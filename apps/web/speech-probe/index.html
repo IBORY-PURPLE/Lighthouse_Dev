@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LightHouse 음성 시험</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --fg: #111;
+      --btn: #1a4d8c;
+      --btn-fg: #fff;
+      --line: #d9d2c5;
+      --ok: #0b5d2a;
+      --ok-bg: #e6f5eb;
+      --wait-bg: #fff6e0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      font-family: "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      background: linear-gradient(180deg, #f7f4ef 0%, #ebe4d8 100%);
+      color: var(--fg);
+      padding: 1.25rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      line-height: 1.3;
+      margin: 0 0 0.75rem;
+    }
+    p { margin: 0 0 1rem; line-height: 1.5; }
+    .actions {
+      display: grid;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    button {
+      min-height: 48px;
+      padding: 0.85rem 1rem;
+      border: 0;
+      border-radius: 0.5rem;
+      background: var(--btn);
+      color: var(--btn-fg);
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    button:disabled { opacity: 0.55; }
+    #result {
+      margin: 0 0 1rem;
+      padding: 1rem;
+      border-radius: 0.75rem;
+      background: var(--wait-bg);
+      border: 2px solid #e0c56a;
+      min-height: 5.5rem;
+    }
+    #result.ok {
+      background: var(--ok-bg);
+      border-color: var(--ok);
+    }
+    #result.fail {
+      background: #fdeceb;
+      border-color: #a12828;
+    }
+    #result-label {
+      display: block;
+      font-size: 0.95rem;
+      margin-bottom: 0.35rem;
+    }
+    #result-text {
+      display: block;
+      font-size: 1.6rem;
+      font-weight: 700;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    details {
+      border-top: 1px solid var(--line);
+      padding-top: 0.75rem;
+    }
+    summary {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #log {
+      margin-top: 0.75rem;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>음성 인식 시험</h1>
+  <p>아무것도 서버로 보내지 않습니다. VoiceOver를 켠 뒤 버튼을 누르고 한 문장만 말해 보세요. 인식되면 아래 큰 글씨에 결과가 나옵니다.</p>
+  <div class="actions">
+    <button type="button" id="start-now">즉시 시작</button>
+    <button type="button" id="start-delay">1초 뒤 시작</button>
+  </div>
+  <div id="result" tabindex="-1">
+    <span id="result-label">인식 결과</span>
+    <span id="result-text">아직 없음. 버튼을 누른 뒤 말해 보세요.</span>
+  </div>
+  <div id="status" role="status" aria-live="assertive"></div>
+  <details>
+    <summary>상세 이벤트 로그</summary>
+    <div id="log">준비 중…</div>
+  </details>
+  <script>
+    (function () {
+      const logEl = document.getElementById("log");
+      const statusEl = document.getElementById("status");
+      const resultEl = document.getElementById("result");
+      const resultText = document.getElementById("result-text");
+      const btnNow = document.getElementById("start-now");
+      const btnDelay = document.getElementById("start-delay");
+      const lines = [];
+      const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      function log(msg) {
+        lines.push(msg);
+        logEl.textContent = lines.join("\n");
+      }
+
+      function setStatus(msg) {
+        statusEl.textContent = msg;
+      }
+
+      function setResult(kind, text) {
+        resultEl.className = kind || "";
+        resultText.textContent = text;
+        resultEl.focus();
+      }
+
+      function setBusy(busy) {
+        btnNow.disabled = busy;
+        btnDelay.disabled = busy;
+      }
+
+      log("SpeechRecognition API: " + (Ctor ? "있음" : "없음"));
+      if (!Ctor) {
+        setResult("fail", "이 브라우저는 음성 인식을 지원하지 않습니다.");
+        setStatus("음성 인식을 쓸 수 없습니다. 입력창 받아쓰기로 가면 됩니다.");
+        log("API 없음");
+        setBusy(true);
+        return;
+      }
+
+      function run(delayMs) {
+        setBusy(true);
+        lines.length = 0;
+        var gotResult = false;
+        setResult("", "듣는 중… 말해 보세요.");
+        setStatus("듣고 있습니다. 말씀하세요.");
+        log("시작 요청: delay=" + delayMs + "ms");
+        log("시각: " + new Date().toISOString());
+
+        const recognition = new Ctor();
+        recognition.lang = "ko-KR";
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        const events = [
+          "audiostart", "soundstart", "speechstart", "speechend",
+          "soundend", "audioend", "result", "nomatch", "error", "start", "end"
+        ];
+        events.forEach(function (name) {
+          recognition.addEventListener(name, function (event) {
+            if (name === "error") {
+              var code = event.error || "?";
+              log("event:error code=" + code + " message=" + (event.message || ""));
+              setResult("fail", "인식 실패: " + code);
+              setStatus("인식에 실패했습니다. 오류 코드 " + code);
+              return;
+            }
+            if (name === "nomatch") {
+              log("event:nomatch");
+              setResult("fail", "말을 알아듣지 못했습니다.");
+              setStatus("말을 알아듣지 못했습니다. 다시 시도해 주세요.");
+              return;
+            }
+            if (name === "result") {
+              var text = "";
+              try {
+                text = event.results[0][0].transcript;
+              } catch (e) {
+                text = "(결과 파싱 실패)";
+              }
+              gotResult = true;
+              log("event:result text=" + text);
+              setResult("ok", text || "(빈 문장)");
+              setStatus("이렇게 들었습니다: " + (text || "빈 문장"));
+              return;
+            }
+            if (name === "speechstart") {
+              setStatus("음성이 감지되었습니다.");
+            }
+            log("event:" + name);
+          });
+        });
+
+        function start() {
+          try {
+            recognition.start();
+            log("recognition.start() 호출됨");
+          } catch (err) {
+            log("start() 예외: " + (err && err.message ? err.message : String(err)));
+            setResult("fail", "시작 실패");
+            setStatus("음성 인식을 시작하지 못했습니다.");
+            setBusy(false);
+          }
+        }
+
+        recognition.addEventListener("end", function () {
+          setBusy(false);
+          if (!gotResult && resultEl.className !== "fail") {
+            setResult("fail", "결과가 오지 않았습니다.");
+            setStatus("인식 결과가 오지 않았습니다. 다시 시도해 주세요.");
+          }
+        });
+
+        if (delayMs > 0) {
+          log(delayMs + "ms 대기 후 시작");
+          setStatus("1초 뒤 듣기를 시작합니다.");
+          setTimeout(start, delayMs);
+        } else {
+          start();
+        }
+      }
+
+      btnNow.addEventListener("click", function () { run(0); });
+      btnDelay.addEventListener("click", function () { run(1000); });
+      setStatus("준비됐습니다. 즉시 시작 또는 1초 뒤 시작을 누르세요.");
+      log("버튼으로 시험을 시작하세요.");
+    })();
+  </script>
+</body>
+</html>
