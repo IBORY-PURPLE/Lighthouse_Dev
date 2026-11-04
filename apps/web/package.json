@@ -1,0 +1,6 @@
+{
+  "name": "@lighthouse/web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "LightHouse 웹 앱. Vercel는 이 폴더를 Root Directory로 둔다. 0블록 정적 speech-probe, 1블록~ Next.js."
+}
