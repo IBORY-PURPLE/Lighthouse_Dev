@@ -62,3 +62,31 @@ PR: [#9](https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/9) `hold-morning`(�
 배포: 없음(블록 2에 배포 단계가 없다). 공개 주소는 아직 `feat/skeleton` `2273e20`이다.
 다음 할 일: 블록 3 `feat/match`를 `feat/user-screen` 위에서 시작
 토큰: 미측정(호출 누적 입력/출력은 잴 수 없음), 예상 대비 미측정. 시간은 00:58~01:22로 끝 시각 02:30보다 빠름.
+
+## 01:55 블록 3 매칭
+상태: 완료
+PR: [#10](https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/10) `hold-morning`(보류 PR #9 위에 쌓임, 실패 이력 있음), 실패 횟수: 3
+결정:
+- 4블록 시작점: `github/feat/match`, PR base `feat/match`.
+- 4블록이 이어 붙일 곳: `src/app/volunteer/page.tsx`. 요청은 `parseStoredMatch(readStoredMatch())`로 읽고(`requestId`, `request.brand`, `request.item`), 안내는 같은 `StatusRegion`을 쓴다. 안내 문구를 처음부터 넣지 말고 빈 영역을 먼저 그린 뒤 채운다(`ANNOUNCE_DELAY_MS` 100ms, 임시값).
+- 횟수 제한: `src/lib/rateLimit.ts`의 `createRateLimiter({ limit: 20, windowMs: 60_000 })`를 route 파일 맨 위에 만들고 `clientKey(request.headers)`로 부른다. 접속 주소(`x-forwarded-for` 첫 값)마다 센다. 429에는 `Retry-After`를 붙였다.
+- 오류 응답은 `{ ok: false, error }`, 전부 `Cache-Control: no-store`다. 로그는 `POST /api/match <코드> <시간>ms`만 남긴다(`src/app/api/match/route.ts`). 코드는 401, 429, 본문 순서로 확인한다.
+- 문서 제목은 메타데이터로만 정한다. 효과에서 `document.title`을 정하면 같은 탭 이동 때 Next가 덮어쓴다. 봉사자 화면은 `src/app/volunteer/layout.tsx`, 기본값은 루트 `layout.tsx`의 "상품 요청 - LightHouse"다.
+- 블록 1 기록의 "`Secure` 쿠키가 저장된다"는 절반만 맞다. Windows WebKit은 저장은 해도 `http://localhost`로 보내지 않는다. 브라우저에서 API를 부르는 시험은 `tests/e2e/match.spec.ts`의 `openUserScreen`처럼 `/enter`가 준 쿠키를 `secure: false`로 다시 넣는다. 운영 쿠키는 그대로고 공개 주소는 HTTPS라 해당 없다.
+- 시험끼리 횟수 제한을 나눠 쓰지 않게 `x-forwarded-for`를 시험마다 `test-<uuid>`로 준다. 카운터는 실패 뒤 워커 재시작 때 초기화돼 쓰면 안 된다.
+- Playwright `click`은 `aria-disabled` 버튼에서 기다리기만 한다. 눌림 무시를 시험하려면 `dispatchEvent("click")`을 쓴다.
+- TSD에 없어 정한 것: 400·422는 입력으로, 401·429·연결 실패는 "이대로 요청"으로 초점을 보낸다. 빈 문장은 400이다. 호출 10초 안에 답이 없으면 연결 실패로 친다. 매칭용 문구 "찾는 상품을 알아듣지 못했습니다. 상품 이름을 넣어 다시 요청하세요.", "요청이 너무 깁니다. 짧게 다시 요청하세요.", "봉사자 연결에 실패했습니다. 다시 시도해 주세요."를 `src/lib/speech.ts`의 `STATUS`에 추가했다.
+- 고친 기존 시험: `tests/e2e/user-screen.spec.ts` 2건. "3블록 전이라 API 호출 없음"이 틀린 기대가 되어, 응답을 보류한 채 찾는 중 안내와 초점을 확인하고 문장을 한 번만 보내는지 보게 했다. PR 본문에 적었고 확인 항목을 줄이지 않았다.
+남은 것:
+- 사람 판정: 실제 아이폰 음성 인식, VoiceOver 낭독, 초점 낭독. 봉사자 화면 안내가 h1 낭독과 겹치지 않고 읽히는지 아침에 본다.
+- 사소한 지적은 없다. 판정 뒤 이 기록 커밋으로 Bugbot이 다시 돌 수 있으나 코드 변경은 없다.
+- 공개 주소 확인은 하지 않았다. `DEMO_ACCESS_CODE`, `GROQ_API_KEY`는 이용자 등록 대기 중이고 이 블록은 값과 Vercel 환경 변수를 다루지 않았다.
+검증: `npm run check` 0(92개), `npm run test:e2e` 0(52개, 가짜 음성 입력 기준), 커밋 `e114a79`. axe `critical`·`serious` 0건. Codex 합격(시험 기록 판정, 심각한 지적 0건, 판정 불가 0건). Bugbot `success` 지적 0건(`e114a79`, 약 8분). 스크린샷 2장은 PR 본문에 링크. `git status`에 비밀 파일 없음.
+실패 목록: 3회.
+1. `npm run test:e2e` 19건, `/api/match` 401(Windows WebKit이 `Secure` 쿠키를 `http://localhost`로 보내지 않음). 함께 `sent` 타이밍 1건.
+2. `npx playwright test -g "합격 문장: 응답"` 같은 401, 1번 원인 확인용.
+3. `npm run test:e2e` 3건: 같은 탭 이동 때 `document.title`이 덮어써짐(실제 버그), 관찰 시험의 제목 의존, 실패 뒤 워커 재시작으로 시험 주소 중복.
+실패로 세지 않은 것: 파일 생성 Bash 명령의 따옴표 파싱 오류 1회(아무것도 실행되지 않아 파일 쓰기 도구로 다시 만듦).
+배포: 없음(블록 3에 배포 단계가 없다). 공개 주소는 아직 `feat/skeleton` `2273e20`이다.
+다음 할 일: 블록 4 `feat/volunteer-chat`을 `feat/match` 위에서 시작
+토큰: 미측정(호출 누적 입력/출력은 잴 수 없음), 예상 대비 미측정. 세션 문맥 약 23.7만 토큰, 주간 전체 모델 27%. 시간은 01:23~01:55로 끝 시각 03:30보다 빠름.
