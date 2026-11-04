@@ -43,6 +43,15 @@ async function expectFellBackToInput(page: Page) {
   await expect(speechButton(page)).toHaveCount(0);
 }
 
+/** /api/match 응답을 주지 않아 "찾고 있습니다" 상태에 머물게 하고, 보낸 본문을 모은다. */
+async function holdMatchResponse(page: Page) {
+  const sent: unknown[] = [];
+  await page.route("**/api/match", (route) => {
+    sent.push(route.request().postDataJSON());
+  });
+  return sent;
+}
+
 async function hearSentence(page: Page, sentence: string) {
   await speechButton(page).click();
   await expect(status(page)).toHaveText("듣고 있습니다. 말씀하세요.");
@@ -127,11 +136,10 @@ test.describe("음성 API가 있을 때", () => {
     expect(await startCount(page)).toBe(2);
   });
 
-  test("이대로 요청: 찾는 중 안내, 초점 유지, 3블록 전이라 API 호출 없음", async ({
+  test("이대로 요청: 찾는 중 안내, 초점 유지, 문장을 한 번만 보낸다", async ({
     page,
   }) => {
-    const requests: string[] = [];
-    page.on("request", (request) => requests.push(request.url()));
+    const sent = await holdMatchResponse(page);
     await hearSentence(page, PASS_SENTENCE);
 
     await confirmButton(page).click();
@@ -139,7 +147,12 @@ test.describe("음성 API가 있을 때", () => {
     await expect(status(page)).toHaveText("봉사자를 찾고 있습니다.");
     await expect(confirmButton(page)).toBeFocused();
     await expect(confirmButton(page)).toHaveAttribute("aria-disabled", "true");
-    expect(requests.filter((url) => url.includes("/api/"))).toEqual([]);
+    await expect.poll(() => sent).toEqual([{ text: PASS_SENTENCE }]);
+
+    // aria-disabled라 Playwright의 click은 기다리기만 하므로 이벤트를 직접 보낸다.
+    await confirmButton(page).dispatchEvent("click");
+    await page.waitForTimeout(200);
+    expect(sent).toHaveLength(1);
   });
 
   for (const code of [
@@ -203,6 +216,7 @@ test.describe("음성 API가 있을 때", () => {
     await expect(status(page)).toHaveText("입력창에 찾는 상품을 입력하세요.");
     await expect(textInput(page)).toBeFocused();
 
+    await holdMatchResponse(page);
     await textInput(page).fill(PASS_SENTENCE);
     await confirmButton(page).click();
     await expect(status(page)).toHaveText("봉사자를 찾고 있습니다.");

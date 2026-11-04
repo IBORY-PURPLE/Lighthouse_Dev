@@ -11,3 +11,7 @@ export const VOLUNTEERS: readonly Volunteer[] = [
   { id: "v-02", displayName: "가상 봉사자 B", items: ["헤드셋", "키보드"] },
   { id: "v-03", displayName: "가상 봉사자 C", items: ["키보드"] },
 ];
+
+export function findVolunteerForItem(item: string): Volunteer | undefined {
+  return VOLUNTEERS.find((volunteer) => volunteer.items.includes(item));
+}
