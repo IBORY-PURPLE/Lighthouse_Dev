@@ -25,19 +25,31 @@ const stripQuotes = (s) => s.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
 const stripRedirects = (s) => s.replace(/(^|\s)\d*(?:&?>>?|<)(?:&\d+|\s*[^\s;&|]+)/g, ' ');
 // 글을 다른 프로그램에 코드로 넘기는 명령이면 글을 지우지 않고 그대로 검사한다.
 // 경로가 붙은 호출(/bin/bash, .\bash.exe)도 이름만 있는 호출과 같이 본다.
-const INTERP = String.raw`bash|sh|zsh|pwsh|powershell|node|python\d*|perl|ruby|eval|iex|Invoke-Expression`;
+const INTERP = String.raw`bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|node|python\d*|perl|ruby|eval|iex|Invoke-Expression`;
 const RUNS_TEXT = new RegExp(
   String.raw`(^|[\s;&|(])(?:[^\s;&|()'"]*[/\\])?(?:${INTERP})(?:\.exe)?(?=$|[\s;&|)])`,
   'i',
 );
-const INTERP_WORD = new RegExp(String.raw`^(?:[^\s;&|()'"]*[/\\])?(?:${INTERP})(?:\.exe)?$`, 'i');
+// 따옴표 안 경로에는 공백이 있을 수 있다(C:\Program Files\...).
+const INTERP_WORD = new RegExp(String.raw`^(?:[^;&|()'"]*[/\\])?(?:${INTERP})(?:\.exe)?$`, 'i');
 // 따옴표만 두른 실행 파일은 판별 전에 드러낸다. 문장 안 예시는 통째로 따옴표 안이라 그대로 둔다.
 const revealQuotedInterpreters = (s) =>
   s.replace(/(^|[\s;&|(])(["'])([^"']+)\2(?=$|[\s;&|)])/g, (all, pre, _q, body) =>
     INTERP_WORD.test(body) ? pre + body : all);
 
+// 접미사 개수와 상관없이 .env 파일 이름을 찾는다. isEnvFile과 같은 기준이다.
+const hasEnvName = (s) => {
+  for (const m of s.matchAll(/(?:^|[\s"'=/\\<>])(\.env(?:\.[\w-]+)*)(?=$|[\s"';&|<>)])/gm)) {
+    if (m[1] !== '.env.example') return true;
+  }
+  return false;
+};
+
 // 셸이 펼치면 .env 파일에 닿는 글롭인지 본다. 점으로 시작하는 패턴만 숨김 파일과 맞는다.
-const ENV_NAMES = ['.env', '.env.local', '.env.development', '.env.production', '.env.test'];
+const ENV_NAMES = [
+  '.env', '.env.local', '.env.development', '.env.production', '.env.test',
+  '.env.development.local', '.env.production.local', '.env.test.local',
+];
 function globHitsEnv(s) {
   if (/\.env\{/.test(s)) return true;
   return s.split(/[\s;&|()<>=]+/).some((token) => {
@@ -64,27 +76,49 @@ function resolveDir(base, raw) {
   return path.resolve(base, p);
 }
 
+// checkout·switch 뒤의 브랜치. 바뀌지 않으면 undefined, 알 수 없으면 null이다.
+function switchedBranch(args) {
+  const clean = (w) => (w === undefined ? null : w.replace(/^["']|["']$/g, ''));
+  const words = args.trim().split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    if (/^(-[bBcC]|--create|--force-create|--orphan)$/.test(words[i])) return clean(words[i + 1]);
+  }
+  if (words.includes('--')) return undefined; // 파일 되돌리기
+  const name = words.find((w) => !w.startsWith('-') || w === '-');
+  if (name === undefined) return undefined;
+  return name === '-' || /[$`%]/.test(name) ? null : clean(name);
+}
+
 function checkCommitBranches(text, base) {
   const QUOTED = String.raw`"[^"]*"|'[^']*'`;
   const re = new RegExp(
     String.raw`(?:^|[\s;&|(])(?:cd|Set-Location|sl|pushd)\s+(${QUOTED}|[^\s;&|)]+)` +
-      String.raw`|\bgit((?:\s+-[cC]\s+(?:${QUOTED}|\S+)|\s+--[\w-]+(?:=\S+)?)*)\s+commit\b`,
+      String.raw`|\bgit((?:\s+-[cC]\s+(?:${QUOTED}|\S+)|\s+--[\w-]+(?:=\S+)?)*)\s+(commit|checkout|switch)\b([^;&|\n]*)`,
     'g',
   );
-  let dir = base;
+  let dir = path.resolve(base);
+  const switched = new Map(); // 같은 명령 안에서 브랜치를 바꾼 폴더
   for (const m of text.matchAll(re)) {
     if (m[1] !== undefined) {
       dir = resolveDir(dir, m[1]);
       continue;
     }
-    const opt = (m[2] || '').match(new RegExp(String.raw`-C\s+(${QUOTED}|\S+)`));
+    const opt = (m[2] || '').match(new RegExp(String.raw`(?:^|\s)-C\s+(${QUOTED}|\S+)`));
     const target = opt ? resolveDir(dir, opt[1]) : dir;
-    let branch;
-    try {
-      branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], target);
-    } catch {
-      block('커밋 대상 브랜치를 확인하지 못함');
+    if (m[3] !== 'commit') {
+      const next = switchedBranch(m[4]);
+      if (next !== undefined) switched.set(target, next);
+      continue;
     }
+    let branch = switched.get(target);
+    if (branch === undefined && !switched.has(target)) {
+      try {
+        branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], target);
+      } catch {
+        block('커밋 대상 브랜치를 확인하지 못함');
+      }
+    }
+    if (branch === null) block('커밋 대상 브랜치를 확인하지 못함');
     if (branch === 'main' || branch === 'master') block('main 직접 커밋. 기능 브랜치에서 작업');
   }
 }
@@ -133,13 +167,13 @@ function checkShell(raw, base) {
   const GIT = String.raw`\bgit(?:\s+-[cC]\s+\S+|\s+--[\w-]+(?:=\S+)?)*\s+`;
   const sub = (name) => new RegExp(GIT + name + String.raw`\b([^;&|\n]*)`, 'g');
 
-  if (/(^|[\s"'=/\\<>])\.env(?!\.example)(\.[\w-]+)?(?=$|[\s"';&|<>)])/m.test(text)) block('.env 접근');
+  if (hasEnvName(text)) block('.env 접근');
   if (globHitsEnv(runsText ? raw : stripQuotes(noHeredoc))) block('.env에 닿는 글롭');
   for (const m of cmd.matchAll(sub('add'))) if (/(^|\s)(-[a-zA-Z]*f[a-zA-Z]*|--force)(?=\s|$)/.test(m[1])) block('무시 파일 강제 추가');
   if (/\b(printenv)\b/.test(cmd)) block('환경 변수 전체 출력');
   for (const m of cmd.matchAll(sub('push'))) checkPush(m[1]);
   for (const m of cmd.matchAll(sub('reset'))) if (/--hard\b/.test(m[1])) block('git reset --hard');
-  for (const m of cmd.matchAll(sub('clean'))) if (/(^|\s)-[a-zA-Z]*f/.test(m[1])) block('git clean -f');
+  for (const m of cmd.matchAll(sub('clean'))) if (/(^|\s)(-[a-zA-Z]*f|--force)/.test(m[1])) block('git clean -f');
   for (const m of cmd.matchAll(sub('branch'))) if (/\s-D\b.*\b(main|master)\b/.test(m[1])) block('main 브랜치 삭제');
   for (const m of cmd.matchAll(sub('(?:config|remote)'))) if (/\b(core\.hooksPath|set-url|remove)\b/.test(m[1])) block('저장소 원격·훅 설정 변경');
   if (/--no-verify\b/.test(cmd)) block('검사 건너뛰기');
