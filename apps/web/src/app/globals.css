@@ -117,3 +117,42 @@ main {
   flex: none;
   margin-top: 0.5rem;
 }
+
+.volunteer-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.volunteer-screen h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.volunteer-screen h1:focus {
+  outline: none;
+}
+
+.volunteer-screen a {
+  box-sizing: border-box;
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0.5rem 0;
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.match-summary {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.match-summary dt {
+  font-weight: 700;
+}
+
+.match-summary dd {
+  margin: 0 0 0.75rem;
+  overflow-wrap: anywhere;
+}

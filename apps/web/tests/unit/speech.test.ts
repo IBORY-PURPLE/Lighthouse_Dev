@@ -242,6 +242,76 @@ describe("speechInputReducer", () => {
     });
   });
 
+  describe("매칭 결과", () => {
+    const voiceSubmitting = speechInputReducer(
+      speechInputReducer(speech, { type: "result", transcript: "소니 헤드셋" }),
+      { type: "submit", text: "소니 헤드셋" },
+    );
+    const textSubmitting = speechInputReducer(createInitialModel("text"), {
+      type: "submit",
+      text: "소니 헤드셋",
+    });
+
+    it("매칭 완료는 봉사자 이름을 안내한다", () => {
+      expect(
+        speechInputReducer(voiceSubmitting, {
+          type: "matched",
+          volunteerName: "가상 봉사자 A",
+        }),
+      ).toMatchObject({
+        state: "matched",
+        status: "가상 봉사자 A와 연결됐습니다.",
+        refocus: null,
+      });
+    });
+
+    it("다시 내야 하면 음성은 처음 버튼으로, 입력창은 입력창으로 간다", () => {
+      const action = { type: "matchRejected", status: "안내" } as const;
+      expect(speechInputReducer(voiceSubmitting, action)).toMatchObject({
+        state: "idle",
+        transcript: "",
+        status: "안내",
+        refocus: "reenter",
+      });
+      expect(speechInputReducer(textSubmitting, action)).toMatchObject({
+        state: "text",
+        status: "안내",
+        refocus: "reenter",
+      });
+    });
+
+    it("다시 보낼 수 있으면 문장을 지우지 않는다", () => {
+      const action = { type: "matchFailed", status: "안내" } as const;
+      expect(speechInputReducer(voiceSubmitting, action)).toMatchObject({
+        state: "confirming",
+        transcript: "소니 헤드셋",
+        status: "안내",
+        refocus: "resend",
+      });
+      expect(speechInputReducer(textSubmitting, action)).toMatchObject({
+        state: "text",
+        status: "안내",
+        refocus: "resend",
+      });
+    });
+
+    it("다시 누르거나 다시 내면 초점 지시를 지운다", () => {
+      const rejected = speechInputReducer(voiceSubmitting, {
+        type: "matchRejected",
+        status: "안내",
+      });
+      expect(speechInputReducer(rejected, { type: "press" }).refocus).toBeNull();
+      const failed = speechInputReducer(voiceSubmitting, {
+        type: "matchFailed",
+        status: "안내",
+      });
+      expect(
+        speechInputReducer(failed, { type: "submit", text: "소니 헤드셋" })
+          .refocus,
+      ).toBeNull();
+    });
+  });
+
   it("다시 말하기는 앞 문장과 안내를 지운다", () => {
     const confirming = speechInputReducer(speech, {
       type: "result",
