@@ -1,0 +1,52 @@
+name: 디자인 요청
+description: 화면이나 컴포넌트 하나의 디자인 개선을 요청합니다
+title: "[디자인] "
+labels: ["design"]
+body:
+  - type: input
+    id: target
+    attributes:
+      label: 대상 화면 / 컴포넌트
+      description: 어느 화면의 어떤 부분인지 적어 주세요
+      placeholder: "예: 홈 화면 > 상단 검색 바"
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: 현재 모습
+      description: 스크린샷을 붙여 넣어 주세요 (드래그 앤 드롭 가능)
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 지금 뭐가 문제인가요
+      description: 사용하면서 불편했거나 어색했던 점
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: 원하는 느낌 / 레퍼런스
+      description: 참고 이미지, 링크, Figma 주소, 형용사("차분한", "밀도 높은") 무엇이든 좋습니다
+  - type: textarea
+    id: scope
+    attributes:
+      label: 건드려도 되는 범위 / 안 되는 범위
+      value: |
+        - 가능: 색, 폰트, 간격, 레이아웃, 아이콘 등 스타일
+        - 금지: API 호출, 상태 관리, 데이터 로직 변경
+  - type: textarea
+    id: done
+    attributes:
+      label: 완료 기준
+      placeholder: "예: 모바일/데스크톱 모두 깨지지 않고, 기존 색상 토큰만 사용"
+  - type: dropdown
+    id: output
+    attributes:
+      label: 기대하는 결과물
+      options:
+        - Figma 시안
+        - 코드 수정 PR
+        - 둘 다
