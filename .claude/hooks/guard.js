@@ -26,6 +26,26 @@ const stripRedirects = (s) => s.replace(/(^|\s)\d*(?:&?>>?|<)(?:&\d+|\s*[^\s;&|]
 // 글을 다른 프로그램에 코드로 넘기는 명령이면 글을 지우지 않고 그대로 검사한다.
 const RUNS_TEXT = /(^|[\s;&|(])(bash|sh|zsh|pwsh|powershell|node|python\d*|perl|ruby|eval|iex|Invoke-Expression)(\.exe)?(?=$|[\s;&|)])/i;
 
+// 셸이 펼치면 .env 파일에 닿는 글롭인지 본다. 점으로 시작하는 패턴만 숨김 파일과 맞는다.
+const ENV_NAMES = ['.env', '.env.local', '.env.development', '.env.production', '.env.test'];
+function globHitsEnv(s) {
+  if (/\.env\{/.test(s)) return true;
+  return s.split(/[\s;&|()<>=]+/).some((token) => {
+    const base = token.replace(/["']/g, '').split(/[\\/]/).pop();
+    if (!base.startsWith('.') || !/[*?[]/.test(base)) return false;
+    const source = base
+      .replace(/[.+^$(){}|\\]/g, '\\$&')
+      .replace(/\*/g, '.*')
+      .replace(/\?/g, '.');
+    try {
+      const re = new RegExp(`^${source}$`);
+      return ENV_NAMES.some((name) => re.test(name));
+    } catch {
+      return true;
+    }
+  });
+}
+
 function resolveDir(base, raw) {
   const arg = raw.replace(/^["']|["']$/g, '');
   if (/[$`%]/.test(arg)) block('커밋 대상 폴더를 확인하지 못함');
@@ -104,6 +124,8 @@ function checkShell(raw, base) {
   const sub = (name) => new RegExp(GIT + name + String.raw`\b([^;&|\n]*)`, 'g');
 
   if (/(^|[\s"'=/\\<>])\.env(?!\.example)(\.[\w-]+)?(?=$|[\s"';&|<>)])/m.test(text)) block('.env 접근');
+  if (globHitsEnv(runsText ? raw : stripQuotes(noHeredoc))) block('.env에 닿는 글롭');
+  for (const m of cmd.matchAll(sub('add'))) if (/(^|\s)(-[a-zA-Z]*f[a-zA-Z]*|--force)(?=\s|$)/.test(m[1])) block('무시 파일 강제 추가');
   if (/\b(printenv)\b/.test(cmd)) block('환경 변수 전체 출력');
   for (const m of cmd.matchAll(sub('push'))) checkPush(m[1]);
   for (const m of cmd.matchAll(sub('reset'))) if (/--hard\b/.test(m[1])) block('git reset --hard');
