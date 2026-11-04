@@ -24,7 +24,17 @@ const stripHeredocs = (s) =>
 const stripQuotes = (s) => s.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
 const stripRedirects = (s) => s.replace(/(^|\s)\d*(?:&?>>?|<)(?:&\d+|\s*[^\s;&|]+)/g, ' ');
 // 글을 다른 프로그램에 코드로 넘기는 명령이면 글을 지우지 않고 그대로 검사한다.
-const RUNS_TEXT = /(^|[\s;&|(])(bash|sh|zsh|pwsh|powershell|node|python\d*|perl|ruby|eval|iex|Invoke-Expression)(\.exe)?(?=$|[\s;&|)])/i;
+// 경로가 붙은 호출(/bin/bash, .\bash.exe)도 이름만 있는 호출과 같이 본다.
+const INTERP = String.raw`bash|sh|zsh|pwsh|powershell|node|python\d*|perl|ruby|eval|iex|Invoke-Expression`;
+const RUNS_TEXT = new RegExp(
+  String.raw`(^|[\s;&|(])(?:[^\s;&|()'"]*[/\\])?(?:${INTERP})(?:\.exe)?(?=$|[\s;&|)])`,
+  'i',
+);
+const INTERP_WORD = new RegExp(String.raw`^(?:[^\s;&|()'"]*[/\\])?(?:${INTERP})(?:\.exe)?$`, 'i');
+// 따옴표만 두른 실행 파일은 판별 전에 드러낸다. 문장 안 예시는 통째로 따옴표 안이라 그대로 둔다.
+const revealQuotedInterpreters = (s) =>
+  s.replace(/(^|[\s;&|(])(["'])([^"']+)\2(?=$|[\s;&|)])/g, (all, pre, _q, body) =>
+    INTERP_WORD.test(body) ? pre + body : all);
 
 // 셸이 펼치면 .env 파일에 닿는 글롭인지 본다. 점으로 시작하는 패턴만 숨김 파일과 맞는다.
 const ENV_NAMES = ['.env', '.env.local', '.env.development', '.env.production', '.env.test'];
@@ -117,7 +127,7 @@ function checkMerge(args, base) {
 
 function checkShell(raw, base) {
   const noHeredoc = stripHeredocs(raw);
-  const runsText = RUNS_TEXT.test(stripQuotes(noHeredoc));
+  const runsText = RUNS_TEXT.test(stripQuotes(revealQuotedInterpreters(noHeredoc)));
   const text = runsText ? raw : noHeredoc;
   const cmd = stripRedirects(runsText ? raw : stripQuotes(noHeredoc));
   const GIT = String.raw`\bgit(?:\s+-[cC]\s+\S+|\s+--[\w-]+(?:=\S+)?)*\s+`;
