@@ -29,12 +29,13 @@ PR: [#7](https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/7) `hold-morning`, 
 - `.vercelignore`에 시험 폴더와 시험 설정을 넣어 배포에서 뺐다.
 - 주간 사용량은 `mcp__ccd_session_mgmt__get_usage`로 잴 수 있다(블록 1 끝 전체 모델 26%, 이 세션 문맥 약 18.5만 토큰).
 막힌 것:
-- Codex: `codex exec -s workspace-write`가 Vitest와 Playwright를 `spawn EPERM`으로 시작하지 못해 2회 모두 판정 `실패`(코드 결함 0건, 원인은 실행 환경). 샌드박스를 넓히는 일은 AI가 정하지 않았다. 해결 전까지 이후 PR도 Codex 미통과로 전부 보류된다.
+- Codex: `codex exec -s workspace-write`가 Vitest와 Playwright를 `spawn EPERM`으로 시작하지 못해 2회 모두 판정 `실패`(코드 결함 0건, 원인은 실행 환경). 샌드박스를 넓히는 일은 AI가 정하지 않았다. 이용자가 시험 기록 판정을 골랐고 규칙은 [#8](https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/8)에 있다.
+- Codex 3회차(01:16, 시험 기록 판정, 직접 실행 아님, `b8d1b23`): 판정 `실패`. 공개 주소 열림과 `npm run check`는 통과, `/api/health`는 판정 불가, `/enter`는 로컬 통과지만 Production에 `DEMO_ACCESS_CODE`가 없어 미달. 코드 결함과 보안 문제는 0건. 등록·재배포 뒤 `test:public` 기록으로 다시 판정받아야 한다. 실패 이력이 있어 `hold-morning`은 유지한다.
 - `DEMO_ACCESS_CODE`: 값은 `.demo-access.local`에 있으나 `vercel env add`를 권한 분류기가 막았다(비밀 저장소 쓰기). 우회하지 않았다. 등록 전까지 공개 주소 `/enter`는 모든 코드에 401이고 `/api/health`도 401이다.
 - `GROQ_API_KEY`: Production에 이름이 `Groq_API_key`로 있다. 수정 전까지 `groqKeyConfigured`는 false일 것이다(공개 주소에서는 위 이유로 아직 못 봄).
 - 환경 변수를 고치면 재배포해야 반영된다. 그 뒤 `BASE_URL=https://lighthouse-web-five.vercel.app npm run test:public`을 돌린다.
 검증: `npm run check` 0(12개), `test:e2e` 0(4개, 가짜 음성 입력 없음), 공개 주소 열림, 틀린 코드 401, 맞는 코드 303은 로컬만 통과, health `true`는 미확인, `git status`에 비밀 파일 없음. Bugbot `success` 지적 0건(10분 34초).
-실패 목록: Codex 판정 실패 2회(`spawn EPERM`). 훅 차단 2회와 권한 차단 1회는 실패로 세지 않았다.
+실패 목록(4회, 위 머리글의 2회를 갱신): Codex 판정 실패 3회(`spawn EPERM` 2회, Production 코드 미등록 1회), `npm run test:e2e` 1회(`http://localhost:3100 is already used`, 다른 세션의 포트 점유, 재실행 통과). 훅 차단 2회와 권한 차단 1회는 실패로 세지 않았다.
 배포: `feat/skeleton` `2273e20`.
 다음 할 일: 블록 2 `feat/user-screen`을 `feat/skeleton` 위에서 시작
 토큰: 미측정(세션 문맥 약 18.5만, 호출 누적 입력/출력은 잴 수 없음), 예상 대비 미측정. 시간은 00:25~00:58로 조정 끝 01:30보다 빠름.
