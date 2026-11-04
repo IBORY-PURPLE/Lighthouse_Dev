@@ -6,7 +6,11 @@
 
 | 경로 | 내용 |
 |---|---|
-| `apps/web/` | 웹 앱. Vercel Root Directory. 0블록 정적 speech-probe, 1블록~ Next.js |
+| `apps/web/` | 웹 앱(Next.js). Vercel Root Directory. 명령은 이 폴더에서 `npm run check` 등으로 돌린다 |
+| `apps/web/src/app/` | 화면과 서버 함수(`enter/route.ts`, `api/*/route.ts`) |
+| `apps/web/src/lib/` | 서버 공용 코드(`access.ts`, `volunteers.ts`, `llm.ts`) |
+| `apps/web/public/speech-probe/` | 0블록 음성 시험 정적 페이지(`/speech-probe/`) |
+| `apps/web/tests/{unit,e2e,chatbot}/` | Vitest 단위, Playwright 화면, 챗봇 고정 질문 |
 | `docs/plans/<날짜>-<이름>/` | 계획. `human.md`(사람용), `ai.md`(실행 기준), `progress.md`(진행 기록), `morning-report.md`(아침 보고) |
 | `docs/plans/2026-11-03-iphone-mvp/human.md` | 전체 개발 계획 |
 | `docs/TSD.md` | 기술 설계서 |
