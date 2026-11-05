@@ -223,6 +223,33 @@ test.describe("봉사자 챗봇", () => {
     await expect(answer(page)).toHaveCount(1);
   });
 
+  test("다음 질문을 누르면 시연 안내가 다시 나오지 않는다(마이크에 섞임 방지)", async ({
+    page,
+  }) => {
+    await openVolunteer(page);
+    await ask(page);
+    await expect(status(page)).toHaveText(STATUS.arrived);
+
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as unknown as { seen: string[] }).seen = seen;
+      const region = document.querySelector('[role="status"]');
+      if (!region) throw new Error("낭독 영역 없음");
+      new MutationObserver(() => seen.push(region.textContent ?? "")).observe(
+        region,
+        { subtree: true, childList: true, characterData: true },
+      );
+    });
+
+    await askButton(page).click();
+    await expect(status(page)).toHaveText("듣고 있습니다. 말씀하세요.");
+    const seen = await page.evaluate(
+      () => (window as unknown as { seen: string[] }).seen,
+    );
+    expect(seen.filter((text) => text.startsWith("시연:"))).toEqual([]);
+    expect(seen[0]).toBe("");
+  });
+
   test("입력창으로도 물을 수 있다(빈 입력 안내 포함)", async ({ page }) => {
     await openVolunteer(page);
     await typeQuestion(page, "   ");

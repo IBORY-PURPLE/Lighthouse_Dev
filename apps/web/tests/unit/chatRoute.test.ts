@@ -197,6 +197,41 @@ describe("POST /api/chat", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("크기를 밝히지 않은 본문은 2KB를 넘는 순간 읽기를 멈추고 400이다", async () => {
+    let pulls = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(1024));
+      },
+    });
+    const request = new NextRequest(`${ORIGIN}/api/chat`, {
+      method: "POST",
+      body: endless,
+      duplex: "half",
+      headers: {
+        "x-forwarded-for": `203.0.113.${(nextClient += 1)}`,
+        cookie: `${ACCESS_COOKIE}=${hashAccessCode("right-code")}`,
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+
+    const response = await POST(request);
+    expect(response.status).toBe(400);
+    expect(await errorOf(response)).toBe("too_long");
+    expect(pulls).toBeLessThan(6);
+  });
+
+  it("본문이 정확히 2KB면 받는다", async () => {
+    const base = JSON.stringify({ ...VALID, context: { brand: "", item: "헤드셋" } });
+    const brand = "S".repeat(2048 - Buffer.byteLength(base));
+    const body = JSON.stringify({ ...VALID, context: { brand, item: "헤드셋" } });
+    expect(Buffer.byteLength(body)).toBe(2048);
+
+    const response = await POST(chatRequest(body));
+    expect(response.status).toBe(200);
+    await response.text();
+  });
+
   for (const [name, body] of [
     ["JSON이 아님", "not json"],
     ["null", "null"],
