@@ -199,3 +199,20 @@ Groq 호출: 이번 수정 3회(상한 9회), 블록 6 4회, 누계 5회(이 기
 배포: `feat/integration` `4f6f31c`(배포 `lighthouse-5zrcoojc4`, 별칭 `lighthouse-web-five.vercel.app`). 환경 변수와 프로젝트 설정은 건드리지 않았다.
 다음 할 일: 블록 7에서 아침 보고를 쓴다. 공개 주소는 `4f6f31c`이고 main과 다르다. 블록 7은 시작하지 않았다.
 토큰: 미측정, 예상 대비 미측정.
+
+## 13:50 블록 7 마무리(아침 보고)
+상태: 완료(보고 작성, 공개 주소 `test:public` 재통과). 병합은 사람이 정한다.
+PR: 아침 보고 PR(base `feat/integration`, head `docs/morning-report`) `hold-morning`, 이번 블록 실패 횟수: 0
+작업 메모: 원래 시간표(07:00~08:00)가 지나 같은 길이로 다시 잡음. 시작 13:30, 끝 14:30. 8시 목표를 놓친 이유: 블록 3이 01:55에 끝난 뒤 다음 블록이 자동으로 이어지지 않았고(원인 미확인) 11/5 약 10:00에 재개했다.
+결정:
+- 재배포하지 않았다. 공개 주소는 `feat/integration` `4f6f31c`(배포 `lighthouse-5zrcoojc4`)이고 그 뒤 브랜치 커밋은 `progress.md`뿐이다(`git diff 4f6f31c a3ddff9`).
+- `morning-report.md`에 병합 방식 권고를 적었다. 병합 커밋(merge commit)으로 아래에서 위로, 앞 PR을 병합할 때마다 다음 PR의 base를 main으로 바꾼다. 근거는 임시 복제본의 시뮬레이션이다. #7을 squash로 병합한 상태에서 #9를 합치면 4개 파일이 충돌했고(`CLAUDE.md`, `globals.css`, `page.tsx`, `progress.md`), 병합 커밋으로 #7→#13과 #8을 순서대로 합치면 충돌 0건이었다. GitHub 실제 병합은 시험하지 않았다.
+- #7의 실패 횟수는 PR 본문과 `feat/skeleton`의 진행 기록이 4회이고, `feat/integration`에 있는 블록 1 항목(머리글 2회)은 옛 값이다. 병합하면 4회로 갱신된 줄이 들어온다. 이 항목에서는 고치지 않았다(같은 줄을 고치면 병합 충돌이 난다).
+- Vercel Git 연동은 있다(PR 체크 `Vercel`, Preview 배포). main 병합이 Production 자동 배포를 만드는지는 확인하지 못했다. Vercel 프로젝트 설정(Root Directory `.`, Node 26.x)은 문서(`apps/web`, Node 22)와 다르고 바꾸지 않았다.
+남은 것: 사람 판정(실제 아이폰 음성, VoiceOver, `SPEECH_START_DELAY_MS`, 실제 Groq 20문항, Bugbot Medium 분류, 문서 초안), 코드에서 드러난 미해결 5건은 `morning-report.md`에 있다.
+검증: `BASE_URL=https://lighthouse-web-five.vercel.app npm run test:public` 종료 코드 0(3개 통과, 13:26, 기록은 로컬 `test-results/13-test-public.txt`, `13-answer.txt`). 답변 첫 줄 `검색어: Sony 헤드셋`, 1,869ms, 답변 규칙 위반 0건. 기록 파일에 접근 코드 값과 `gsk_` 형식 문자열 0건. `npm run check`와 `test:e2e`는 앱 코드가 바뀌지 않아 돌리지 않았다. Codex는 문서 PR이라 돌리지 않았다. Bugbot 결과는 PR 본문에 적는다.
+Groq 호출: 이번 블록 1회, 누계 6회(이 기록 기준, 상한 200). 주간 사용량 전체 모델 28%.
+실패 목록: 0회. 실패로 세지 않은 것: 훅 차단 1회(병합 시뮬레이션 명령에 `git commit`이 들어 있어 `커밋 대상 폴더를 확인하지 못함`. 우회하지 않고 `git merge-tree`와 `git merge`로 다시 함, 훅은 고치지 않음).
+배포: 없음. 공개 주소는 `feat/integration` `4f6f31c`.
+다음 할 일: 이용자가 `morning-report.md`의 시연 절차로 시험하고 PR #8, #7부터 병합 여부를 정한다.
+토큰: 미측정, 예상 대비 미측정(이 세션 문맥 약 19만 토큰).
