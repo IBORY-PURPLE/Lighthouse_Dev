@@ -292,13 +292,13 @@ recognition.maxAlternatives = 1;
 - 0블록: 같은 프로젝트에 정적 `speech-probe`를 올린다. 1블록 Next 배포가 앱 루트를 덮어쓰되, 시험 URL `/speech-probe/`는 필요하면 `public/`으로 유지한다.
 - 1블록 이후 배포 뒤 `/api/health`에서 `groqKeyConfigured: true`를 확인한다. `false`면 챗봇 시험을 건너뛰고 아침 보고 첫 줄에 적는다.
 - `DEMO_ACCESS_CODE`는 1블록에서 만들어 Vercel에 등록하고 `.demo-access.local`에 시연 주소를 적는다. 사람은 아침에 이 주소를 아이폰으로 옮겨 눈을 가리기 전에 연다.
-- 브랜치, PR, Codex·Bugbot 검증, 병합은 `.claude/rules/pr-flow.md`를 따른다. 원격은 `github`만 쓴다.
+- 브랜치, PR, Codex 검증, 병합은 `.claude/rules/pr-flow.md`를 따른다. 원격은 `github`만 쓴다.
 
 ## 12. 블록별 구현 범위
 
 | 블록 | PR | 만드는 것 | 통과 조건 |
 |---|---|---|---|
-| 0 | PR #2, `docs/overnight-plan` | 규칙·훅 PR 병합, 문서 PR(TSD, 계획), `apps/web`+speech-probe, `evidence` 브랜치 | Bugbot 결과 수신, 사람이 병합, Root Directory=`apps/web` 배포, 입력 방식·지연값 결정 |
+| 0 | PR #2, `docs/overnight-plan` | 규칙·훅 PR 병합, 문서 PR(TSD, 계획), `apps/web`+speech-probe, `evidence` 브랜치 | 사람이 병합, Root Directory=`apps/web` 배포, 입력 방식·지연값 결정 |
 | 1 | `feat/skeleton` | `apps/web`에 Next.js, 검사 명령, `/api/health`, `/enter`, 명단, 배포 | `check` 통과, 공개 주소와 health 확인 |
 | 2 | `feat/user-screen` | `SpeechInput`, `StatusRegion`, 이용자 전용 `/` | 입력 관련 E2E, axe, 챗봇 UI 없음 |
 | 3 | `feat/match` | `parseRequest`, `/api/match`, `matchHandoff`, `DemoHandoff`, 봉사자 뼈대 | 매칭·시연 이어 보기·역할 분리 E2E |
@@ -307,7 +307,7 @@ recognition.maxAlternatives = 1;
 | 6 | 지적별 | 보류·지적 수정, 남으면 문서 초안 | 재시험 통과 |
 | 7 | 없음 | 최종 배포, 아침 보고 | `test:public` 재통과 |
 
-PR마다 Codex와 Bugbot 판정이 필요하다(`.claude/rules/pr-flow.md`). Bugbot 체크 이름은 `Cursor Bugbot`이고 지적이 있어도 기본 결과가 `neutral`이므로, 체크 상태만 보지 말고 PR 댓글도 읽는다. 쌓인 PR에서 Bugbot이 도는지는 문서에 없어 첫 쌓인 PR에서 확인한다.
+PR마다 Codex 판정이 필요하다(`.claude/rules/pr-flow.md`). Cursor Bugbot은 쓰지 않는다(2026-11-05 이용자 결정).
 
 ## 13. 확인되지 않은 것
 
@@ -320,5 +320,3 @@ PR마다 Codex와 Bugbot 판정이 필요하다(`.claude/rules/pr-flow.md`). Bug
 | Groq 스트리밍 SDK 형식, 지시문 품질 | 4블록 | 형식 수정, 지시문 조정 |
 | Playwright WebKit의 Windows 동작 | 1블록 | Chromium 모바일 크기 |
 | Groq 학습 사용 여부 | 미확인 | 개인정보를 넣지 않음 |
-| Bugbot 결과 수신(PR #2에서 실행 시작 확인)과 포함 사용량 | 0블록 | 결과가 오지 않으면 모든 PR 보류 |
-| 쌓인 PR에서 Bugbot 동작 | 첫 쌓인 PR | 해당 PR 보류 |
