@@ -119,3 +119,30 @@ PR: [#11](https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/11) `hold-morning`
 배포: 없음(이 블록 범위 아님). 공개 주소는 아직 `feat/skeleton` `2273e20`이다.
 다음 할 일: 키가 보이는 환경에서 `npm run test:chatbot` 실행 후 Codex 재판정. 블록 5 `feat/integration`은 시작하지 않았다.
 토큰: 미측정, 예상 대비 미측정.
+
+## 12:46 블록 5 통합
+상태: 완료(공개 주소 완주 통과, 가짜 음성 입력 기준)
+PR: [#12](https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/12) `hold-morning`(보류 PR #11 위에 쌓임), 실패 횟수: 0
+작업 메모: 원래 시간표가 지나 같은 길이로 다시 잡음. 시작 12:30, 끝 13:30. 끝 시각 안에 마쳤고 블록 6 버퍼는 쓰지 않았다.
+결정:
+- 기존 `test:public`은 첫 화면과 health만 봐서 합격 기준을 판정하지 못했다. `tests/e2e/public.spec.ts`에 완주 시험을 더했다. 그래서 코드 변경은 시험 파일뿐이고 앱 코드는 그대로다. 시험 파일은 `.vercelignore`로 배포에서 빠진다.
+- 이제 `test:public`은 실행마다 실제 Groq 호출이 1회 든다. 다시 돌릴 때 돈 상한을 본다. 호출 없이 health만 보려면 `-g "접근 코드와 health|첫 화면"`을 붙인다.
+- 완주 기록은 저장소 루트 `test-results/public/`(답변 원문, 화면 3장)에 남는다. 시험은 접근 코드가 든 주소와 오류 내용을 출력하지 않게 짰다.
+- 배포 방식: `apps/web`에서 `vercel deploy --prod --yes`. 프로젝트 설정은 Root Directory `.`, Node.js `26.x`, Framework Preset `Other`이고 `vercel.json`이 `nextjs`로 정한다. 이 방식으로 빌드가 된다. `CLAUDE.md`와 TSD:289의 `apps/web`과 다르지만 설정과 문서는 고치지 않았다. 사람이 어느 쪽을 맞출지 정한다.
+- Codex 방식은 시험 기록 판정(직접 실행 아님, spawn EPERM 때문). 기록 파일 전부에 해시 머리줄과 종료 코드 끝줄이 있어야 한다. 답변 원문은 `test-results/12-answer.txt`로 맞췄다.
+남은 것:
+- 사람 판정: 실제 아이폰 음성 인식, VoiceOver 낭독, 실제 Groq 답변 품질, Bugbot Medium 1건의 분류.
+- `npm run test:chatbot` 실제 20문항은 돌리지 않았다(이용자가 Development 키 사용에 답하지 않음). PR #11의 `미완료` 사유로 남는다. 이번 답변 1건은 그 기준을 대신하지 않는다.
+- 사소한 지적 2건(고치지 않음): Bugbot Medium `public.spec.ts:88`, 매칭 뒤 버튼을 기본 5초만 기다려 앱의 10초 한도(`MATCH_TIMEOUT_MS`)보다 짧다. 지적은 사실이고 시험이 틀리게 실패할 수 있다. 제품 오작동이나 거짓 통과는 아니고, 고치면 재검증에 유료 호출이 또 들어 두었다. 둘째는 Codex의 지적으로, 답변 규칙 검사 결과를 출력만 하고 실패 조건으로 삼지 않는다.
+- PR #7 후속: 공개 주소 `/enter`와 인증된 `/api/health` 확인(`groqKeyConfigured` `true`, `llmMode` `live`, `test-results/7-public.txt`). 커밋 `92d6341` 기준이라 PR #7 HEAD `a47d40c` 재판정은 아니다. 댓글을 남겼고 `hold-morning`은 그대로다.
+- Vercel Production에 이름이 틀린 옛 `Groq_API_key`가 남아 있다. 쓰지 않으며 지우지 않았다.
+검증(기록은 저장소 루트 `test-results/12-*.txt`, 커밋 `92d6341`): `npm run check` 0(159개), `npm run test:e2e` 0(72개, 가짜 음성 입력·가짜 답변 기준, 앞서 `8c2f7df`에서도 72개 통과), `test:public` 0(3개, 공개 주소). axe `critical`·`serious` 0건(E2E 전체, 공개 주소는 답변 화면). Codex `통과`(2회차). Bugbot 결과 있음, 심각한 지적 0건(AI 분류). 스크린샷은 PR 본문에 링크. 기록 파일에 접근 코드 값과 키 형식 문자열 0건(패턴 검사), `git status`에 비밀 파일 없음.
+완주 결과: 답변 첫 줄 `검색어: Sony 헤드셋`, 소요 시간 1,813ms(질문 확인 버튼부터 "답변이 도착했습니다."까지), 답변 규칙 위반 0건, 모델 `openai/gpt-oss-120b`. 실제 Groq 호출 이 블록 1회, 누계 1회(이 기록 기준).
+실패 목록: 0회(검사, 시험, 빌드, 배포, 심각한 지적).
+실패로 세지 않은 것:
+- Codex 1회차 `판정 불가`: 프롬프트에 답변 원문 파일을 기록으로 넣었는데 해시 머리줄이 없었다. 내 준비 실수다. 시험을 다시 돌리지 않고 같은 답변에 머리줄과 끝줄을 붙여 `12-answer.txt`를 만든 뒤 재판정했다. `test-results/codex-12-run1.md`에 남겼고 PR 댓글에도 함께 올렸다.
+- Bugbot Medium 1건: 위 이유로 사소한 지적으로 분류했다. 사람이 뒤집으면 실패 1회로 센다.
+- 내 명령 실수 1회: `git rev-parse --short`에 인자 2개를 줘 종료 코드 128. 검사·시험과 무관하다.
+배포: `feat/integration` `92d6341`(배포 `lighthouse-3hbh1t5lc`, 별칭 `lighthouse-web-five.vercel.app`). 먼저 `8c2f7df`를 올렸다가(`lighthouse-c54fil5xz`) 기록과 커밋을 맞추려고 다시 배포했다. 두 커밋의 앱 코드는 같다.
+다음 할 일: 블록 6 시작 전 이용자가 정할 것은 20문항 실행용 키다. 시험을 다시 돌려야 하면 먼저 `public.spec.ts:88`의 대기 시간을 늘린다.
+토큰: 미측정(세션 문맥 약 17.6만, 주간 사용량 전체 모델 27%), 예상 대비 미측정.
