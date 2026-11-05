@@ -23,6 +23,12 @@ export const STATUS = {
   missed: "못 들었습니다. 버튼을 눌러 다시 말씀하세요.",
   matching: "봉사자를 찾고 있습니다.",
   emptyText: "입력창에 찾는 상품을 입력하세요.",
+  connected: (volunteer: string) => `${volunteer}와 연결됐습니다.`,
+  needItem: "찾는 상품을 알아듣지 못했습니다. 상품 이름을 넣어 다시 요청하세요.",
+  tooLong: "요청이 너무 깁니다. 짧게 다시 요청하세요.",
+  noAccess: "접근 코드가 필요합니다. 시연 주소로 다시 열어 주세요.",
+  tooMany: "요청이 많습니다. 1분 뒤 다시 시도해 주세요.",
+  matchFailed: "봉사자 연결에 실패했습니다. 다시 시도해 주세요.",
 } as const;
 
 /** 입력창으로 바로 가는 오류. 그 밖의 오류는 못 들은 것으로 친다. */
@@ -39,7 +45,8 @@ export type InputState =
   | "listening"
   | "confirming"
   | "submitting"
-  | "text";
+  | "text"
+  | "matched";
 
 export interface SpeechInputModel {
   state: InputState;
@@ -48,8 +55,10 @@ export interface SpeechInputModel {
   status: string;
   /** 음성 실패로 입력창에 왔는지. 처음부터 입력창이면 초점을 옮기지 않는다. */
   fellBack: boolean;
-  /** 제출한 문장. 3블록의 /api/match가 쓴다. */
+  /** 제출한 문장. */
   submitted: string;
+  /** 매칭이 안 됐을 때 초점을 보낼 곳. reenter는 새 입력, resend는 같은 문장 다시 보내기. */
+  refocus: "reenter" | "resend" | null;
 }
 
 export type SpeechInputAction =
@@ -59,7 +68,10 @@ export type SpeechInputAction =
   | { type: "miss" }
   | { type: "unavailable" }
   | { type: "submit"; text: string }
-  | { type: "emptyText" };
+  | { type: "emptyText" }
+  | { type: "matched"; volunteerName: string }
+  | { type: "matchRejected"; status: string }
+  | { type: "matchFailed"; status: string };
 
 export function createInitialModel(mode: InputMode): SpeechInputModel {
   return {
@@ -69,6 +81,7 @@ export function createInitialModel(mode: InputMode): SpeechInputModel {
     status: "",
     fellBack: false,
     submitted: "",
+    refocus: null,
   };
 }
 
@@ -78,7 +91,13 @@ export function speechInputReducer(
 ): SpeechInputModel {
   switch (action.type) {
     case "press":
-      return { ...model, state: "starting", transcript: "", status: "" };
+      return {
+        ...model,
+        state: "starting",
+        transcript: "",
+        status: "",
+        refocus: null,
+      };
     case "listening":
       return { ...model, state: "listening", status: STATUS.listening };
     case "result":
@@ -103,9 +122,32 @@ export function speechInputReducer(
         state: "submitting",
         submitted: action.text,
         status: STATUS.matching,
+        refocus: null,
       };
     case "emptyText":
       return { ...model, status: STATUS.emptyText };
+    case "matched":
+      return {
+        ...model,
+        state: "matched",
+        status: STATUS.connected(action.volunteerName),
+      };
+    // transcript가 있으면 음성으로 낸 요청이고, 없으면 입력창으로 낸 요청이다.
+    case "matchRejected":
+      return {
+        ...model,
+        state: model.transcript ? "idle" : "text",
+        transcript: "",
+        status: action.status,
+        refocus: "reenter",
+      };
+    case "matchFailed":
+      return {
+        ...model,
+        state: model.transcript ? "confirming" : "text",
+        status: action.status,
+        refocus: "resend",
+      };
   }
 }
 

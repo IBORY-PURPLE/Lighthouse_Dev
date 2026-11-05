@@ -27,6 +27,7 @@ export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
   const speechRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
 
   const { state, transcript } = model;
@@ -49,6 +50,16 @@ export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
   useEffect(() => {
     if (reachedFallback) inputRef.current?.focus();
   }, [reachedFallback]);
+
+  // 위 효과들 뒤에 둬서, 매칭이 안 돌아왔을 때는 이 초점이 이긴다.
+  const { refocus } = model;
+  useEffect(() => {
+    if (refocus === "reenter") {
+      (typing ? inputRef : speechRef).current?.focus();
+    } else if (refocus === "resend") {
+      (typing ? submitRef : confirmRef).current?.focus();
+    }
+  }, [refocus, typing]);
 
   const handlePress = () => {
     if (busy || submitting) return;
@@ -131,6 +142,7 @@ export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
             onChange={(event) => setTyped(event.target.value)}
           />
           <button
+            ref={submitRef}
             type="submit"
             className="big-button"
             aria-disabled={submitting ? true : undefined}

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useReducer, useRef } from "react";
+import { DemoHandoff } from "@/components/DemoHandoff";
 import { SpeechInput } from "@/components/SpeechInput";
 import { StatusRegion } from "@/components/StatusRegion";
+import { requestMatch, saveMatch } from "@/lib/matchHandoff";
 import {
   createInitialModel,
   PRIMARY_INPUT,
@@ -18,12 +20,28 @@ export default function HomePage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
-    document.title = "상품 요청 - LightHouse";
     headingRef.current?.focus();
   }, []);
 
-  // 3블록: 여기서 /api/match를 호출하고 매칭 결과를 안내한다.
-  const handleSubmit = (text: string) => dispatch({ type: "submit", text });
+  const handleSubmit = async (text: string) => {
+    dispatch({ type: "submit", text });
+    const outcome = await requestMatch(text);
+    switch (outcome.kind) {
+      case "matched":
+        saveMatch(outcome.match);
+        dispatch({
+          type: "matched",
+          volunteerName: outcome.match.volunteer.displayName,
+        });
+        break;
+      case "rejected":
+        dispatch({ type: "matchRejected", status: outcome.status });
+        break;
+      case "failed":
+        dispatch({ type: "matchFailed", status: outcome.status });
+        break;
+    }
+  };
 
   return (
     <main className="user-screen">
@@ -31,7 +49,11 @@ export default function HomePage() {
         LightHouse 상품 요청
       </h1>
       <StatusRegion message={model.status} />
-      <SpeechInput model={model} dispatch={dispatch} onSubmit={handleSubmit} />
+      {model.state === "matched" ? (
+        <DemoHandoff />
+      ) : (
+        <SpeechInput model={model} dispatch={dispatch} onSubmit={handleSubmit} />
+      )}
     </main>
   );
 }
