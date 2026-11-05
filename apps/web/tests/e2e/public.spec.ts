@@ -3,6 +3,7 @@ import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { checkAnswer } from "../../src/lib/answerRules";
+import { MATCH_TIMEOUT_MS } from "../../src/lib/matchHandoff";
 import { installFakeSpeech, say } from "./helpers/fakeSpeech";
 
 // 접근 코드는 저장소 루트 .demo-access.local의 첫 줄에서만 읽는다.
@@ -85,7 +86,7 @@ test("공개 주소 완주: 가짜 음성, 매칭, 이어 보기, 실제 Groq �
   await say(page, "sony껄로 헤드셋 사고싶어");
   await page.getByRole("button", { name: "이대로 요청" }).click();
   const handoff = page.getByRole("button", { name: "봉사자 화면으로(시연)" });
-  await expect(handoff).toBeFocused();
+  await expect(handoff).toBeFocused({ timeout: MATCH_TIMEOUT_MS + 5_000 });
   await shot("match-done");
 
   await handoff.click();
@@ -113,7 +114,10 @@ test("공개 주소 완주: 가짜 음성, 매칭, 이어 보기, 실제 Groq �
   writeFileSync(path.join(RECORD_DIR, "answer.txt"), `${text}\n`, "utf8");
   console.log(`답변 첫 줄: ${text.split(/\r?\n/)[0]}`);
   console.log(`소요 시간: ${elapsedMs}ms`);
-  console.log(`답변 규칙 위반: ${JSON.stringify(checkAnswer(text))}`);
+  const violations = checkAnswer(text);
+  console.log(`답변 규칙 위반: ${JSON.stringify(violations)}`);
+  // 위반이면 시험은 실패하되, 아래 화면 기록과 접근성 검사까지는 마친다.
+  expect.soft(violations, "답변 규칙 위반").toEqual([]);
   await answer.scrollIntoViewIfNeeded();
   await page.screenshot({
     path: path.join(RECORD_DIR, "volunteer-answer.png"),
