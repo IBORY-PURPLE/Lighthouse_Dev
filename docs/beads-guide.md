@@ -8,7 +8,7 @@ beads는 AI와 사람이 함께 쓰는 할 일 장부다. 할 일 사이의 순�
 - **이 PC 전용이다.** 데이터는 저장소의 `.beads/`에 있고 git에 올라가지 않는다. 어느 브랜치, 어느 worktree에서든 같은 장부를 본다.
 - 서버 동기화는 꺼져 있다. 다른 PC와 클라우드 세션에서는 이 장부가 보이지 않는다.
 - 이슈 번호는 `lh-3sy`처럼 붙는다. bd 사용 통계는 껐다.
-- **Claude 연동:** 세션을 시작할 때마다 `bd prime`(작업 안내, 약 6KB)이 자동으로 들어온다. `.claude/settings.json`의 SessionStart 훅과 `CLAUDE.md`의 안내 블록 때문이다. 이 두 파일은 git에 올라가므로 bd가 없는 환경에서는 훅이 오류를 낼 수 있다.
+- **Claude 연동:** 세션을 시작할 때마다 `bd prime`(작업 안내, 약 6KB)이 자동으로 들어온다. `.claude/settings.json`의 SessionStart 훅이 실행하는 것이고, `CLAUDE.md`의 안내 블록은 그 사실을 알리는 문서다. 이 두 파일은 git에 올라가므로 bd가 없는 환경에서는 훅이 오류를 낼 수 있다.
 - **git 훅:** 이 PC의 `.git/hooks/`에 5개를 설치했다. 지금 설정(`export.auto` 꺼짐)에서는 아무 일도 하지 않는다. git에 올라가지 않아 이 PC에서만 있다.
 
 ## 자주 쓰는 명령
@@ -55,4 +55,8 @@ bd close lh-aaa --reason "문구 수정"           # 이제 bbb가 나온다
 - 프로젝트 사실 기억: `bd remember "내용" --key 영문-이름`. 한글만 쓰면 `--key` 없이는 실패한다.
 - 옵션 없는 `bd doctor`는 이 저장 방식에서 지원되지 않고 `--check=conventions` 등 일부만 된다. 고장이 의심되면 `bd version`과 `bd list`를 먼저 본다.
 - bd를 새로 설치하거나 올릴 때는 [공식 업그레이드 안내](https://beads.gascity.com/getting-started/upgrading)를 따른다.
-- 제거: `bd setup claude --remove`와 `bd hooks uninstall`을 먼저 실행한다. 그다음 `.beads/` 폴더와 `bd.exe`를 지우고, `.git/info/exclude`에서 `.beads/`와 `*.gate.lock*` 두 줄을 뺀다.
+- 제거(순서대로):
+  1. 새 브랜치에서 `bd setup claude --remove`를 실행한다. `.claude/settings.json`의 SessionStart 훅과 `CLAUDE.md`의 BEADS 블록이 빠진다. 이 변경은 git에 추적되는 파일이므로 PR로 main에 반영해야 다른 체크아웃과 새 클론에서도 사라진다. 반영 전에 `bd.exe`를 지우면 그 환경에서 훅이 오류를 낸다.
+  2. `bd hooks uninstall`로 `.git/hooks/`의 훅을 지운다.
+  3. 아래 3개는 **주 저장소 폴더**(`C:\Users\chewo\Lighthouse_Dev`) 기준이다. 다른 worktree 폴더의 `.git`은 파일이라 `.git/info/exclude`가 없다. 주 저장소의 `.beads/` 폴더를 지우고, `.git/info/exclude`에서 `.beads/`와 `*.gate.lock*` 두 줄을 빼고, `.git/config`에서 `[beads]` 항목을 뺀다.
+  4. 마지막에 `bd.exe`를 지운다.
