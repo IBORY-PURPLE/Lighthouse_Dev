@@ -41,14 +41,15 @@ bd close lh-aaa --reason "문구 수정"           # 이제 bbb가 나온다
 
 ## 이 프로젝트에서 하지 말 것
 
-- `bd dolt push`와 `bd dolt remote add`: 전체 기록이 원격에 올라간다. 기본값은 `origin`이다.
-- `bd init` 재실행과 `bd setup`, `bd hooks install`: git 훅 설정과 `CLAUDE.md`를 바꾼다.
+- `bd dolt push`: 전체 기록이 원격에 올라간다. `bd dolt remote add`는 올릴 원격을 등록한다. bd는 git `origin`을 기본 후보로 잡는다.
+- `bd init --reinit-local`(`--force`): 기존 장부를 덮어쓴다. 옵션 없는 `bd init`은 이미 초기화되어 있어 오류로 끝난다.
+- `bd setup`: `CLAUDE.md`와 `.claude/settings.json`을 바꾼다. `bd hooks install`: git 훅을 설치한다.
 - `.beads/` 폴더 삭제: 장부가 사라진다. 복구할 곳이 없다.
 
 ## 기타
 
 - 백업: `bd backup init <폴더>`를 한 번 실행한 뒤, 필요할 때 `bd backup sync`.
 - 프로젝트 사실 기억: `bd remember "내용" --key 영문-이름`. 한글만 쓰면 `--key` 없이는 실패한다.
-- `bd doctor`는 이 저장 방식에서 지원되지 않는다. 고장이 의심되면 `bd version`과 `bd list`를 먼저 본다.
+- 옵션 없는 `bd doctor`는 이 저장 방식에서 지원되지 않고 `--check=conventions` 등 일부만 된다. 고장이 의심되면 `bd version`과 `bd list`를 먼저 본다.
 - bd를 새로 설치하거나 올릴 때는 [공식 업그레이드 안내](https://beads.gascity.com/getting-started/upgrading)를 따른다.
 - 제거: `.beads/` 폴더와 `bd.exe`를 지우고, `.git/info/exclude`에서 `.beads/`와 `*.gate.lock*` 두 줄을 뺀다.
