@@ -4,16 +4,23 @@ import Link from "next/link";
 import {
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import { StatusRegion } from "@/components/StatusRegion";
+import { VolunteerChat } from "@/components/VolunteerChat";
 import {
   parseStoredMatch,
   readStoredMatch,
   requestLabel,
 } from "@/lib/matchHandoff";
+import {
+  createInitialModel,
+  PRIMARY_INPUT,
+  speechInputReducer,
+} from "@/lib/speech";
 
 /**
  * 낭독 영역은 빈 채로 먼저 그려져 있어야 VoiceOver가 변화를 읽는다.
@@ -34,6 +41,11 @@ export default function VolunteerPage() {
   const match = useMemo(() => parseStoredMatch(stored), [stored]);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [announced, setAnnounced] = useState(false);
+  const [chatModel, chatDispatch] = useReducer(
+    speechInputReducer,
+    PRIMARY_INPUT,
+    createInitialModel,
+  );
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -42,11 +54,13 @@ export default function VolunteerPage() {
   }, []);
 
   const hydrated = stored !== undefined;
-  const message = !announced
+  const arrivalMessage = !announced
     ? ""
     : match
       ? `시연: 봉사자 화면으로 바뀌었습니다. 이용자 요청: ${requestLabel(match.request)}.`
       : "매칭 정보가 없습니다.";
+  // 낭독 영역은 화면에 하나만 둔다. 챗봇 안내가 생기면 도착 안내를 대신한다.
+  const message = chatModel.status || arrivalMessage;
 
   return (
     <main className="volunteer-screen">
@@ -55,14 +69,21 @@ export default function VolunteerPage() {
       </h1>
       <StatusRegion message={message} />
       {match && (
-        <dl className="match-summary">
-          <dt>이용자 요청</dt>
-          <dd>{requestLabel(match.request)}</dd>
-          <dt>이용자가 한 말</dt>
-          <dd>{match.request.raw}</dd>
-          <dt>연결된 봉사자</dt>
-          <dd>{match.volunteer.displayName}</dd>
-        </dl>
+        <>
+          <dl className="match-summary">
+            <dt>이용자 요청</dt>
+            <dd>{requestLabel(match.request)}</dd>
+            <dt>이용자가 한 말</dt>
+            <dd>{match.request.raw}</dd>
+            <dt>연결된 봉사자</dt>
+            <dd>{match.volunteer.displayName}</dd>
+          </dl>
+          <VolunteerChat
+            match={match}
+            model={chatModel}
+            dispatch={chatDispatch}
+          />
+        </>
       )}
       {hydrated && !match && <Link href="/">이용자 화면으로 돌아가기</Link>}
     </main>
