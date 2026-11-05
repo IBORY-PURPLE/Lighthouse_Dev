@@ -312,6 +312,53 @@ describe("speechInputReducer", () => {
     });
   });
 
+  describe("봉사자 질문", () => {
+    const heard = speechInputReducer(speech, {
+      type: "result",
+      transcript: "소니 헤드셋 찾는 법",
+    });
+
+    it("제출과 빈 입력 안내는 넘겨준 문구를 쓴다", () => {
+      expect(
+        speechInputReducer(heard, {
+          type: "submit",
+          text: "질문",
+          status: STATUS.chatWaiting,
+        }).status,
+      ).toBe(STATUS.chatWaiting);
+      expect(
+        speechInputReducer(speech, {
+          type: "emptyText",
+          status: STATUS.emptyQuestion,
+        }).status,
+      ).toBe(STATUS.emptyQuestion);
+    });
+
+    it("답변을 받으면 음성은 처음으로, 입력창은 입력창으로 돌아가고 초점을 옮기지 않는다", () => {
+      const voice = speechInputReducer(
+        speechInputReducer(heard, { type: "submit", text: "질문" }),
+        { type: "answered", status: STATUS.chatArrived },
+      );
+      expect(voice).toMatchObject({
+        state: "idle",
+        transcript: "",
+        status: STATUS.chatArrived,
+        refocus: null,
+      });
+
+      const fellBack = speechInputReducer(speech, { type: "unavailable" });
+      const typed = speechInputReducer(
+        speechInputReducer(fellBack, { type: "submit", text: "질문" }),
+        { type: "answered", status: STATUS.chatArrived },
+      );
+      expect(typed).toMatchObject({
+        state: "text",
+        fellBack: false,
+        refocus: null,
+      });
+    });
+  });
+
   it("다시 말하기는 앞 문장과 안내를 지운다", () => {
     const confirming = speechInputReducer(speech, {
       type: "result",

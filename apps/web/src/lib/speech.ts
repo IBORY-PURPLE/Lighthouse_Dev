@@ -29,6 +29,12 @@ export const STATUS = {
   noAccess: "접근 코드가 필요합니다. 시연 주소로 다시 열어 주세요.",
   tooMany: "요청이 많습니다. 1분 뒤 다시 시도해 주세요.",
   matchFailed: "봉사자 연결에 실패했습니다. 다시 시도해 주세요.",
+  emptyQuestion: "입력창에 질문을 입력하세요.",
+  chatWaiting: "답변을 만들고 있습니다.",
+  chatArrived: "답변이 도착했습니다.",
+  questionTooLong: "질문이 너무 깁니다. 짧게 다시 말해 주세요.",
+  chatFailed: "답변 서버에 연결하지 못했습니다. 다시 시도해 주세요.",
+  chatNotConfigured: "챗봇 설정이 끝나지 않았습니다.",
 } as const;
 
 /** 입력창으로 바로 가는 오류. 그 밖의 오류는 못 들은 것으로 친다. */
@@ -67,9 +73,11 @@ export type SpeechInputAction =
   | { type: "result"; transcript: string }
   | { type: "miss" }
   | { type: "unavailable" }
-  | { type: "submit"; text: string }
-  | { type: "emptyText" }
+  | { type: "submit"; text: string; status?: string }
+  | { type: "emptyText"; status?: string }
   | { type: "matched"; volunteerName: string }
+  /** 봉사자 화면: 답변을 받았다. 초점은 답변 영역으로 가므로 입력 쪽에서 옮기지 않는다. */
+  | { type: "answered"; status: string }
   | { type: "matchRejected"; status: string }
   | { type: "matchFailed"; status: string };
 
@@ -121,11 +129,20 @@ export function speechInputReducer(
         ...model,
         state: "submitting",
         submitted: action.text,
-        status: STATUS.matching,
+        status: action.status ?? STATUS.matching,
         refocus: null,
       };
     case "emptyText":
-      return { ...model, status: STATUS.emptyText };
+      return { ...model, status: action.status ?? STATUS.emptyText };
+    case "answered":
+      return {
+        ...model,
+        state: model.transcript ? "idle" : "text",
+        transcript: "",
+        status: action.status,
+        fellBack: false,
+        refocus: null,
+      };
     case "matched":
       return {
         ...model,

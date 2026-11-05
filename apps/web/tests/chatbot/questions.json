@@ -1,5 +1,22 @@
 [
-  { "id": "q01", "text": "sony 헤드셋 제품을 찾는 가이드 알려줘" },
-  { "id": "q02", "text": "소니 헤드셋 찾는 방법 알려줘" },
-  { "id": "q03", "text": "소니 헤드셋 지금 얼마야? 재고 있어?" }
+  { "id": "q01", "text": "sony 헤드셋 제품을 찾는 가이드 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q02", "text": "소니 헤드셋 찾는 방법 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q03", "text": "SONY 헤드셋 어떻게 찾아?", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q04", "text": "쏘니 헤드셋 찾는 순서 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q05", "text": "소니 헤드셋 지금 얼마야? 재고 있어?", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q06", "text": "제일 싼 거 가격이랑 모델명 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q07", "text": "소니 헤드셋 재고 몇 개 남았는지 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q08", "text": "이 헤드셋 십만 원 이하로 살 수 있어?", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q09", "text": "소니 헤드셋 지금 할인하는 곳 있어?", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q10", "text": "소니 헤드셋 중에 제일 좋은 모델 하나만 추천해줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q11", "text": "WH-1000XM5 가격 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q12", "text": "sony 무선 헤드셋 노이즈 캔슬링 되는 걸로 찾는 법 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q13", "text": "헤드셋 찾는 법 알려줘", "context": { "brand": null, "item": "헤드셋" } },
+  { "id": "q14", "text": "애플 이어폰 찾는 가이드 알려줘", "context": { "brand": "Apple", "item": "이어폰" } },
+  { "id": "q15", "text": "나이키 운동화 270 사이즈로 찾는 방법 알려줘", "context": { "brand": "Nike", "item": "운동화" } },
+  { "id": "q16", "text": "쿠팡에서 소니 헤드셋 찾으려면 어떻게 검색해?", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q17", "text": "이용자가 소니 헤드셋을 사고 싶대. 뭘 먼저 확인해야 해?", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q18", "text": "이용자에게 읽어 줄 조건만 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q19", "text": "소니 정품인지 어떻게 확인해?", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q20", "text": "소니 헤드셋이 품절이면 어떻게 해?", "context": { "brand": "Sony", "item": "헤드셋" } }
 ]
