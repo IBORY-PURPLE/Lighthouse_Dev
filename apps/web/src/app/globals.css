@@ -13,3 +13,107 @@ main {
   margin: 0 auto;
   padding: 2rem 1rem;
 }
+
+.user-screen {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 1rem;
+}
+
+.user-screen h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+/* 제목은 코드로만 초점을 받는 낭독 시작점이라 조작 요소처럼 보이지 않게 한다. */
+.user-screen h1:focus {
+  outline: none;
+}
+
+/* 낭독 영역은 내용이 없어도 숨기지 않는다. 숨기면 VoiceOver가 변화를 읽지 못할 수 있다. */
+.status-region {
+  min-height: 1.5em;
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.speech-input {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.speech-transcript {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.big-button {
+  flex: 1;
+  min-height: 44px;
+  padding: 1rem;
+  border: 2px solid #0b3d91;
+  border-radius: 1rem;
+  background: #0b3d91;
+  color: #ffffff;
+  font: inherit;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.big-button--secondary {
+  background: #ffffff;
+  color: #0b3d91;
+}
+
+.big-button[data-input-state="listening"] {
+  border-color: #8a1c1c;
+  background: #8a1c1c;
+}
+
+.big-button[aria-disabled="true"] {
+  opacity: 0.75;
+}
+
+.big-button:focus-visible,
+.text-form input:focus-visible {
+  outline: 3px solid #d9480f;
+  outline-offset: 2px;
+}
+
+.text-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.text-form label {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.text-form input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  border: 2px solid currentColor;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  /* iOS는 16px 미만 입력창에 초점이 오면 화면을 확대한다. */
+  font: inherit;
+  font-size: 1.125rem;
+}
+
+.text-form .big-button {
+  flex: none;
+  margin-top: 0.5rem;
+}
