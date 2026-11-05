@@ -41,10 +41,12 @@ export default function VolunteerPage() {
   const match = useMemo(() => parseStoredMatch(stored), [stored]);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [announced, setAnnounced] = useState(false);
+  const [initialChatModel] = useState(() =>
+    createInitialModel(PRIMARY_INPUT),
+  );
   const [chatModel, chatDispatch] = useReducer(
     speechInputReducer,
-    PRIMARY_INPUT,
-    createInitialModel,
+    initialChatModel,
   );
 
   useEffect(() => {
@@ -59,8 +61,10 @@ export default function VolunteerPage() {
     : match
       ? `시연: 봉사자 화면으로 바뀌었습니다. 이용자 요청: ${requestLabel(match.request)}.`
       : "매칭 정보가 없습니다.";
-  // 낭독 영역은 화면에 하나만 둔다. 챗봇 안내가 생기면 도착 안내를 대신한다.
-  const message = chatModel.status || arrivalMessage;
+  // 낭독 영역은 화면에 하나만 둔다. 입력을 건드린 뒤에는 도착 안내로 돌아가지 않는다.
+  // 듣기 전에 일부러 비운 영역에 도착 안내가 다시 나오면 낭독이 마이크에 섞인다.
+  const message =
+    chatModel === initialChatModel ? arrivalMessage : chatModel.status;
 
   return (
     <main className="volunteer-screen">

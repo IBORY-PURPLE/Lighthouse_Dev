@@ -26,19 +26,31 @@ function failure(
   );
 }
 
+/** 크기를 밝히지 않은 본문도 있으므로 읽으면서 끊는다. 다 읽은 뒤 재면 이미 메모리에 올라온 뒤다. */
+async function readLimitedText(request: NextRequest): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const pieces: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(pieces).toString("utf8");
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    pieces.push(value);
+  }
+}
+
 async function readChatBody(request: NextRequest) {
   const declared = Number(request.headers.get("content-length") ?? 0);
   if (declared > MAX_BODY_BYTES) return "too_long";
 
-  let raw: string;
   try {
-    raw = await request.text();
-  } catch {
-    return null;
-  }
-  if (Buffer.byteLength(raw) > MAX_BODY_BYTES) return "too_long";
-
-  try {
+    const raw = await readLimitedText(request);
+    if (raw === null) return "too_long";
     const body: unknown = JSON.parse(raw);
     if (!isChatRequest(body)) return null;
     const question = body.question.trim();
