@@ -116,6 +116,15 @@ describe("가짜 답변과 지시문", () => {
     expect(prompt.endsWith("Sony 헤드셋")).toBe(true);
   });
 
+  it("지시문이 항목 이름 앞의 번호를 막고 번호는 단계에만 쓰게 한다", () => {
+    const prompt = buildSystemPrompt({ brand: "Sony", item: "헤드셋" });
+    expect(prompt).toMatch(/^검색어: /m);
+    expect(prompt).toMatch(/^확인할 조건: /m);
+    expect(prompt).toMatch(/^찾는 순서:\n1\. /m);
+    expect(prompt).toContain("앞에 번호, 기호, 공백을 붙이지 않는다");
+    expect(prompt).not.toContain("번호만");
+  });
+
   it("브랜드가 없으면 품목만 넣고, 줄바꿈을 지운다", () => {
     expect(
       buildSystemPrompt({ brand: null, item: "헤드셋" }).endsWith(": 헤드셋"),
