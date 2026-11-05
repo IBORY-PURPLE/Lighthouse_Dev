@@ -34,5 +34,5 @@
 - 완료 기준: `.claude/rules/success-criteria.md`
 - 챗봇 품질: `.claude/rules/chatbot-quality.md`
 - 파일 탐색: `.claude/rules/file-navigation.md`
-- PR·Codex·Bugbot·병합·배포: `.claude/rules/pr-flow.md`
+- PR·Codex·병합·배포: `.claude/rules/pr-flow.md`
 - 밤샘 루프·금지선: `.claude/rules/overnight-loop.md`
