@@ -56,7 +56,7 @@ bd close lh-aaa --reason "문구 수정"           # 이제 bbb가 나온다
 - 옵션 없는 `bd doctor`는 이 저장 방식에서 지원되지 않고 `--check=conventions` 등 일부만 된다. 고장이 의심되면 `bd version`과 `bd list`를 먼저 본다.
 - bd를 새로 설치하거나 올릴 때는 [공식 업그레이드 안내](https://beads.gascity.com/getting-started/upgrading)를 따른다.
 - 제거(순서대로):
-  1. 새 브랜치에서 `bd setup claude --remove`를 실행한다. `.claude/settings.json`의 SessionStart 훅과 `CLAUDE.md`의 BEADS 블록이 빠진다. 이 변경은 git에 추적되는 파일이므로 PR로 main에 반영해야 다른 체크아웃과 새 클론에서도 사라진다. 반영 전에 `bd.exe`를 지우면 그 환경에서 훅이 오류를 낸다.
+  1. 새 브랜치에서 `bd setup claude --remove`를 실행한다. `.claude/settings.json`의 SessionStart 훅과 `CLAUDE.md`의 BEADS 블록이 빠진다. 이 변경은 git에 추적되는 파일이므로 PR로 main에 반영해야 다른 체크아웃과 새 클론에서도 사라진다. `--remove`는 우리가 만든 파일을 지우지 않으므로 같은 PR에서 `.claude/rules/beads.md`와 `docs/beads-guide.md`를 지우고 `CLAUDE.md` 규칙 목록의 bd 줄도 뺀다. 반영 전에 `bd.exe`를 지우면 그 환경에서 훅이 오류를 낸다.
   2. `bd hooks uninstall`로 `.git/hooks/`의 훅을 지운다.
-  3. 아래 3개는 **주 저장소 폴더**(`C:\Users\chewo\Lighthouse_Dev`) 기준이다. 다른 worktree 폴더의 `.git`은 파일이라 `.git/info/exclude`가 없다. 주 저장소의 `.beads/` 폴더를 지우고, `.git/info/exclude`에서 `.beads/`와 `*.gate.lock*` 두 줄을 빼고, `.git/config`에서 `[beads]` 항목을 뺀다.
+  3. 아래 3개는 **주 저장소 폴더**(`C:\Users\chewo\Lighthouse_Dev`) 기준이다. 다른 worktree 폴더의 `.git`은 파일이라 `.git/info/exclude`가 없다. 주 저장소의 `.beads/` 폴더를 지우고, `.git/info/exclude`에서 `.beads/`와 `*.gate.lock*` 두 줄과 `# Beads fork protection (bd init)` 주석(있으면)을 빼고, `.git/config`에서 `[beads]` 항목을 뺀다.
   4. 마지막에 `bd.exe`를 지운다.
