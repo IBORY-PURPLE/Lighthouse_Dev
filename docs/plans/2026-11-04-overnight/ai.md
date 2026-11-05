@@ -445,4 +445,11 @@ human.md:28 그대로다. 하지 않는다.
 
 | 날짜 | 단계 | 결과 | 근거 |
 |---|---|---|---|
-| | | | |
+| 11/4 | 블록 0 사전 점검 | 완료. 실패 0 | progress.md 00:20, PR 없음 |
+| 11/4 | 블록 1 뼈대 | 미완료(Codex `실패`). 실패 4, PR #7 `hold-morning` | progress.md 00:58, PR #7 본문(헤더는 2회, 본문·feat/skeleton은 4회) |
+| 11/4 | 블록 2 이용자 화면 | 완료(가짜 음성 입력 기준). 실패 1, PR #9 `hold-morning` | progress.md 01:22 |
+| 11/4 | 블록 3 매칭 | 완료(가짜 음성 입력 기준). 실패 3, PR #10 `hold-morning` | progress.md 01:55 |
+| 11/5 | 블록 4 봉사자 챗봇 | 미완료(실제 Groq 20문항 미실행). 실패 3, PR #11 `hold-morning` | progress.md 12:28 |
+| 11/5 | 블록 5 통합 시험 | 완료로 적었다가 블록 6에서 미완료로 바뀜. PR #12 `hold-morning` | progress.md 12:46, 13:04 |
+| 11/5 | 블록 6 버퍼 | 지시문 수정 후 완료(`4f6f31c` 기준, 가짜 음성 입력 기준). PR #12 실패 2, 문서 PR #13 실패 0 | progress.md 13:04, 13:14 |
+| 11/5 | 블록 7 마무리 | 완료. `test:public` 3개 통과(Groq 1회, 누계 6), 재배포 없음(`4f6f31c`), 보고 PR | progress.md 블록 7 항목, `morning-report.md` |
