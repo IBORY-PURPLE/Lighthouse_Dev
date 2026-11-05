@@ -31,3 +31,4 @@
 - 파일 탐색: `.claude/rules/file-navigation.md`
 - PR·Codex·Bugbot·병합·배포: `.claude/rules/pr-flow.md`
 - 밤샘 루프·금지선: `.claude/rules/overnight-loop.md`
+- 작업 추적(`bd`): `.claude/rules/beads.md`, 사용 안내 `docs/beads-guide.md`
