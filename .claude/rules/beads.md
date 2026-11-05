@@ -18,7 +18,7 @@
 
 ## 금지
 
-- `bd dolt push`, `bd dolt remote add`, `bd backup init`으로 원격 지정, `bd init --reinit-local`(`--force`), `bd setup`, `bd hooks install`을 이용자 허락 없이 실행하지 않는다.
-  - 이유: `bd`는 금지된 `origin`을 동기화 기본 후보로 잡고, `--reinit-local`은 장부를 덮어쓰며, `bd setup`과 `bd hooks install`은 Claude 설정과 git 훅을 바꾼다. 어기면: 금지선을 `git` 명령 없이 넘어서 `guard.js`도 막지 못한다.
+- `bd dolt push`, `bd dolt remote add`, `bd backup init`으로 원격 지정, `bd init --reinit-local`(`--force`), `bd setup <도구>`, `bd hooks install`을 이용자 허락 없이 실행하지 않는다.
+  - 이유: `bd`는 금지된 `origin`을 동기화 기본 후보로 잡고, `--reinit-local`은 장부를 덮어쓰며, `bd setup <도구>`와 `bd hooks install`은 Claude 설정과 git 훅을 바꾼다. 어기면: 금지선을 `git` 명령 없이 넘어서 `guard.js`도 막지 못한다.
 - `.beads/` 파일을 커밋하거나 지우지 않는다.
   - 이유: 이 PC 전용 데이터이고 다른 복사본이 없다. 어기면: 저장소가 무거워지거나 장부를 잃는다.
