@@ -156,3 +156,29 @@ main {
   margin: 0 0 0.75rem;
   overflow-wrap: anywhere;
 }
+
+.volunteer-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.volunteer-chat h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.chat-answer {
+  padding: 0.75rem;
+  border: 2px solid currentColor;
+  border-radius: 0.5rem;
+  font-size: 1.125rem;
+  /* 답변은 줄바꿈과 번호로만 구분된다. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-answer:focus-visible {
+  outline: 3px solid #d9480f;
+  outline-offset: 2px;
+}

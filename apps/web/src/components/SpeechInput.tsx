@@ -10,19 +10,41 @@ import {
 import {
   getSpeechRecognitionCtor,
   startRecognition,
+  STATUS,
   type SpeechInputAction,
   type SpeechInputModel,
 } from "@/lib/speech";
 
-const CONFIRM_LABEL = "이대로 요청";
+export interface SpeechInputLabels {
+  speak: string;
+  confirm: string;
+  /** 같은 문장을 다시 보내는 상태(refocus "resend")의 확인 버튼 이름. */
+  retry: string;
+  field: string;
+  emptyStatus: string;
+}
+
+const REQUEST_LABELS: SpeechInputLabels = {
+  speak: "눌러서 말하기",
+  confirm: "이대로 요청",
+  retry: "이대로 요청",
+  field: "찾는 상품",
+  emptyStatus: STATUS.emptyText,
+};
 
 interface SpeechInputProps {
   model: SpeechInputModel;
   dispatch: Dispatch<SpeechInputAction>;
   onSubmit(text: string): void;
+  labels?: SpeechInputLabels;
 }
 
-export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
+export function SpeechInput({
+  model,
+  dispatch,
+  onSubmit,
+  labels = REQUEST_LABELS,
+}: SpeechInputProps) {
   const [typed, setTyped] = useState("");
   const confirmRef = useRef<HTMLButtonElement>(null);
   const speechRef = useRef<HTMLButtonElement>(null);
@@ -35,6 +57,8 @@ export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
   const typing = state === "text" || (submitting && !transcript);
   const confirming = state === "confirming" || (submitting && !!transcript);
   const busy = state === "starting" || state === "listening";
+  const confirmLabel =
+    model.refocus === "resend" ? labels.retry : labels.confirm;
 
   useEffect(() => {
     if (!getSpeechRecognitionCtor(window)) dispatch({ type: "unavailable" });
@@ -86,7 +110,7 @@ export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
     if (text) {
       onSubmit(text);
     } else {
-      dispatch({ type: "emptyText" });
+      dispatch({ type: "emptyText", status: labels.emptyStatus });
       inputRef.current?.focus();
     }
   };
@@ -107,7 +131,7 @@ export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
               onSubmit(transcript);
             }}
           >
-            {CONFIRM_LABEL}
+            {confirmLabel}
           </button>
         </>
       )}
@@ -125,12 +149,12 @@ export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
           data-input-state={state}
           onClick={handlePress}
         >
-          {confirming ? "다시 말하기" : "눌러서 말하기"}
+          {confirming ? "다시 말하기" : labels.speak}
         </button>
       )}
       {typing && (
         <form className="text-form" onSubmit={handleTextSubmit} noValidate>
-          <label htmlFor="request-text">찾는 상품</label>
+          <label htmlFor="request-text">{labels.field}</label>
           <input
             ref={inputRef}
             id="request-text"
@@ -147,7 +171,7 @@ export function SpeechInput({ model, dispatch, onSubmit }: SpeechInputProps) {
             className="big-button"
             aria-disabled={submitting ? true : undefined}
           >
-            {CONFIRM_LABEL}
+            {confirmLabel}
           </button>
         </form>
       )}
