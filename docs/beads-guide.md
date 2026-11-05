@@ -7,7 +7,9 @@ beads는 AI와 사람이 함께 쓰는 할 일 장부다. 할 일 사이의 순�
 - 버전 1.3.4. 설치 위치는 `C:\Users\chewo\.local\bin\bd.exe`.
 - **이 PC 전용이다.** 데이터는 저장소의 `.beads/`에 있고 git에 올라가지 않는다. 어느 브랜치, 어느 worktree에서든 같은 장부를 본다.
 - 서버 동기화는 꺼져 있다. 다른 PC와 클라우드 세션에서는 이 장부가 보이지 않는다.
-- 이슈 번호는 `lh-3sy`처럼 붙는다. git 훅은 설치하지 않았고, bd 사용 통계도 껐다.
+- 이슈 번호는 `lh-3sy`처럼 붙는다. bd 사용 통계는 껐다.
+- **Claude 연동:** 세션을 시작할 때마다 `bd prime`(작업 안내, 약 6KB)이 자동으로 들어온다. `.claude/settings.json`의 SessionStart 훅과 `CLAUDE.md`의 안내 블록 때문이다. 이 두 파일은 git에 올라가므로 bd가 없는 환경에서는 훅이 오류를 낼 수 있다.
+- **git 훅:** 이 PC의 `.git/hooks/`에 5개를 설치했다. 지금 설정(`export.auto` 꺼짐)에서는 아무 일도 하지 않는다. git에 올라가지 않아 이 PC에서만 있다.
 
 ## 자주 쓰는 명령
 
@@ -43,7 +45,8 @@ bd close lh-aaa --reason "문구 수정"           # 이제 bbb가 나온다
 
 - `bd dolt push`: 전체 기록이 원격에 올라간다. `bd dolt remote add`는 올릴 원격을 등록한다. bd는 git `origin`을 기본 후보로 잡는다.
 - `bd init --reinit-local`(`--force`): 기존 장부를 덮어쓴다. 옵션 없는 `bd init`은 이미 초기화되어 있어 오류로 끝난다.
-- `bd setup claude` 같은 `bd setup <도구>`: `CLAUDE.md`와 `.claude/settings.json` 등 설정 파일을 바꾼다. `bd hooks install`: git 훅을 설치한다.
+- 다른 도구용 `bd setup <도구>`: 그 도구의 설정 파일을 바꾼다. Claude용 `bd setup claude`와 `bd hooks install`은 이미 실행했다.
+- `CLAUDE.md`의 `BEGIN BEADS`~`END BEADS` 블록 직접 수정: `bd setup`을 다시 실행하면 덮어쓴다. 우리 규칙은 `.claude/rules/beads.md`에 쓴다.
 - `.beads/` 폴더 삭제: 장부가 사라진다. 복구할 곳이 없다.
 
 ## 기타
@@ -52,4 +55,4 @@ bd close lh-aaa --reason "문구 수정"           # 이제 bbb가 나온다
 - 프로젝트 사실 기억: `bd remember "내용" --key 영문-이름`. 한글만 쓰면 `--key` 없이는 실패한다.
 - 옵션 없는 `bd doctor`는 이 저장 방식에서 지원되지 않고 `--check=conventions` 등 일부만 된다. 고장이 의심되면 `bd version`과 `bd list`를 먼저 본다.
 - bd를 새로 설치하거나 올릴 때는 [공식 업그레이드 안내](https://beads.gascity.com/getting-started/upgrading)를 따른다.
-- 제거: `.beads/` 폴더와 `bd.exe`를 지우고, `.git/info/exclude`에서 `.beads/`와 `*.gate.lock*` 두 줄을 뺀다.
+- 제거: `bd setup claude --remove`와 `bd hooks uninstall`을 먼저 실행한다. 그다음 `.beads/` 폴더와 `bd.exe`를 지우고, `.git/info/exclude`에서 `.beads/`와 `*.gate.lock*` 두 줄을 뺀다.
