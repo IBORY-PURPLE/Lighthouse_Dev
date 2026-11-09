@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maxDuration, POST, runtime } from "@/app/api/chat/route";
 import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import { LLM_MODEL, TRUNCATED_NOTICE } from "@/lib/llm";
+import { buildSystemPrompt } from "@/lib/prompt";
 
 // 일반 시험은 실제 Groq를 부르지 않는다(.claude/rules/chatbot-quality.md).
 const { create, constructed } = vi.hoisted(() => ({
@@ -180,10 +181,10 @@ describe("POST /api/chat", () => {
     expect(await errorOf(tooLong)).toBe("too_long");
   });
 
-  it("본문이 2KB를 넘으면 400이다(실제 크기와 선언 크기 모두)", async () => {
+  it("본문이 4KB를 넘으면 400이다(실제 크기와 선언 크기 모두)", async () => {
     const padded = {
       ...VALID,
-      context: { brand: "S".repeat(2100), item: "헤드셋" },
+      context: { brand: "S".repeat(4200), item: "헤드셋" },
     };
     const actual = await POST(chatRequest(padded));
     expect(actual.status).toBe(400);
@@ -197,7 +198,7 @@ describe("POST /api/chat", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("크기를 밝히지 않은 본문은 2KB를 넘는 순간 읽기를 멈추고 400이다", async () => {
+  it("크기를 밝히지 않은 본문은 4KB를 넘는 순간 읽기를 멈추고 400이다", async () => {
     let pulls = 0;
     const endless = new ReadableStream<Uint8Array>({
       pull(controller) {
@@ -218,18 +219,66 @@ describe("POST /api/chat", () => {
     const response = await POST(request);
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toBe("too_long");
-    expect(pulls).toBeLessThan(6);
+    // 1KB 조각 5개째에 4KB를 넘는다. 앞서 당겨 읽는 1~2개까지만 허용한다.
+    expect(pulls).toBeLessThan(8);
   });
 
-  it("본문이 정확히 2KB면 받는다", async () => {
+  it("본문이 정확히 4KB면 받고 1바이트 넘으면 400이다", async () => {
     const base = JSON.stringify({ ...VALID, context: { brand: "", item: "헤드셋" } });
-    const brand = "S".repeat(2048 - Buffer.byteLength(base));
+    const brand = "S".repeat(4096 - Buffer.byteLength(base));
     const body = JSON.stringify({ ...VALID, context: { brand, item: "헤드셋" } });
-    expect(Buffer.byteLength(body)).toBe(2048);
+    expect(Buffer.byteLength(body)).toBe(4096);
 
     const response = await POST(chatRequest(body));
     expect(response.status).toBe(200);
     await response.text();
+
+    const over = JSON.stringify({
+      ...VALID,
+      context: { brand: `${brand}S`, item: "헤드셋" },
+    });
+    expect(Buffer.byteLength(over)).toBe(4097);
+    const rejected = await POST(chatRequest(over));
+    expect(rejected.status).toBe(400);
+    expect(await errorOf(rejected)).toBe("too_long");
+  });
+
+  it("선택 필드 hasBudget·condition을 받아 지시문에 조건 줄만 넣는다", async () => {
+    const response = await POST(
+      chatRequest({
+        ...VALID,
+        context: { ...VALID.context, hasBudget: true, condition: "used" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    await response.text();
+
+    const system: string = create.mock.calls[0][0].messages[0].content;
+    expect(system).toContain("이용자가 예산을 정했다.");
+    expect(system).toContain("이용자는 중고를 원한다.");
+    expect(system.endsWith("다음과 같다: Sony 헤드셋")).toBe(true);
+  });
+
+  it("선택 필드가 없으면 지시문이 v1과 같다", async () => {
+    await (await POST(chatRequest(VALID))).text();
+    const system: string = create.mock.calls[0][0].messages[0].content;
+    expect(system).toBe(buildSystemPrompt({ brand: "Sony", item: "헤드셋" }));
+    expect(system).not.toContain("예산을 정했다");
+    expect(system).not.toContain("중고를 원한다");
+  });
+
+  it("context에 예산 숫자가 와도 지시문에 넣지 않는다", async () => {
+    const response = await POST(
+      chatRequest({
+        ...VALID,
+        context: { ...VALID.context, hasBudget: true, budget: "10만 원" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    await response.text();
+    const system: string = create.mock.calls[0][0].messages[0].content;
+    expect(system).not.toContain("10만");
+    expect(system).not.toMatch(/\d+\s*만\s*원/);
   });
 
   for (const [name, body] of [
@@ -241,6 +290,14 @@ describe("POST /api/chat", () => {
     ["context 없음", { requestId: VALID.requestId, question: "가" }],
     ["품목 없음", { ...VALID, context: { brand: "Sony", item: " " } }],
     ["브랜드가 숫자", { ...VALID, context: { brand: 1, item: "헤드셋" } }],
+    [
+      "hasBudget이 불리언이 아님",
+      { ...VALID, context: { ...VALID.context, hasBudget: "100000" } },
+    ],
+    [
+      "condition이 정해진 값이 아님",
+      { ...VALID, context: { ...VALID.context, condition: "refurbished" } },
+    ],
   ] as const) {
     it(`형식 오류는 400이다: ${name}`, async () => {
       const response = await POST(chatRequest(body));

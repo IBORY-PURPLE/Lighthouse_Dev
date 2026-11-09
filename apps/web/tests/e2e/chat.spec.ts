@@ -459,7 +459,7 @@ test.describe("POST /api/chat", () => {
     expect((await response.json()).error).toBe("unauthorized");
   });
 
-  test("가짜 답변 text/plain, 질문 301자와 2KB 초과는 400", async ({
+  test("가짜 답변 text/plain, 질문 301자와 4KB 초과는 400", async ({
     request,
   }) => {
     const cookie = await accessCookie(request);
@@ -479,7 +479,7 @@ test.describe("POST /api/chat", () => {
 
     const tooBig = await post({
       ...VALID,
-      context: { brand: "S".repeat(2100), item: "헤드셋" },
+      context: { brand: "S".repeat(4200), item: "헤드셋" },
     });
     expect(tooBig.status()).toBe(400);
     expect((await tooBig.json()).error).toBe("too_long");
@@ -508,5 +508,64 @@ test.describe("POST /api/chat", () => {
     expect(Number(limited.headers()["retry-after"])).toBeGreaterThan(0);
 
     expect((await post(nextClient())).status()).toBe(200);
+  });
+});
+
+// 블록 5(③): /api/chat 선택 필드(TSD §8.6). 가짜 답변(LLM_MODE=mock) 기준이다.
+// 지시문 내용은 단위 시험(answerRules·chatRoute)이 본다. 여기서는 서버 계약만 본다.
+test.describe("POST /api/chat 선택 필드", () => {
+  const BASE = {
+    requestId: "6f1c2e4a-1111-4222-8333-444455556666",
+    question: PASS_QUESTION,
+  };
+
+  async function postWithCookie(request: APIRequestContext, data: object) {
+    const entered = await request.get(`/enter?code=${E2E_ACCESS_CODE}`, {
+      maxRedirects: 0,
+    });
+    const cookie = (entered.headers()["set-cookie"] ?? "").split(";")[0];
+    return request.post("/api/chat", {
+      headers: { cookie, "x-forwarded-for": nextClient() },
+      data,
+    });
+  }
+
+  test("선택 필드 없는 요청(v1)과 있는 요청 모두 200과 세 항목", async ({
+    request,
+  }) => {
+    for (const context of [
+      { brand: "Sony", item: "헤드셋" },
+      { brand: "Sony", item: "헤드셋", hasBudget: true, condition: "used" },
+      { brand: null, item: "헤드셋", hasBudget: false, condition: "new" },
+      { brand: "Sony", item: "헤드셋", condition: "any" },
+      { brand: "Sony", item: "헤드셋", condition: null },
+    ]) {
+      const response = await postWithCookie(request, { ...BASE, context });
+      expect(response.status(), JSON.stringify(context)).toBe(200);
+      const text = await response.text();
+      for (const label of ["검색어:", "확인할 조건:", "찾는 순서:"]) {
+        expect(text).toContain(label);
+      }
+    }
+  });
+
+  test("선택 필드 값이 틀리면 400 invalid_request", async ({ request }) => {
+    for (const context of [
+      { brand: "Sony", item: "헤드셋", hasBudget: 100000 },
+      { brand: "Sony", item: "헤드셋", condition: "refurbished" },
+    ]) {
+      const response = await postWithCookie(request, { ...BASE, context });
+      expect(response.status(), JSON.stringify(context)).toBe(400);
+      expect((await response.json()).error).toBe("invalid_request");
+    }
+  });
+
+  test("본문 2KB를 넘어도 4KB 이하면 받는다", async ({ request }) => {
+    const response = await postWithCookie(request, {
+      ...BASE,
+      context: { brand: "S".repeat(3000), item: "헤드셋", hasBudget: true },
+    });
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toContain("찾는 순서:");
   });
 });

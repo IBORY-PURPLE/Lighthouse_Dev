@@ -20,6 +20,19 @@ export type ChatOutcome =
   /** 같은 질문을 다시 보낼 수 있다. */
   | { kind: "failed"; status: string };
 
+const CONDITION_KINDS: readonly unknown[] = ["new", "used", "any"];
+
+/** 선택 필드(TSD §8.6). 없으면 v1과 같다. 있으면 정해진 값만 받는다. */
+function hasValidOptionalContext(context: Partial<ChatContext>): boolean {
+  return (
+    (context.hasBudget === undefined ||
+      typeof context.hasBudget === "boolean") &&
+    (context.condition === undefined ||
+      context.condition === null ||
+      CONDITION_KINDS.includes(context.condition))
+  );
+}
+
 export function isChatRequest(value: unknown): value is ChatRequest {
   const body = value as Partial<ChatRequest> | null;
   return (
@@ -27,8 +40,20 @@ export function isChatRequest(value: unknown): value is ChatRequest {
     typeof body.question === "string" &&
     (body.context?.brand === null || typeof body.context?.brand === "string") &&
     typeof body.context?.item === "string" &&
-    body.context.item.trim().length > 0
+    body.context.item.trim().length > 0 &&
+    hasValidOptionalContext(body.context)
   );
+}
+
+/**
+ * 지시문에 넘길 맥락만 골라 낸다. 예산 숫자 같은 다른 필드가 와도 버린다(TSD §8.6).
+ * 선택 필드가 없으면 키도 만들지 않아 v1 요청과 같은 모양이 된다.
+ */
+export function pickChatContext(context: ChatContext): ChatContext {
+  const picked: ChatContext = { brand: context.brand, item: context.item };
+  if (context.hasBudget !== undefined) picked.hasBudget = context.hasBudget;
+  if (context.condition !== undefined) picked.condition = context.condition;
+  return picked;
 }
 
 function outcomeForStatus(status: number): ChatOutcome {

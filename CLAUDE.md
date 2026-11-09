@@ -9,7 +9,7 @@
 | `apps/web/` | 웹 앱(Next.js). Vercel Root Directory. 명령은 이 폴더에서 `npm run check` 등으로 돌린다 |
 | `apps/web/src/app/` | 화면과 서버 함수(`enter/route.ts`, `api/*/route.ts`) |
 | `apps/web/src/components/` | 화면 부품(`SpeechInput.tsx`, `StatusRegion.tsx`, `DemoHandoff.tsx`, `VolunteerChat.tsx`) |
-| `apps/web/src/lib/` | 서버 공용 코드(`access.ts`, `volunteers.ts`, `llm.ts`, `rateLimit.ts`), 챗봇 지시문(`prompt.ts`), 문장 분석(`parseRequest.ts`), 브라우저 음성 입력(`speech.ts`), 매칭 호출과 시연 이어 보기(`matchHandoff.ts`), 챗봇 호출(`chat.ts`), 답변 규칙 검사(`answerRules.ts`, 시험 전용) |
+| `apps/web/src/lib/` | 서버 공용 코드(`access.ts`, `volunteers.ts`, `llm.ts`, `rateLimit.ts`), 챗봇 지시문(`prompt.ts`), 문장 분석(`parseRequest.ts`), 브라우저 음성 입력(`speech.ts`), 매칭 호출과 시연 이어 보기(`matchHandoff.ts`), 봉사자 화면 공용 요청 모양(`volunteerRequest.ts`), 챗봇 호출(`chat.ts`), 답변 규칙 검사(`answerRules.ts`, 시험 전용) |
 | `apps/web/public/speech-probe/` | 0블록 음성 시험 정적 페이지(`/speech-probe/`) |
 | `apps/web/tests/{unit,e2e,chatbot}/` | Vitest 단위, Playwright 화면(가짜 음성: `e2e/helpers/fakeSpeech.ts`), 챗봇 고정 질문 |
 | `apps/web/experiments/vision/` | 비전 AI 육안 확인용 로컬 실험 서버(`server.mjs`, `index.html`). 제품 코드 아님, 배포하지 않음 |

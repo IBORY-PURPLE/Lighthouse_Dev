@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
-import { isChatRequest, MAX_QUESTION_LENGTH } from "@/lib/chat";
+import { isChatRequest, MAX_QUESTION_LENGTH, pickChatContext } from "@/lib/chat";
 import { isLlmConfigured, LlmError, streamAnswer } from "@/lib/llm";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
 
@@ -8,7 +8,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-const MAX_BODY_BYTES = 2048;
+/** 선택 필드(hasBudget·condition)가 붙어도 들어가게 v1 2048에서 늘림(TSD §8.6). */
+const MAX_BODY_BYTES = 4096;
 /** maxDuration에 강제로 끊기기 전에 끝내서 브라우저가 정상적인 오류를 받게 한다. */
 const LLM_BUDGET_MS = 28_000;
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -56,7 +57,7 @@ async function readChatBody(request: NextRequest) {
     const question = body.question.trim();
     if (!question) return null;
     if (question.length > MAX_QUESTION_LENGTH) return "too_long";
-    return { question, context: body.context };
+    return { question, context: pickChatContext(body.context) };
   } catch {
     return null;
   }
