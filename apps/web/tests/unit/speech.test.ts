@@ -453,7 +453,19 @@ describe("speechInputReducer: 이용자 질문 흐름(플로우 A)", () => {
       "emptyQuestion", "chatWaiting", "chatArrived", "questionTooLong",
       "chatFailed", "chatNotConfigured",
     ]);
-    expect(keys.slice(18)).toEqual(["typedBack", "needProduct", "answerTooLong", "summary"]);
+    expect(keys.slice(18, 22)).toEqual(["typedBack", "needProduct", "answerTooLong", "summary"]);
+    // 플로우 A PR 2(대기열 접수) 문구도 끝에 붙인다.
+    expect(keys.slice(22)).toEqual([
+      "registering", "registerFailed", "queued", "checking", "waiting",
+      "requestGone", "checkFailed",
+    ]);
+    expect(STATUS.queued(3)).toBe(
+      "접수됐습니다. 대기번호 3번입니다. 앱을 닫아도 됩니다. 다시 열면 대기번호를 알려 드립니다.",
+    );
+    expect(STATUS.waiting(3)).toBe("대기번호 3번, 봉사자를 기다리고 있습니다.");
+    expect(STATUS.checkFailed(3)).toBe(
+      "대기번호 3번입니다. 지금은 상태를 확인하지 못했습니다.",
+    );
     expect(STATUS.summary("소니 헤드셋", "10만 원", "중고")).toBe(
       "요청 내용입니다. 제품 소니 헤드셋. 예산 10만 원. 중고. 맞으면 봉사자 매칭 요청 버튼을 누르세요.",
     );

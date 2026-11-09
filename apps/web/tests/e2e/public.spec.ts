@@ -4,6 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { checkAnswer } from "../../src/lib/answerRules";
 import { MATCH_TIMEOUT_MS } from "../../src/lib/matchHandoff";
+import { REQUEST_TIMEOUT_MS } from "../../src/lib/requestRecord";
 import { installFakeSpeech, say } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
 
@@ -55,17 +56,22 @@ test("공개 주소 접근 코드와 health", async ({ request }) => {
   });
   expect(health.status()).toBe(200);
   const body = await health.json();
+  // PR 2: health에 저장소 종류(store)를 더했다(시험 변경). 키 값은 없다.
   expect(Object.keys(body).sort()).toEqual([
     "groqKeyConfigured",
     "llmMode",
     "ok",
+    "store",
   ]);
   expect(body.llmMode).toBe("live");
+  expect(["supabase", "memory"]).toContain(body.store);
   console.log(`groqKeyConfigured=${body.groqKeyConfigured}`);
+  // memory면 실패가 아니라 "흉내"다(실제 저장소에 연결되지 않음).
+  console.log(`store=${body.store}${body.store === "memory" ? " (흉내)" : ""}`);
 });
 
 // 가짜 음성 입력 기준이다. 답변만 실제 Groq이고 실행마다 유료 호출이 1회 든다.
-test("공개 주소 완주: 가짜 음성, 매칭, 이어 보기, 실제 Groq 답변", async ({
+test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이어 보기, 실제 Groq 답변", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -83,14 +89,41 @@ test("공개 주소 완주: 가짜 음성, 매칭, 이어 보기, 실제 Groq �
   expect(new URL(page.url()).pathname).toBe("/");
   await shot("user-first-screen");
 
-  await completeFlowA(page, DEFAULT_ANSWERS, {
+  // 대기열 접수(POST /api/requests) 1회와 조회(GET) 2회의 저장소 시간을 잰다(결정 11).
+  const registerResponse = page.waitForResponse("**/api/requests");
+  const registerStartedAt = Date.now();
+  const queueNumber = await completeFlowA(page, DEFAULT_ANSWERS, {
+    timeout: REQUEST_TIMEOUT_MS + 5_000,
+  });
+  const registered = await registerResponse;
+  const registerMs = Date.now() - registerStartedAt;
+  expect(registered.status()).toBe(201);
+  const { requestId } = await registered.json();
+  console.log(
+    `POST /api/requests status=${registered.status()} queueNumber=${queueNumber} ` +
+      `server-timing="${registered.headers()["server-timing"] ?? ""}" ` +
+      `flow-ms(답 확인부터 대기번호까지, 근사)=${registerMs}`,
+  );
+  for (const round of [1, 2]) {
+    const startedAt = Date.now();
+    const checked = await page.request.get(`/api/requests/${requestId}`);
+    const roundTripMs = Date.now() - startedAt;
+    expect(checked.status()).toBe(200);
+    expect((await checked.json()).queueNumber).toBe(queueNumber);
+    console.log(
+      `GET /api/requests/[id] #${round} status=${checked.status()} ` +
+        `server-timing="${checked.headers()["server-timing"] ?? ""}" round-trip-ms=${roundTripMs}`,
+    );
+  }
+  await shot("user-queued");
+
+  const handoff = page.getByRole("button", { name: "봉사자 화면으로(시연)" });
+  await expect(handoff).toBeVisible();
+  const matchResponse = page.waitForResponse("**/api/match", {
     timeout: MATCH_TIMEOUT_MS + 5_000,
   });
-  const handoff = page.getByRole("button", { name: "봉사자 화면으로(시연)" });
-  await expect(handoff).toBeFocused();
-  await shot("match-done");
-
   await handoff.click();
+  expect((await matchResponse).status()).toBe(200);
   await expect(page).toHaveURL(/\/volunteer$/);
   await page.getByRole("button", { name: "눌러서 질문하기" }).click();
   await say(page, "sony 헤드셋 제품을 찾는 가이드 알려줘");

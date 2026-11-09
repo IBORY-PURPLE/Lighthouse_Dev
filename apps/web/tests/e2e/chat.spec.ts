@@ -67,8 +67,9 @@ async function openVolunteer(page: Page) {
   if (access) await context.addCookies([{ ...access, secure: false }]);
 
   await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
+  // PR 2: 대기번호 화면에서는 "접수 완료" 제목에 초점이 있다. 이어 보기 버튼은 그 아래에 있다.
   const handoff = page.getByRole("button", { name: "봉사자 화면으로(시연)" });
-  await expect(handoff).toBeFocused();
+  await expect(handoff).toBeVisible();
   await handoff.click();
   await expect(page).toHaveURL(/\/volunteer$/);
   await expect(heading(page)).toBeFocused();
@@ -426,7 +427,7 @@ test.describe("역할 분리", () => {
     await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
     await expect(
       page.getByRole("button", { name: "봉사자 화면으로(시연)" }),
-    ).toBeFocused();
+    ).toBeVisible();
 
     expect(chatCalls).toEqual([]);
     await expect(askButton(page)).toHaveCount(0);

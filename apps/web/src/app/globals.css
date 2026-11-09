@@ -49,6 +49,12 @@ main {
   font-size: 1.125rem;
 }
 
+.queue-number {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
 .flow-summary {
   margin: 0;
   padding-left: 1.25rem;

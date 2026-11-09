@@ -53,30 +53,77 @@ describe("requestFlowReducer", () => {
     expect(model).toMatchObject({ question: 2, inputMode: "text" });
   });
 
-  it("summary → matching → connected", () => {
+  // PR 2: 요약 다음은 매칭이 아니라 접수 → 대기번호다(시험 변경, PR 본문).
+  it("summary → registering → queued, id는 첫 시도 때 정한다", () => {
     const summary = answerAll(initial);
-    const matching = requestFlowReducer(summary, { type: "requestMatch" });
-    expect(matching).toMatchObject({ step: "matching", status: STATUS.matching });
-    const connected = requestFlowReducer(matching, { type: "matched", volunteerName: "봉사자 A" });
-    expect(connected).toMatchObject({ step: "connected", status: STATUS.connected("봉사자 A") });
+    expect(summary.clientRequestId).toBeNull();
+    const registering = requestFlowReducer(summary, { type: "register", clientRequestId: "id-1" });
+    expect(registering).toMatchObject({ step: "registering", clientRequestId: "id-1", status: STATUS.registering });
+    const queued = requestFlowReducer(registering, { type: "registered", requestId: "r-1", queueNumber: 3 });
+    expect(queued).toMatchObject({
+      step: "queued",
+      queued: { requestId: "r-1", queueNumber: 3 },
+      status: STATUS.queued(3),
+    });
   });
 
-  it("매칭 실패는 요약으로 돌아가고 답을 유지한다", () => {
-    const matching = requestFlowReducer(answerAll(initial), { type: "requestMatch" });
-    const failed = requestFlowReducer(matching, { type: "matchFailed", status: STATUS.matchFailed });
+  it("접수 실패는 요약으로 돌아가 답과 id를 유지하고, 다시 보내면 같은 id를 쓴다", () => {
+    const registering = requestFlowReducer(answerAll(initial), { type: "register", clientRequestId: "id-1" });
+    const failed = requestFlowReducer(registering, { type: "registerFailed", status: STATUS.registerFailed });
     expect(failed).toMatchObject({
       step: "summary",
-      status: STATUS.matchFailed,
+      status: STATUS.registerFailed,
+      clientRequestId: "id-1",
       answers: { product: "소니 헤드셋", budget: "10만 원 이하", condition: "중고" },
     });
+    const retry = requestFlowReducer(failed, { type: "register", clientRequestId: "id-2" });
+    expect(retry.clientRequestId).toBe("id-1");
+  });
+
+  it("서버가 품목 없음(422)이면 질문 1로 돌아가고 id를 버린다", () => {
+    const registering = requestFlowReducer(answerAll(initial), { type: "register", clientRequestId: "id-1" });
+    const back = requestFlowReducer(registering, { type: "backToProduct" });
+    expect(back).toMatchObject({ step: "asking", question: 0, clientRequestId: null });
+  });
+
+  it("다시 열기: checking → 기다리는 중 / 없음 → intro / 확인 실패 → 저장 번호", () => {
+    const checking = requestFlowReducer(initial, { type: "check" });
+    expect(checking).toMatchObject({ step: "checking", status: STATUS.checking });
+    const target = { requestId: "r-1", queueNumber: 7, product: "소니 헤드셋" };
+    expect(requestFlowReducer(checking, { type: "resumed", ...target })).toMatchObject({
+      step: "queued",
+      queued: { requestId: "r-1", queueNumber: 7 },
+      answers: { product: "소니 헤드셋" },
+      status: STATUS.waiting(7),
+    });
+    expect(requestFlowReducer(checking, { type: "resumeGone" })).toMatchObject({
+      step: "intro",
+      status: STATUS.requestGone,
+    });
+    expect(requestFlowReducer(checking, { type: "resumeFailed", ...target })).toMatchObject({
+      step: "queued",
+      status: STATUS.checkFailed(7),
+    });
+  });
+
+  it("대기번호 화면: 이어 보기 실패 안내, 새 요청하기는 처음으로", () => {
+    let queued = requestFlowReducer(answerAll(initial), { type: "register", clientRequestId: "id-1" });
+    queued = requestFlowReducer(queued, { type: "registered", requestId: "r-1", queueNumber: 1 });
+    expect(requestFlowReducer(queued, { type: "handoffFailed", status: STATUS.matchFailed })).toMatchObject({
+      step: "queued",
+      status: STATUS.matchFailed,
+    });
+    expect(requestFlowReducer(queued, { type: "newRequest" })).toEqual(createInitialFlow(queued.inputMode));
   });
 
   it("단계에 맞지 않는 동작은 무시한다", () => {
     expect(requestFlowReducer(initial, { type: "answer", text: "x", inputMode: "speech" })).toBe(initial);
-    expect(requestFlowReducer(initial, { type: "requestMatch" })).toBe(initial);
+    expect(requestFlowReducer(initial, { type: "register", clientRequestId: "id" })).toBe(initial);
+    expect(requestFlowReducer(initial, { type: "resumeGone" })).toBe(initial);
     const summary = answerAll(initial);
     expect(requestFlowReducer(summary, { type: "start" })).toBe(summary);
-    expect(requestFlowReducer(summary, { type: "matched", volunteerName: "A" })).toBe(summary);
+    expect(requestFlowReducer(summary, { type: "registered", requestId: "r", queueNumber: 1 })).toBe(summary);
+    expect(requestFlowReducer(summary, { type: "check" })).toBe(summary);
   });
 });
 

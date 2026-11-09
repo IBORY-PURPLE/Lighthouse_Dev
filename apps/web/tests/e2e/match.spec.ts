@@ -10,6 +10,7 @@ import { E2E_ACCESS_CODE } from "../../playwright.config";
 import { fail, installFakeSpeech, say } from "./helpers/fakeSpeech";
 import {
   answerFlowA,
+  completeFlowA,
   DEFAULT_ANSWERS,
   MATCH_REQUEST_NAME,
 } from "./helpers/flowA";
@@ -36,6 +37,16 @@ const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 
 const storedMatch = (page: Page) =>
   page.evaluate(() => sessionStorage.getItem("lh.match.v1"));
+const storedRequest = (page: Page) =>
+  page.evaluate(() => localStorage.getItem("lh.request.v1"));
+const queuedHeading = (page: Page) =>
+  page.getByRole("heading", { level: 2, name: "접수 완료" });
+const queuedStatus = (n: number) =>
+  `접수됐습니다. 대기번호 ${n}번입니다. 앱을 닫아도 됩니다. 다시 열면 대기번호를 알려 드립니다.`;
+const REGISTER_FAILED =
+  "접수하지 못했습니다. 답은 그대로 있습니다. 봉사자 매칭 요청 버튼을 다시 누르세요.";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * 횟수 제한은 주소마다 센다. 시험끼리 서로의 횟수를 쓰지 않게 주소를 나눈다.
@@ -96,46 +107,80 @@ async function answerFirstQuestion(page: Page, sentence: string) {
   await confirmButton(page).click();
 }
 
+/** 플로우 A로 접수까지 마쳐 대기번호 화면에 둔다(PR 2). 이어 보기 버튼은 아직 누르지 않는다. */
 async function matchThroughUi(page: Page, sentence = PASS_SENTENCE) {
   await openUserScreen(page);
   await hearAndConfirm(page, sentence);
-  await expect(handoffButton(page)).toBeFocused();
+  await expect(queuedHeading(page)).toBeFocused();
+  await expect(handoffButton(page)).toBeVisible();
 }
 
 test.describe("매칭 흐름", () => {
-  test("합격 문장: 응답, 안내, 초점, 저장", async ({ page }) => {
+  // PR 2: 매칭 요청은 대기열 접수(POST /api/requests)다. 시연 이어 보기가 /api/match를 부른다(시험 변경).
+  test("합격 문장: 접수 응답, 대기번호 낭독, 초점, 기록, 이어 보기 저장", async ({ page }) => {
     await openUserScreen(page);
     await expect(handoffButton(page)).toHaveCount(0);
 
-    const responsePromise = page.waitForResponse("**/api/match");
+    const registerPromise = page.waitForResponse("**/api/requests");
     await hearAndConfirm(page, PASS_SENTENCE);
-    const response = await responsePromise;
-    const body = await response.json();
-
-    expect(response.status()).toBe(200);
-    expect(body.requestId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(body.volunteer).toEqual({
-      id: "v-01",
-      displayName: "가상 봉사자 A",
+    const registered = await registerPromise;
+    const sent = registered.request().postDataJSON();
+    expect(sent).toEqual({
+      clientRequestId: expect.stringMatching(UUID_PATTERN),
+      product: PASS_SENTENCE,
+      budget: DEFAULT_ANSWERS.budget,
+      condition: DEFAULT_ANSWERS.condition,
     });
-    expect(body.request).toEqual({
+    expect(registered.status()).toBe(201);
+    const body = await registered.json();
+    expect(body).toEqual({
+      requestId: expect.stringMatching(UUID_PATTERN),
+      queueNumber: expect.any(Number),
+      status: "waiting",
+    });
+
+    await expect(status(page)).toHaveText(queuedStatus(body.queueNumber));
+    await expect(queuedHeading(page)).toBeFocused();
+    await expect(
+      page.getByText(`대기번호 ${body.queueNumber}번`, { exact: true }),
+    ).toBeVisible();
+    expect(JSON.parse((await storedRequest(page)) ?? "null")).toMatchObject({
+      v: 1,
+      requestId: body.requestId,
+      queueNumber: body.queueNumber,
+      product: PASS_SENTENCE,
+    });
+    expect(await storedMatch(page)).toBeNull();
+    await expect(speechButton(page)).toHaveCount(0);
+    await expect(matchButton(page)).toHaveCount(0);
+    await expectNoAxeViolations(page);
+    await page.screenshot({ path: "test-results/user-queued.png" });
+
+    const matchPromise = page.waitForResponse("**/api/match");
+    await handoffButton(page).click();
+    const match = await matchPromise;
+    expect(match.status()).toBe(200);
+    const matchBody = await match.json();
+    expect(matchBody.request).toEqual({
       brand: "Sony",
       item: "헤드셋",
       raw: PASS_SENTENCE,
     });
+    await expect(page).toHaveURL(/\/volunteer$/);
+    expect(JSON.parse((await storedMatch(page)) ?? "null")).toEqual(matchBody);
+  });
 
-    await expect(status(page)).toHaveText("가상 봉사자 A와 연결됐습니다.");
-    await expect(handoffButton(page)).toBeFocused();
-    expect(
-      await page.evaluate(() => document.activeElement?.textContent),
-    ).toContain("시연");
-    expect(JSON.parse((await storedMatch(page)) ?? "null")).toEqual(body);
-
-    await expect(speechButton(page)).toHaveCount(0);
-    await expect(confirmButton(page)).toHaveCount(0);
-    await expect(matchButton(page)).toHaveCount(0);
-    await expectNoAxeViolations(page);
-    await page.screenshot({ path: "test-results/match-done.png" });
+  test("두 번째 접수는 대기번호가 1 늘고, 새 요청하기는 기록만 지운다", async ({
+    page,
+  }) => {
+    await openUserScreen(page);
+    const first = await completeFlowA(page);
+    await page.getByRole("button", { name: "새 요청하기" }).click();
+    await expect(heading(page)).toBeFocused();
+    await expect(page.getByRole("button", { name: "시작하기" })).toBeVisible();
+    expect(await storedRequest(page)).toBeNull();
+    const second = await completeFlowA(page);
+    expect(second).toBe(first + 1);
   });
 
   for (const sentence of [
@@ -147,8 +192,9 @@ test.describe("매칭 흐름", () => {
     "소니껄로 헤드셋",
   ]) {
     test(`표기 변형: ${sentence}`, async ({ page }) => {
-      const responsePromise = page.waitForResponse("**/api/match");
       await matchThroughUi(page, sentence);
+      const responsePromise = page.waitForResponse("**/api/match");
+      await handoffButton(page).click();
       const body = await (await responsePromise).json();
       expect(body.request).toEqual({
         brand: "Sony",
@@ -227,7 +273,7 @@ test.describe("매칭 흐름", () => {
   });
 });
 
-test.describe("매칭 실패 안내", () => {
+test.describe("접수 실패 안내", () => {
   test("쿠키 없음: 접근 코드 안내, 답 유지, 매칭 요청에 초점", async ({
     page,
   }) => {
@@ -246,8 +292,12 @@ test.describe("매칭 실패 안내", () => {
   });
 
   test("횟수 초과: 1분 뒤 안내, 매칭 요청에 초점", async ({ page }) => {
-    await page.route("**/api/match", (route) =>
-      route.fulfill({ status: 429, json: { ok: false, error: "rate_limited" } }),
+    await page.route("**/api/requests", (route) =>
+      route.fulfill({
+        status: 429,
+        headers: { "Retry-After": "30" },
+        json: { ok: false, error: "rate_limited" },
+      }),
     );
     await openUserScreen(page);
     await hearAndConfirm(page, PASS_SENTENCE);
@@ -258,26 +308,54 @@ test.describe("매칭 실패 안내", () => {
     await expect(matchButton(page)).toBeFocused();
   });
 
-  test("연결 실패 뒤 같은 문장을 다시 보내면 매칭된다(음성)", async ({ page }) => {
-    await page.route("**/api/match", (route) => route.abort());
+  test("서버 500 뒤 다시 누르면 같은 clientRequestId로 보내고 같은 대기번호다", async ({
+    page,
+  }) => {
+    const sent: { clientRequestId: string }[] = [];
+    let serverNumber = 0;
+    // 첫 요청은 서버까지 보내 접수시키고, 이용자에게는 500을 돌려준다(응답만 잃은 경우).
+    await page.route("**/api/requests", async (route) => {
+      sent.push(route.request().postDataJSON());
+      const response = await route.fetch();
+      serverNumber = (await response.json()).queueNumber;
+      await route.fulfill({
+        status: 500,
+        json: { ok: false, error: "internal" },
+      });
+    });
     await openUserScreen(page);
     await hearAndConfirm(page, PASS_SENTENCE);
 
-    await expect(status(page)).toHaveText(
-      "봉사자 연결에 실패했습니다. 다시 시도해 주세요.",
-    );
+    await expect(status(page)).toHaveText(REGISTER_FAILED);
     await expect(matchButton(page)).toBeFocused();
     await expect(matchButton(page)).not.toHaveAttribute("aria-disabled");
+    await expect(
+      page.getByText(`찾는 제품: ${PASS_SENTENCE}`, { exact: true }),
+    ).toBeVisible();
+    expect(await storedRequest(page)).toBeNull();
+    expect(serverNumber).toBeGreaterThan(0);
 
-    await page.unroute("**/api/match");
+    await page.unroute("**/api/requests");
+    const retryPromise = page.waitForResponse("**/api/requests");
     await matchButton(page).click();
-    await expect(handoffButton(page)).toBeFocused();
+    const retry = await retryPromise;
+    expect(retry.request().postDataJSON().clientRequestId).toBe(
+      sent[0].clientRequestId,
+    );
+    expect(retry.status()).toBe(200);
+    expect((await retry.json()).queueNumber).toBe(serverNumber);
+    await expect(status(page)).toHaveText(queuedStatus(serverNumber));
+    await expect(queuedHeading(page)).toBeFocused();
   });
 
-  test("연결 실패 뒤 같은 문장을 다시 보내면 매칭된다(입력창)", async ({
+  test("연결 실패 뒤 다시 누르면 접수된다(입력창, 같은 id)", async ({
     page,
   }) => {
-    await page.route("**/api/match", (route) => route.abort());
+    const sent: string[] = [];
+    await page.route("**/api/requests", (route) => {
+      sent.push(route.request().postDataJSON().clientRequestId);
+      return route.abort();
+    });
     await openUserScreen(page);
     await page.getByRole("button", { name: "시작하기" }).click();
     await speechButton(page).click();
@@ -294,17 +372,29 @@ test.describe("매칭 실패 안내", () => {
     }
     await matchButton(page).click();
 
-    await expect(status(page)).toHaveText(
-      "봉사자 연결에 실패했습니다. 다시 시도해 주세요.",
-    );
+    await expect(status(page)).toHaveText(REGISTER_FAILED);
     await expect(matchButton(page)).toBeFocused();
     await expect(
       page.getByText(`찾는 제품: ${PASS_SENTENCE}`, { exact: true }),
     ).toBeVisible();
 
-    await page.unroute("**/api/match");
+    await page.unroute("**/api/requests");
+    const retryPromise = page.waitForRequest("**/api/requests");
     await matchButton(page).click();
+    expect((await retryPromise).postDataJSON().clientRequestId).toBe(sent[0]);
+    await expect(queuedHeading(page)).toBeFocused();
+  });
+
+  test("이어 보기 실패: 안내하고 대기번호 화면에 머문다", async ({ page }) => {
+    await matchThroughUi(page);
+    await page.route("**/api/match", (route) => route.abort());
+    await handoffButton(page).click();
+    await expect(status(page)).toHaveText(
+      "봉사자 연결에 실패했습니다. 다시 시도해 주세요.",
+    );
     await expect(handoffButton(page)).toBeFocused();
+    await expect(queuedHeading(page)).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
   });
 });
 
@@ -403,12 +493,14 @@ test.describe("역할 분리", () => {
   });
 
   test("봉사자 화면은 저장값을 바꾸지 않는다", async ({ page }) => {
+    // PR 2: lh.match.v1은 이어 보기를 누를 때 저장된다. 저장된 응답 그대로 남는지 본다.
     await matchThroughUi(page);
-    const before = await storedMatch(page);
+    const matchPromise = page.waitForResponse("**/api/match");
     await handoffButton(page).click();
+    const saved = JSON.stringify(await (await matchPromise).json());
     await expect(heading(page)).toBeFocused();
     await expect(status(page)).toHaveText(/^시연: /);
-    expect(await storedMatch(page)).toBe(before);
+    expect(await storedMatch(page)).toBe(saved);
   });
 });
 

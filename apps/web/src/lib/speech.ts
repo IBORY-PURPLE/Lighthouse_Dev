@@ -41,6 +41,18 @@ export const STATUS = {
   answerTooLong: "답이 너무 깁니다. 짧게 다시 말씀하세요.",
   summary: (product: string, budget: string, condition: string) =>
     `요청 내용입니다. 제품 ${product}. 예산 ${budget}. ${condition}. 맞으면 봉사자 매칭 요청 버튼을 누르세요.`,
+  registering: "요청을 접수하고 있습니다.",
+  registerFailed:
+    "접수하지 못했습니다. 답은 그대로 있습니다. 봉사자 매칭 요청 버튼을 다시 누르세요.",
+  queued: (queueNumber: number) =>
+    `접수됐습니다. 대기번호 ${queueNumber}번입니다. 앱을 닫아도 됩니다. 다시 열면 대기번호를 알려 드립니다.`,
+  checking: "지난 요청을 확인하고 있습니다.",
+  waiting: (queueNumber: number) =>
+    `대기번호 ${queueNumber}번, 봉사자를 기다리고 있습니다.`,
+  requestGone:
+    "지난 요청을 찾지 못했습니다. 새로 요청하려면 시작하기를 누르세요.",
+  checkFailed: (queueNumber: number) =>
+    `대기번호 ${queueNumber}번입니다. 지금은 상태를 확인하지 못했습니다.`,
 } as const;
 
 /** 입력창으로 바로 가는 오류. 그 밖의 오류는 못 들은 것으로 친다. */
