@@ -66,3 +66,5 @@ PR: 없음(블록 1이 `feat/demo4/experiment`의 PR을 base `stage/demo4`로 �
 db push 허락: 예
 통합 배포 푸시 허락: 예
 토큰: 미측정, 예상 대비 미측정
+추가 00:45 이용자: Vercel `OPENAI_API_KEY`를 production·preview·development에 등록함(이용자 화면 캡처로 확인, 값은 보지 않음. 블록 2는 배포 전 `vercel env ls`로 이름만 다시 본다).
+추가 00:45 이용자 결정: 테스트(블록 1 실험, 블록 2·6 공개 완주)의 OpenAI 엔진은 **가장 저렴한 luna 모델**로 한다. 블록 1이 OpenAI 모델 목록(`GET /v1/models`, 키는 실험 서버 쪽 코드가 읽는다)과 공식 가격 페이지로 luna 계열 중 가장 싼 모델 ID를 확정해 결과표·진행 기록에 적고, 블록 2는 그 ID를 쓴다. 확정하지 못하면 결정 9의 `gpt-5.6-luna`. Groq qwen은 무료 비교 기준선으로 유지(C6 엔진 2개).
