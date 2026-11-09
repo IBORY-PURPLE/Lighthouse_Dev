@@ -111,15 +111,16 @@ for (const { product, method, engine } of plan) {
     return n;
   }, { synthetic, opts });
   const key = `${product.name}-${method.label}-${engine}`;
-  if (PAID[engine] && used[engine] + tileCount > BUDGET) {
-    console.log(`[run] ${key}: 미실행(예산 상한, 누계 ${used[engine]} + ${tileCount} > ${BUDGET})`);
+  // 예산 검사는 최악의 호출 수(조각 수 × 엔진 최대 재시도)로 한다. openai는 매개변수 거부 때 최대 3회 보낸다.
+  const maxAttempts = engine === "openai" ? 3 : 1;
+  if (PAID[engine] && used[engine] + tileCount * maxAttempts > BUDGET) {
+    console.log(`[run] ${key}: 미실행(예산 상한, 누계 ${used[engine]} + 최대 ${tileCount * maxAttempts} > ${BUDGET})`);
     summary.push({ key, skipped: "budget" });
     continue;
   }
   // 호출 전에 최대 호출 수(조각 수 × 엔진 최대 재시도)로 임시 기록을 먼저 써 둔다.
   // 실행이 중간에 끊겨도 다음 실행이 이 수를 누계에 넣어 상한을 넘지 않는다. 끝나면 실제 수로 덮어쓴다.
   const file = path.join(outDir, `${stamp}-${key}.json`);
-  const maxAttempts = engine === "openai" ? 3 : 1;
   await writeFile(file, JSON.stringify({ product: product.name, method: method.label, engine, pending: true, paidCalls: PAID[engine] ? tileCount * maxAttempts : 0 }));
   const before = (await (await fetch(`${BASE}/api/status`)).json()).calls;
   const started = Date.now();

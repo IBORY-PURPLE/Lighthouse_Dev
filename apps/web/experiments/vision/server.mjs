@@ -324,7 +324,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/analyze") {
       const body = await readBody(req);
       const result = await analyze(body);
-      console.log(`[analyze] ${result.engine} ${result.model} images=${body.images.length} kind=${body.kind} ${result.ms}ms finish=${result.finishReason}`);
+      console.log(`[analyze] ${result.engine} ${result.model} images=${body.images.length} kind=${Object.hasOwn(PROMPTS, body.kind) ? body.kind : "summary"} ${result.ms}ms finish=${result.finishReason}`);
       json(res, 200, result);
       return;
     }
