@@ -164,3 +164,34 @@ PR: #23 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/23 (base `stage/demo
 db push 허락: 예
 통합 배포 푸시 허락: 예
 토큰: 미측정, 예상 대비 미측정
+
+## 03:27 블록 4 플로우 A PR 2 대기열 접수
+상태: 완료(완료 조건 모두 있음: 시험 출력 요약, 스크린샷 2장, Codex 1차 통과. 실패 1회라 보류)
+PR: #24 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/24 (base `feat/demo1/questions`, head `feat/demo2/queue` `f56d2e1`, 라벨 `hold-morning`), 실패 횟수: 1
+시작 02:58 워크플로(끝 상한 04:48 = min(02:58+110, 07:00), 작업 멈춤 04:38. R = 06:50 − 02:58 = 232분 ≥ 110 → 포기 없이 전체 범위. 실제 끝 03:27)
+실패 목록:
+- 03:05 `npx tsc --noEmit`(커밋 전) 종료 1: `requestFlow.test.ts` 옛 액션(requestMatch·matched·matchFailed) 6건 — 시험 갱신 전에 타입 검사를 돌림
+실패로 세지 않은 것: 03:14 스테이징 확인 grep 패턴에 키 파일 이름 글자 → 안전 훅 차단(우회 없이 패턴을 빼고 확인)
+검증(`f56d2e1`): `npm run check` 종료 0(unit 223/223), `npm run test:e2e` 종료 0(84/84, chat.spec 20 포함, 가짜 음성 입력·가짜 응답·메모리 저장소 기준), `test:public` 종료 0(3/3). 접수 완료·다시 열기 화면 axe 태그·영향도 무관 위반 0건. C12 사례: match.spec "서버 500 뒤 … 같은 clientRequestId … 같은 대기번호", "연결 실패 뒤 … 같은 id". Codex 1차 통과(심각 0, 판정 불가 1: 실제 Supabase 중복 재전송 기록 없음 → MCP 롤백 시험으로 보완, 사소 1: public.spec flow-ms 이름, PR 댓글 1개, 시험 기록 판정). 스크린샷 evidence/24/user-queued.png, user-resumed.png. 비밀·접근 코드 패턴 검사 0건. `git ls-files test-results` 0개. `git status`에 `supabase/.temp` 없음.
+배포: Vercel Git 소스 배포(MCP create_deployment, `feat/demo2/queue` `f56d2e1`, target production, 프로젝트 lighthouse-web) `dpl_HTonq9PYXtEmoYSXv6WJzTALLjUa` → https://lighthouse-web-five.vercel.app 별칭 확인. **블록 2의 ④가 공개 주소에서 빠짐**(다른 단계 브랜치) → 블록 6 통합 배포에서 합칠 것. 프로젝트 설정·환경 변수 안 바꿈.
+공개 완주(C14·C15, 실제 Supabase·Groq, 가짜 음성 입력): health `store=supabase`(흉내 아님), `groqKeyConfigured=true`. `POST /api/requests` 201 `store;dur=1620`ms. `GET` #1 `store;dur=698`ms·왕복 1,057ms, #2(웜) `store;dur=810`ms·왕복 1,682ms. 이어 보기 `/api/match` 200 → 챗봇 Groq 2,098ms, 답변 규칙 위반 0. 함수 iad1, DB 서울. 운영 `requests`에 시험 행 1개(48시간 뒤 정리).
+결정:
+- **db push 성공**: `supabase link --project-ref zdnlhnzybbuloquzxwkg --yes`(비밀번호 묻지 않음) → `migration new requests`(`20261109175932_requests.sql`) → `db push --linked --dry-run` → `db push --linked --yes` → `migration list --linked` Local=Remote. Supabase MCP `execute_sql`로 `begin … rollback` 안에서 created 1 / existing 1 / created 2 확인, 롤백 뒤 0행, anon 실행·조회 권한 없음.
+- 마이그레이션: TSD §8.3 열 전부, RLS 켬·정책 없음, anon·authenticated 표 권한 회수, `register_request` 정리는 waiting 24h → expired, expired는 생성 48h 뒤 삭제, done은 done_at 7일 뒤 삭제. human.md:91 "하루 뒤 삭제"와 다름 → 아침 보고 10절 "결과 보관 기간".
+- 자동 전환 오류 코드에 `PGRST205`(표 없음) 추가. Supabase 변수는 빈 값도 없는 것으로 봄(`||`).
+- 화면: 요약 → registering("요청을 접수하고 있습니다.") → queued(h2 "접수 완료" 초점, "대기번호 N번", 안내, "봉사자 화면으로(시연)", "새 요청하기"). DemoHandoff는 누를 때 `/api/match` → `saveMatch` → `/volunteer`, 실패면 matchFailed 낭독·대기번호 화면 유지. 422면 질문 1로(needProduct). 메모리 404(`persistent:false`)는 기록 유지·checkFailed.
+- `requestFlow` 단계: checking|intro|asking|summary|registering|queued(PR 1의 matching·connected 없앰). STATUS 끝에 7개(registering, registerFailed, queued, checking, waiting, requestGone, checkFailed). `completeFlowA`는 이제 접수 완료 화면에서 멈추고 대기번호를 돌려준다.
+- `playwright.config.ts` webServer env에 `STORE_MODE`·`EXTRACT_MODE` 두 줄(블록 2와 같은 자리·같은 줄). `CLAUDE.md` lib 줄에 `requestStore.ts`·`requestRecord.ts`, `supabase/` 줄 추가. 루트 `.gitignore`에 `supabase/.temp/`.
+- 통합 충돌 예상(블록 6): health 응답(`extractEngine`과 `store`), routes.test·public.spec health 키 집합, CLAUDE.md lib 줄, playwright.config(같은 두 줄), `public.spec.ts` 완주 사례(④ 사례와 둘 다 살림), `match.spec.ts`(블록 2의 봉사자 화면 입력 1개 시험과 이 PR의 접수 흐름 변경).
+- 판정 문구: `보류(이유: 실패 1회 — 개발 중 타입 검사 실패 1회. 보류 PR #23 위에 쌓임. 훅 guard.js:158 때문에도 사람 병합)`.
+- 아침 절차(분기 표): PR #23을 `stage/demo1`에 병합 → `stage/demo2`를 `stage/demo1`에서 만들어 푸시 → PR #24 base를 `stage/demo2`로 → `stage/demo2`를 `feat/demo2/queue`에 병합(`-X ours`, 강제 푸시 금지).
+- 단계 PR 안 엶(훅 수정 허락 아니오). `bd ready`: 열린 이슈 없음.
+다음 할 일: 블록 5 ③ 탐색 조언(`feat/demo3/search-advice`, 조건 충족: T = 03:37, 06:50까지 193분). 아침: 실기기 VoiceOver로 접수 완료·다시 열기 낭독(C9), 보관 기간 결정, 블록 6 통합 배포로 ④와 플로우 A를 함께 공개 주소에.
+호출: luna 0장(누계 24/500), Upstage 0장(누계 0/500), Groq qwen 0회(누계 18), Groq gpt-oss 1회(누계 14/200)
+시작 브랜치 분기 근거: PR #23 보류(`stage/demo1`에 코드 없음, 훅 미수정) → 분기 표 셋째 행대로 `feat/demo2/queue` ← `github/feat/demo1/questions`(`eee9ed3`), base `feat/demo1/questions`, `stage/demo2` 만들지 않음
+다음 블록: 5
+이어 달리기 명령: 메인 세션 local_317d473e-56b7-4ce2-8976-dfd8dfcb2955의 Workflow 스크립트 overnight-1109가 블록 에이전트를 차례로 띄운다(블록 에이전트는 3.5의 6에서 block-<M>.started만 만들고 자식을 띄우지 않으며, 7을 하지 않는다)
+훅 수정 허락: 아니오
+db push 허락: 예
+통합 배포 푸시 허락: 예
+토큰: 미측정, 예상 대비 미측정
