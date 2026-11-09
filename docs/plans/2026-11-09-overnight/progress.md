@@ -195,3 +195,33 @@ PR: #24 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/24 (base `feat/demo1
 db push 허락: 예
 통합 배포 푸시 허락: 예
 토큰: 미측정, 예상 대비 미측정
+
+## 03:50 블록 5 ③ 탐색 조언
+상태: 미완료(Codex 1차 미통과: 실제 Groq 고정 질문 위반 — v1 질문 q20·q11. 고치려면 v1 지시문 본문을 바꿔야 해 "값 없으면 v1과 같다" 기준과 충돌 → 밤에 안 고침, 아침 사람 결정)
+PR: #25 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/25 (base `stage/demo3`, head `feat/demo3/search-advice` `5ade843`, 라벨 `hold-morning`), 실패 횟수: 4
+시작 03:27 워크플로(블록 4 항목 03:27 → T = 03:37, 06:50까지 193분 ≥ 60. 끝 상한 04:27 = min(03:27+60, 07:00), 작업 멈춤 04:17. 실제 끝 03:50)
+실패 목록:
+- 03:33 `npm run test:chatbot`(`01b6524`) 종료 0이지만 실제 Groq 25건 건너뜀(시험 환경에 GROQ 키 없음, 건너뜀은 통과 아님) → `vitest.chatbot.config.mts`에 Vite `loadEnv`(GROQ_ 접두만, 값 출력 없음, 키 파일 직접 안 엶)
+- 03:39 `npm run test:chatbot` 1차(`5ade843`) 종료 1, 24/25: q20(v1) stock "재고가 없을 경우"
+- 03:42 `npm run test:chatbot` 2차(`5ade843`) 종료 1, 23/25: q11(v1) model "WH-1000"(질문 모델명 되풀이), q20(v1) stock 2건. q20 같은 위반 2회 → 3회째 전에 재실행 중지
+- 03:48 Codex 1차(`5ade843`) 미통과, 심각 1(위 두 실행의 위반). 판정 불가 0, 사소 0
+실패로 세지 않은 것: 03:32 키 파일 이름 글자가 든 확인 명령 → 안전 훅 차단(우회 안 함)
+검증(`5ade843`): `npm run check` 종료 0(unit 173/173), `npm run test:e2e` 종료 0(75/75, 가짜 음성 입력·가짜 응답 기준, 선택 필드 사례 3개), `npm run test:chatbot` 종료 1(1차 24/25, 2차 23/25. 맥락 질문 q21~q25는 두 번 모두 5/5). Codex 미통과(PR 댓글 1개, 시험 기록 판정). 스크린샷 없음(화면 불변). 비밀·접근 코드 패턴 검사 9개 파일 0건. `volunteer/page.tsx`·`VolunteerChat.tsx`·`speech.ts` 불변.
+배포: 없음(블록 5는 배포하지 않음). 공개 완주 없음(human.md:122 미충족) — `public.spec.ts` 끝 "③ 선택 필드 호출" 사례를 블록 6 통합 배포 뒤 재완주에서 돌릴 것(Groq 1회).
+결정:
+- `prompt.ts`: `ChatContext`에 `hasBudget?`·`condition?`(`ConditionKind = new|used|any`). 마지막 줄 바로 앞에만 TSD 406-408 줄. `any`·`false`·없음은 줄 없음. v1 sha256 고정값(Sony 헤드셋 `f414b595…`, 브랜드 없음 `e3e17317…`)을 `answerRules.test.ts`에 둠 — v1 본문을 고치면 이 값도 갱신해야 함.
+- `chat.ts`: 선택 필드 값 검사(틀리면 400 invalid_request), `pickChatContext`로 brand·item·hasBudget·condition만 넘김(`budget` 등 버림). `route.ts` `MAX_BODY_BYTES` 4096(export 안 함, Next 라우트 규칙).
+- `volunteerRequest.ts`: `VolunteerRequestView`, `fromMatchV1`, `chatContextFor`(예산 원문 대신 있음 여부). 화면 연결은 TSD 12의 4.
+- 고정 질문 25개(v1 20 + q21~q25). `questions.test.ts`가 앞 20개 id·맥락 없음을 단언.
+- 판정 문구: `보류(이유: 실패 4회 — test:chatbot 건너뜀 1회, 실제 Groq 위반 2회(v1 질문), Codex 미통과 1회. Codex 통과 없음(미완료). 훅 guard.js:158 때문에도 사람 병합)`.
+- 통합 충돌 예상(블록 6): `CLAUDE.md` lib 줄(`volunteerRequest.ts` 추가), `chat.spec.ts`(2KB→4KB 사례 제목·값, 파일 끝 새 describe), `public.spec.ts` 끝(블록 2·4 사례와 둘 다 살림).
+- 단계 PR 안 엶(훅 수정 허락 아니오). `bd ready`: 열린 이슈 없음.
+다음 할 일: 블록 6 마무리. 아침: v1 지시문 수정 허락 여부 또는 재고 규칙의 조건문 허용 여부 결정 → test:chatbot 재실행 → Codex 재판정(PR #25).
+호출: luna 0장(누계 24/500), Upstage 0장(누계 0/500), Groq qwen 0회(누계 18), Groq gpt-oss 50회(누계 64/200)
+시작 브랜치 분기 근거: 블록 5는 앞 블록 의존 없음(4절 표) → `stage/demo3`을 `github/main`(`a4fdd26`)에서 새로 만들어 푸시하고 `feat/demo3/search-advice`를 땀
+다음 블록: 6
+이어 달리기 명령: 메인 세션 local_317d473e-56b7-4ce2-8976-dfd8dfcb2955의 Workflow 스크립트 overnight-1109가 블록 에이전트를 차례로 띄운다(블록 에이전트는 3.5의 6에서 block-<M>.started만 만들고 자식을 띄우지 않으며, 7을 하지 않는다)
+훅 수정 허락: 아니오
+db push 허락: 예
+통합 배포 푸시 허락: 예
+토큰: 미측정, 예상 대비 미측정
