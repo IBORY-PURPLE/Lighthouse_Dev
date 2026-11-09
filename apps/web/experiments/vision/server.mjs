@@ -11,11 +11,14 @@ import Groq from "groq-sdk";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webRoot = path.resolve(here, "../..");
 
+// 키 파일 위치가 확정되지 않았으므로 후보를 조건 없이 차례로 읽는다.
+// loadEnvFile은 이미 있는 변수를 덮지 않으므로 앞 파일의 값이 우선한다. 값은 출력하지 않는다.
 for (const envPath of [
   path.join(webRoot, ".env.local"),
+  path.join(webRoot, ".env"),
   path.resolve(webRoot, "../../.env"),
 ]) {
-  if (!process.env.GROQ_API_KEY?.trim() && existsSync(envPath)) {
+  if (existsSync(envPath)) {
     try {
       process.loadEnvFile(envPath);
     } catch {
@@ -109,7 +112,12 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && req.url === "/api/status") {
-      json(res, 200, { keyConfigured: Boolean(process.env.GROQ_API_KEY?.trim()), models: MODELS });
+      json(res, 200, {
+        keyConfigured: Boolean(process.env.GROQ_API_KEY?.trim()),
+        openaiKeyConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+        upstageKeyConfigured: Boolean(process.env.UPSTAGE_API_KEY?.trim()),
+        models: MODELS,
+      });
       return;
     }
     if (req.method === "POST" && req.url === "/api/analyze") {
