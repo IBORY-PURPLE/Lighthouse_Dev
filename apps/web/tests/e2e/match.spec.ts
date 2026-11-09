@@ -338,7 +338,12 @@ test.describe("역할 분리", () => {
     await expect(speechButton(page)).toHaveCount(0);
     await expect(confirmButton(page)).toHaveCount(0);
     await expect(textInput(page)).toHaveCount(0);
-    await expect(page.locator("input, textarea")).toHaveCount(0);
+    // ④ 상세 이미지 올리기(파일 선택)는 봉사자 기능이라 있어야 한다(11/9 블록 2).
+    // 그 밖의 입력(이용자 요청 작성용 글 입력)은 여전히 하나도 없어야 한다.
+    const inputs = page.locator("input, textarea");
+    await expect(inputs).toHaveCount(1);
+    await expect(inputs).toHaveAttribute("type", "file");
+    await expect(page.getByLabel("상세 이미지 올리기")).toHaveCount(1);
   });
 
   test("봉사자 화면은 저장값을 바꾸지 않는다", async ({ page }) => {
