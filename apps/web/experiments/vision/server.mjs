@@ -72,9 +72,20 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-// 오류 문구에 키 조각이 섞여 나오는 경우(예: 잘못된 키 안내)를 지운다.
+const KEY_NAMES = ["GROQ_API_KEY", "OPENAI_API_KEY", "UPSTAGE_API_KEY"];
+
+// 오류 문구에 키가 섞여 나오는 경우(예: 잘못된 키 안내)를 지운다.
+// 실제 키 값(전체와 앞뒤 8자 조각)을 먼저 지우고, 알려진 접두사·Bearer 형식도 지운다.
 export function redact(text) {
-  return String(text)
+  let out = String(text);
+  for (const name of KEY_NAMES) {
+    const value = process.env[name]?.trim();
+    if (!value) continue;
+    const pieces = [value];
+    if (value.length >= 16) pieces.push(value.slice(0, 8), value.slice(-8));
+    for (const piece of pieces) out = out.split(piece).join("[redacted]");
+  }
+  return out
     .replace(/(sk-|gsk_|up_)[A-Za-z0-9_*-]{4,}/g, "$1[redacted]")
     .replace(/Bearer\s+\S+/gi, "Bearer [redacted]");
 }
