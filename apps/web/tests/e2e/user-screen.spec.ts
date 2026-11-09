@@ -45,15 +45,17 @@ const questionHeading = (page: Page, n: 1 | 2 | 3) =>
 const summaryHeading = (page: Page) =>
   page.getByRole("heading", { level: 2, name: "요청 내용" });
 
+/** 이용자 화면(intro·질문·요약)은 영향도와 무관하게 axe 위반 0건이어야 한다. */
 async function expectNoBlockingAxe(page: Page) {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
     .analyze();
-  const blocking = results.violations.filter(
-    (violation) =>
-      violation.impact === "critical" || violation.impact === "serious",
-  );
-  expect(blocking).toEqual([]);
+  expect(
+    results.violations.map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+    })),
+  ).toEqual([]);
 }
 
 async function expectTouchTargets(page: Page) {
@@ -74,10 +76,13 @@ async function expectFellBackToInput(page: Page) {
   await expect(speechButton(page)).toHaveCount(0);
 }
 
-/** /api/ 아래 모든 요청을 모으고, /api/match는 응답하지 않아 "찾고 있습니다"에 머물게 한다. */
+/**
+ * 이 시점 뒤의 모든 네트워크 요청(주소 종류 무관)을 page.route로 모은다.
+ * /api/match는 응답하지 않아 "찾고 있습니다"에 머물게 하고, 나머지는 그대로 보낸다.
+ */
 async function recordApi(page: Page) {
   const calls: { url: string; body: unknown }[] = [];
-  await page.route("**/api/**", (route) => {
+  await page.route("**/*", (route) => {
     const request = route.request();
     calls.push({ url: request.url(), body: request.postDataJSON() });
     if (!request.url().includes("/api/match")) return route.continue();
@@ -162,8 +167,7 @@ test.describe("음성 API가 있을 때", () => {
   test("합격 문장: 설정, 확인 단계, 초점, 바로 넘어가지 않음", async ({
     page,
   }) => {
-    const requests: string[] = [];
-    page.on("request", (request) => requests.push(request.url()));
+    const calls = await recordApi(page);
     await startQuestions(page);
 
     await hearSentence(page, PASS_SENTENCE);
@@ -180,7 +184,7 @@ test.describe("음성 API가 있을 때", () => {
     await expect(questionHeading(page, 1)).toBeVisible();
     await expectNoBlockingAxe(page);
     await expectTouchTargets(page);
-    expect(requests.filter((url) => url.includes("/api/"))).toEqual([]);
+    expect(calls).toEqual([]);
   });
 
   for (const sentence of ["sony 헤드셋", "소니 헤드셋", "쏘니 헤드셋", "소니껄로 헤드셋"]) {
@@ -289,6 +293,7 @@ test.describe("음성 API가 있을 때", () => {
     await expect
       .poll(() => calls.map((call) => call.body))
       .toEqual([{ text: DEFAULT_ANSWERS.product }]);
+    expect(new URL(calls[0].url).pathname).toBe("/api/match");
 
     // aria-disabled라 Playwright의 click은 기다리기만 하므로 이벤트를 직접 보낸다.
     await matchButton(page).dispatchEvent("click");
