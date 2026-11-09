@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>비전 AI 실험실</title>
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e2e2dc; --accent:#1f5fbf; --warn:#b3261e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 16px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:16px; }
+  .row { display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center; }
+  label { display:inline-flex; gap:6px; align-items:center; }
+  input[type=number] { width:80px; }
+  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .status { font-size:13px; color:var(--muted); }
+  .status.bad { color:var(--warn); }
+  .batch { display:grid; grid-template-columns: 280px 1fr; gap:16px; }
+  @media (max-width:760px) { .batch { grid-template-columns:1fr; } }
+  .thumbs { display:flex; flex-direction:column; gap:8px; max-height:620px; overflow:auto; }
+  .thumbs img { width:100%; border:1px solid var(--line); border-radius:6px; cursor:zoom-in; background:#fff; }
+  .meta { font-size:12px; color:var(--muted); margin-top:2px; }
+  pre { white-space:pre-wrap; word-break:break-word; margin:0; font:14px/1.6 inherit; font-family:inherit; }
+  .err { color:var(--warn); }
+  h2 { font-size:16px; margin:0 0 8px; }
+  dialog { max-width:95vw; max-height:95vh; padding:0; border:none; }
+  dialog img { display:block; max-width:95vw; }
+</style>
+</head>
+<body>
+<main>
+  <h1>비전 AI 실험실</h1>
+  <p class="sub">상세 이미지를 올리면 Groq 비전 모델이 읽은 결과를 이미지 옆에 보여 줍니다. 로컬 실험용이며 이미지는 저장하지 않습니다.</p>
+
+  <section class="panel">
+    <div class="row">
+      <input id="files" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+      <button id="sample" type="button">예시 이미지 만들기</button>
+      <span id="status" class="status">서버 확인 중…</span>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label>보내는 방법
+        <select id="mode">
+          <option value="whole">통째로(이미지 1장 = 1장)</option>
+          <option value="tiles">잘라서(타일)</option>
+        </select>
+      </label>
+      <label>지시
+        <select id="kind">
+          <option value="summary">항목 요약</option>
+          <option value="ocr">글자 그대로 읽기</option>
+        </select>
+      </label>
+      <label>최대 폭(px) <input id="maxWidth" type="number" value="1024" min="256" step="64"></label>
+      <label>타일 높이(px) <input id="tileHeight" type="number" value="1400" min="400" step="100"></label>
+      <button id="run" class="primary" type="button" disabled>분석하기</button>
+    </div>
+    <p class="meta">Groq 제한으로 한 번에 이미지 3장까지 보냅니다. 더 많으면 3장씩 나눠 여러 번 호출합니다. iPhone HEIC 사진은 PNG/JPEG로 바꿔 올려 주세요.</p>
+  </section>
+
+  <section id="results"></section>
+</main>
+<dialog id="zoom"><img alt="확대 이미지"></dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let sampleFile = null;
+let keyOk = false;
+
+fetch("/api/status").then((r) => r.json()).then((s) => {
+  keyOk = s.keyConfigured;
+  $("status").textContent = s.keyConfigured ? `키 확인됨 · 모델 ${s.models.join(", ")}` : "GROQ_API_KEY가 없습니다(서버 콘솔 확인)";
+  $("status").classList.toggle("bad", !s.keyConfigured);
+  updateRunButton();
+}).catch(() => { $("status").textContent = "서버 연결 실패"; $("status").classList.add("bad"); });
+
+function selectedFiles() {
+  const files = [...$("files").files];
+  return files.length ? files : sampleFile ? [sampleFile] : [];
+}
+function updateRunButton() { $("run").disabled = !keyOk || selectedFiles().length === 0; }
+$("files").addEventListener("change", () => { sampleFile = null; updateRunButton(); });
+
+function toJpeg(source, sx, sy, sw, sh, scale) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(sw * scale);
+  canvas.height = Math.round(sh * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  return { url: canvas.toDataURL("image/jpeg", 0.85), w: canvas.width, h: canvas.height };
+}
+
+async function prepare(file, mode, maxWidth, tileHeight) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, maxWidth / bmp.width);
+  const out = [];
+  if (mode === "whole") {
+    out.push({ ...toJpeg(bmp, 0, 0, bmp.width, bmp.height, scale), label: `${file.name} 전체` });
+  } else {
+    const srcTile = Math.round(tileHeight / scale);
+    const overlap = Math.round(80 / scale);
+    let y = 0, i = 1;
+    while (y < bmp.height) {
+      let h = Math.min(srcTile, bmp.height - y);
+      // 끝에 타일 높이의 40%보다 작게 남으면 따로 보내지 않고 이 조각에 붙인다.
+      if (bmp.height - (y + h) > 0 && bmp.height - (y + h) < srcTile * 0.4) h = bmp.height - y;
+      out.push({ ...toJpeg(bmp, 0, y, bmp.width, h, scale), label: `${file.name} 조각 ${i++}` });
+      if (y + h >= bmp.height) break;
+      y += srcTile - overlap;
+    }
+  }
+  out.forEach((o) => { o.orig = `${bmp.width}×${bmp.height}`; o.kb = Math.round(o.url.length * 0.75 / 1024); });
+  return out;
+}
+
+function el(tag, attrs = {}, text) {
+  const node = document.createElement(tag);
+  Object.assign(node, attrs);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+$("run").addEventListener("click", async () => {
+  const mode = $("mode").value, kind = $("kind").value;
+  const maxWidth = Number($("maxWidth").value), tileHeight = Number($("tileHeight").value);
+  $("run").disabled = true;
+  $("results").replaceChildren();
+  try {
+    const images = [];
+    for (const f of selectedFiles()) images.push(...await prepare(f, mode, maxWidth, tileHeight));
+    const batches = [];
+    for (let i = 0; i < images.length; i += 3) batches.push(images.slice(i, i + 3));
+    for (const [bi, batch] of batches.entries()) {
+      const card = el("section", { className: "panel" });
+      card.append(el("h2", {}, `호출 ${bi + 1}/${batches.length} · ${mode === "whole" ? "통째로" : "타일"} · ${kind === "ocr" ? "글자 그대로" : "항목 요약"}`));
+      const grid = el("div", { className: "batch" });
+      const thumbs = el("div", { className: "thumbs" });
+      for (const img of batch) {
+        const wrap = el("div");
+        const im = el("img", { src: img.url, alt: img.label });
+        im.addEventListener("click", () => { $("zoom").querySelector("img").src = img.url; $("zoom").showModal(); });
+        wrap.append(im, el("div", { className: "meta" }, `${img.label} · 원본 ${img.orig} → 보냄 ${img.w}×${img.h} · ${img.kb}KB`));
+        thumbs.append(wrap);
+      }
+      const out = el("div");
+      const pre = el("pre", {}, "분석 중…");
+      const meta = el("p", { className: "meta" });
+      out.append(pre, meta);
+      grid.append(thumbs, out);
+      card.append(grid);
+      $("results").append(card);
+      let res, data, waited = 0;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ images: batch.map((b) => b.url), kind }),
+        });
+        data = await res.json();
+        if (res.status !== 429 || !data.retryAfterSec) break;
+        for (let s = data.retryAfterSec; s > 0; s--) {
+          pre.textContent = `무료 한도(분당 입력 토큰) 대기 중… ${s}초`;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        waited += data.retryAfterSec;
+      }
+      if (!res.ok) { pre.textContent = `실패: ${data.error}`; pre.className = "err"; continue; }
+      pre.textContent = data.text || "(빈 답변)";
+      const u = data.usage || {};
+      meta.textContent = `${data.model} · ${(data.ms / 1000).toFixed(1)}초 · 입력 ${u.prompt_tokens ?? "?"} / 출력 ${u.completion_tokens ?? "?"} 토큰 · 종료 ${data.finishReason}${waited ? ` · 한도 대기 ${waited}초` : ""}`;
+    }
+  } catch (e) {
+    $("results").append(el("p", { className: "err" }, `오류: ${e.message}`));
+  } finally {
+    updateRunButton();
+  }
+});
+$("zoom").addEventListener("click", () => $("zoom").close());
+
+// 시험용 합성 상세 이미지(세로로 긴 쇼핑몰 상세 이미지 흉내). 실제 상품 아님.
+$("sample").addEventListener("click", () => {
+  const c = document.createElement("canvas");
+  c.width = 860; c.height = 4200;
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+  const blocks = [
+    ["#111", 54, "라이트하우스 무선 헤드셋 LH-200"],
+    ["#555", 28, "블루투스 5.4 · 노이즈 캔슬링 · 최대 40시간 재생"],
+    ["#000", 34, "색상 옵션: 블랙 / 화이트 / 네이비"],
+    ["#000", 30, "• 드라이버: 40mm 다이나믹"],
+    ["#000", 30, "• 무게: 250g"],
+    ["#000", 30, "• 충전 단자: USB-C, 10분 충전 시 5시간 사용"],
+    ["#000", 30, "• 지원 코덱: SBC, AAC"],
+    ["#000", 34, "구성품: 본체, USB-C 케이블, 휴대용 파우치, 설명서"],
+    ["#b3261e", 26, "주의: 귀에 이상이 느껴지면 즉시 사용을 중단하세요."],
+    ["#b3261e", 22, "※ 방수 기능이 없습니다. 비나 물에 닿지 않게 하세요."],
+    ["#999", 18, "작은 글씨 테스트: 본 제품은 KC 인증(R-C-LHX-LH200)을 받았습니다."],
+  ];
+  let y = 120;
+  for (const [color, size, text] of blocks) {
+    g.fillStyle = color; g.font = `${size >= 34 ? "bold " : ""}${size}px sans-serif`;
+    g.fillText(text, 40, y);
+    y += 340;
+  }
+  c.toBlob((blob) => {
+    sampleFile = new File([blob], "sample-headset.png", { type: "image/png" });
+    $("files").value = "";
+    $("status").textContent += " · 예시 이미지 준비됨(860×4200)";
+    updateRunButton();
+  }, "image/png");
+});
+</script>
+</body>
+</html>
