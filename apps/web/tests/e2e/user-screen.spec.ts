@@ -45,11 +45,9 @@ const questionHeading = (page: Page, n: 1 | 2 | 3) =>
 const summaryHeading = (page: Page) =>
   page.getByRole("heading", { level: 2, name: "요청 내용" });
 
-/** 이용자 화면(intro·질문·요약)은 영향도와 무관하게 axe 위반 0건이어야 한다. */
+/** 이용자 화면(intro·질문·요약)은 태그·영향도와 무관하게 axe 위반 0건이어야 한다. */
 async function expectNoBlockingAxe(page: Page) {
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-    .analyze();
+  const results = await new AxeBuilder({ page }).analyze();
   expect(
     results.violations.map((violation) => ({
       id: violation.id,

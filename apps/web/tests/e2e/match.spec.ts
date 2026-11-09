@@ -54,6 +54,17 @@ async function expectNoBlockingAxe(page: Page) {
   expect(blocking).toEqual([]);
 }
 
+/** 이용자 화면(플로우 A)은 태그·영향도와 무관하게 axe 위반 0건이어야 한다. */
+async function expectNoAxeViolations(page: Page) {
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(
+    results.violations.map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+    })),
+  ).toEqual([]);
+}
+
 async function openUserScreen(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
@@ -123,7 +134,7 @@ test.describe("매칭 흐름", () => {
     await expect(speechButton(page)).toHaveCount(0);
     await expect(confirmButton(page)).toHaveCount(0);
     await expect(matchButton(page)).toHaveCount(0);
-    await expectNoBlockingAxe(page);
+    await expectNoAxeViolations(page);
     await page.screenshot({ path: "test-results/match-done.png" });
   });
 
@@ -166,7 +177,7 @@ test.describe("매칭 흐름", () => {
     await expect(handoffButton(page)).toHaveCount(0);
     expect(await storedMatch(page)).toBeNull();
     expect(matchCalls).toEqual([]);
-    await expectNoBlockingAxe(page);
+    await expectNoAxeViolations(page);
 
     await answerFirstQuestion(page, PASS_SENTENCE);
     await expect(
