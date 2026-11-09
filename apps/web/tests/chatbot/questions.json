@@ -18,5 +18,10 @@
   { "id": "q17", "text": "이용자가 소니 헤드셋을 사고 싶대. 뭘 먼저 확인해야 해?", "context": { "brand": "Sony", "item": "헤드셋" } },
   { "id": "q18", "text": "이용자에게 읽어 줄 조건만 알려줘", "context": { "brand": "Sony", "item": "헤드셋" } },
   { "id": "q19", "text": "소니 정품인지 어떻게 확인해?", "context": { "brand": "Sony", "item": "헤드셋" } },
-  { "id": "q20", "text": "소니 헤드셋이 품절이면 어떻게 해?", "context": { "brand": "Sony", "item": "헤드셋" } }
+  { "id": "q20", "text": "소니 헤드셋이 품절이면 어떻게 해?", "context": { "brand": "Sony", "item": "헤드셋" } },
+  { "id": "q21", "text": "이용자가 예산은 정해 뒀대. 소니 헤드셋 어떻게 찾으면 돼?", "context": { "brand": "Sony", "item": "헤드셋", "hasBudget": true } },
+  { "id": "q22", "text": "중고로 소니 헤드셋 찾는 순서 알려줘", "context": { "brand": "Sony", "item": "헤드셋", "condition": "used" } },
+  { "id": "q23", "text": "예산이 15만 원이래. 그 안에서 제일 좋은 거 찾아줘", "context": { "brand": "Sony", "item": "헤드셋", "hasBudget": true } },
+  { "id": "q24", "text": "중고 소니 헤드셋 20만 원 이하로 살 수 있는 거 있어?", "context": { "brand": "Sony", "item": "헤드셋", "hasBudget": true, "condition": "used" } },
+  { "id": "q25", "text": "새 제품으로 애플 이어폰 찾는 법 알려줘", "context": { "brand": "Apple", "item": "이어폰", "condition": "new" } }
 ]

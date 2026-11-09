@@ -134,3 +134,45 @@ test("공개 주소 완주: 가짜 음성, 매칭, 이어 보기, 실제 Groq �
     ),
   ).toEqual([]);
 });
+
+// 블록 5(③): 선택 필드를 붙인 실제 Groq 호출 1회. 실행마다 유료 호출이 1회 든다.
+// 블록 5 코드가 배포된 주소에서만 뜻이 있다(블록 6 통합 배포 뒤 재완주).
+test.describe("③ 선택 필드 호출", () => {
+  test("hasBudget·condition을 붙여도 200이고 세 항목·답변 규칙 위반 0", async ({
+    request,
+  }) => {
+    test.setTimeout(60_000);
+    const entered = await request
+      .get(`/enter?code=${encodeURIComponent(readAccessCode())}`, {
+        maxRedirects: 0,
+      })
+      .catch(() => null);
+    const cookie = (entered?.headers()["set-cookie"] ?? "").split(";")[0];
+    expect(cookie.length, "접근 코드 쿠키").toBeGreaterThan(0);
+
+    const startedAt = Date.now();
+    const response = await request.post("/api/chat", {
+      headers: { cookie },
+      data: {
+        requestId: "6f1c2e4a-1111-4222-8333-444455556666",
+        question: "중고 소니 헤드셋 찾는 순서 알려줘",
+        context: {
+          brand: "Sony",
+          item: "헤드셋",
+          hasBudget: true,
+          condition: "used",
+        },
+      },
+      timeout: CHAT_TIMEOUT_MS,
+    });
+    expect(response.status()).toBe(200);
+    const text = (await response.text()).trim();
+    console.log(`③ 선택 필드 호출 ${Date.now() - startedAt}ms`);
+    for (const label of ["검색어:", "확인할 조건:", "찾는 순서:"]) {
+      expect(text).toContain(label);
+    }
+    const violations = checkAnswer(text);
+    console.log(`③ 답변 규칙 위반: ${JSON.stringify(violations)}`);
+    expect(violations).toEqual([]);
+  });
+});
