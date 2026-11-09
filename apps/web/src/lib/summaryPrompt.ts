@@ -15,7 +15,7 @@ export const SUMMARY_INSTRUCTIONS = [
   "원문에 있는 내용만으로 항목을 채워 JSON 객체 하나만 출력하라. 다른 글은 쓰지 않는다.",
   '형식: {"fields":[{"key":"productName","label":"상품명","value":"...","evidence":"..."}, ...]}',
   `key는 이 순서로 모두 넣는다: ${KEY_LIST}.`,
-  `evidence는 value의 근거가 되는 원문 구절을 글자 그대로 복사한다(${MAX_EVIDENCE_LENGTH}자 이하).`,
+  `evidence는 value의 근거가 되는 원문 구절을 글자 그대로 복사한다(${MAX_EVIDENCE_LENGTH}자 이하). value의 낱말은 모두 evidence 안에 있어야 한다.`,
   "원문에 없으면 value와 evidence를 모두 null로 둔다. 추측하거나 지어내지 않는다.",
   "가격, 재고, 할인 항목은 만들지 않는다. 원문에 가격이 있어도 넣지 않는다.",
 ].join("\n");

@@ -38,15 +38,14 @@ async function uploadLongImage(page: Page) {
   return buffer;
 }
 
+/** 봉사자 화면 axe 위반은 영향도와 상관없이 0건이어야 한다(위반 수를 출력에 남긴다). */
 async function expectNoBlockingAxe(page: Page) {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
     .analyze();
-  expect(
-    results.violations.filter(
-      (violation) => violation.impact === "critical" || violation.impact === "serious",
-    ),
-  ).toEqual([]);
+  const byImpact = results.violations.map((violation) => `${violation.id}:${violation.impact}`);
+  console.log(`axe 위반(전체 영향도): ${results.violations.length}건 ${byImpact.join(" ")}`);
+  expect(results.violations).toEqual([]);
 }
 
 test.describe("④ 상세 이미지 올리기·요약(가짜 응답 기준)", () => {
@@ -71,6 +70,12 @@ test.describe("④ 상세 이미지 올리기·요약(가짜 응답 기준)", ()
       await route.fallback();
     });
 
+    let summarizeCalls = 0;
+    await page.route("**/api/volunteer/summarize", async (route) => {
+      summarizeCalls += 1;
+      await route.fallback();
+    });
+
     await uploadLongImage(page);
     await expect(summaryStatus(page)).toHaveText(STATUS.reading);
     await expect(summaryStatus(page)).toHaveText(STATUS.arrived, { timeout: 60_000 });
@@ -81,6 +86,8 @@ test.describe("④ 상세 이미지 올리기·요약(가짜 응답 기준)", ()
     expect(posted.map((p) => p.pieceIndex)).toEqual(posted.map((_, i) => i));
     expect(new Set(posted.map((p) => p.pieceCount))).toEqual(new Set([posted.length]));
     expect(posted.every((p) => p.bytes <= 1.5 * 1024 * 1024)).toBe(true);
+    // 다 읽은 뒤 summarize는 한 번만 부른다.
+    expect(summarizeCalls).toBe(1);
 
     // 항목 이름, 값, 확인 필요 여부 순서. 근거가 원문에 없는 항목은 "확인 안 됨".
     await expect(fieldRow(page, "상품명")).toContainText("가짜 헤드셋 LH-200");

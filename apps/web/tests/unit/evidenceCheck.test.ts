@@ -62,6 +62,26 @@ describe("checkEvidence", () => {
     });
   });
 
+  it("근거가 원문에 있어도 값이 근거에 없으면(무관한 구절) unverified다", () => {
+    const draft = checkEvidence(
+      [
+        field("spec", "노이즈 캔슬링", "블루투스 5.3, 최대 30시간 재생"),
+        field("option", "블랙, 레드", "색상 옵션: 블랙, 화이트"),
+        field("productName", "LH-200", "상품명: 가짜 헤드셋 LH-200"),
+      ],
+      SOURCE,
+      { source: "ocr" },
+    );
+    expect(draft.fields.find((f) => f.key === "spec")).toMatchObject({
+      check: "unverified",
+      value: null,
+      evidence: null,
+    });
+    expect(draft.fields.find((f) => f.key === "option")?.check).toBe("unverified");
+    // 값의 낱말이 모두 근거에 있으면(일부만 옮겨도) matched다.
+    expect(draft.fields.find((f) => f.key === "productName")?.check).toBe("matched");
+  });
+
   it("값은 있는데 근거가 없으면 unverified다", () => {
     const draft = checkEvidence([field("caution", "물 주의", null)], SOURCE, {
       source: "ocr",
@@ -138,7 +158,7 @@ describe("checkEvidence", () => {
 
   it("근거는 200자로 자르고 못 읽은 조각 번호는 정렬해 남긴다", () => {
     const long = "가".repeat(250);
-    const draft = checkEvidence([field("caution", "긴 문장", long)], long, {
+    const draft = checkEvidence([field("caution", "가가가", long)], long, {
       source: "ocr",
       unreadable: [3, 1],
     });

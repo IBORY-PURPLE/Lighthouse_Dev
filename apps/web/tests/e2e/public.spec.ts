@@ -154,6 +154,7 @@ test("④ 올리기·요약 완주", async ({ page }) => {
   let engine: string | null = null;
   let llmMs: number | null = null;
   let summarizeStatus: number | null = null;
+  let summarizeCalls = 0;
   let draftBody: { fields: Array<{ key: string; label: string; check: string }> } | null = null;
   page.on("response", async (response) => {
     const url = response.url();
@@ -172,6 +173,7 @@ test("④ 올리기·요약 완주", async ({ page }) => {
       });
     }
     if (url.includes("/api/volunteer/summarize")) {
+      summarizeCalls += 1;
       summarizeStatus = response.status();
       const llmMatch = /llm;dur=(\d+)/.exec(timing);
       llmMs = llmMatch ? Number(llmMatch[1]) : null;
@@ -204,10 +206,11 @@ test("④ 올리기·요약 완주", async ({ page }) => {
   console.log(`조각 수: ${pieces.length}, 상태: ${pieces.map((p) => `${p.pieceIndex}:${p.status}`).join(" ")}`);
   console.log(`조각별 engine ms: ${pieces.map((p) => p.engineMs).join("/")}, 중앙값 ${median}`);
   console.log(`조각별 왕복 ms: ${pieces.map((p) => p.roundTripMs).join("/")}`);
-  console.log(`summarize: ${summarizeStatus}, llm ms: ${llmMs}`);
+  console.log(`summarize: 호출 ${summarizeCalls}회, 상태 ${summarizeStatus}, llm ms: ${llmMs}`);
   console.log(`전체 ms(올리기부터 초안까지): ${totalMs}`);
 
   expect(summarizeStatus).toBe(200);
+  expect(summarizeCalls).toBe(1);
   const fields = (draftBody as { fields: Array<{ key: string; label: string; check: string }> } | null)?.fields ?? [];
   console.log(`항목 수: ${fields.length}, 확인 안 됨: ${fields.filter((f) => f.check === "unverified").length}`);
   console.log(`항목(key/label/check): ${fields.map((f) => `${f.key}/${f.label}/${f.check}`).join(", ")}`);

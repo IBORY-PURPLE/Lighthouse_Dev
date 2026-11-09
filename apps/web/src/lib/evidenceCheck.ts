@@ -23,6 +23,18 @@ export function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+/**
+ * 값의 낱말이 모두 근거 안에 있는지 본다. 근거가 원문에 있어도 값과 무관한 구절이면
+ * 원문에 없는 값이 통과하므로, 값과 근거를 묶는다. 공백·문장부호 차이는 무시한다.
+ */
+export function valueFollowsEvidence(value: string, evidence: string): boolean {
+  const compactEvidence = normalizeText(evidence).replace(/\s+/g, "");
+  const words = normalizeText(value)
+    .split(/[\s,/·:;()[\]"'“”‘’]+/)
+    .filter((word) => word !== "");
+  return words.length > 0 && words.every((word) => compactEvidence.includes(word));
+}
+
 function overlapsLowConfidence(
   field: { value: string; evidence: string },
   lowConfidence: readonly string[],
@@ -71,8 +83,12 @@ export function checkEvidence(
 
     const evidence = raw.evidence?.trim() ?? "";
     const normalizedEvidence = normalizeText(evidence);
-    if (!normalizedEvidence || !normalizedSource.includes(normalizedEvidence)) {
-      // 원문에 없는 근거는 지어냈을 수 있으므로 값도 근거도 보여 주지 않는다.
+    if (
+      !normalizedEvidence ||
+      !normalizedSource.includes(normalizedEvidence) ||
+      !valueFollowsEvidence(raw.value, evidence)
+    ) {
+      // 원문에 없는 근거, 또는 값이 근거에 없는 경우는 지어냈을 수 있으므로 값도 근거도 보여 주지 않는다.
       return {
         key,
         label,
