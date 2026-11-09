@@ -256,7 +256,7 @@ db push 허락: 예
 PR: 새 PR 없음. 문서 PR #26(`docs/overnight-1109`)에 보고 보완 커밋을 더함, 실패 횟수: 0
 확인: PR #21~#26 6개 열림·모두 `hold-morning`(gh pr list). Vercel `dpl_99Xdw…` READY·production·`975d673`·별칭 lighthouse-web-five·iad1, 이보다 새 production 배포 없음(list_deployments). OpenAI 가격표에서 luna는 `gpt-6-luna`·`gpt-5.6-luna` 둘이고 `gpt-6-luna`가 더 쌈. `codex.exe`·stash 없음. 작업 트리는 밤 전 변경만.
 정리: 블록 2가 남긴 로컬 `next start -p 3200`(PID 38196·30624, 01:38 시작)을 멈춤.
-실패로 세지 않은 것: 04:16 커밋 명령이 안전 훅에 막힘("커밋 대상 폴더를 확인하지 못함", 저장소 경로를 셸 변수 `git -C $R`로 넘김) → 저장소 폴더에서 경로 인자 없는 일반 `git add`·`git commit`으로 다시 함
+실패로 세지 않은 것: 04:15 커밋 명령이 안전 훅에 막힘("커밋 대상 폴더를 확인하지 못함", 저장소 경로를 셸 변수 `git -C $R`로 넘김) → 저장소 폴더에서 경로 인자 없는 일반 `git add`·`git commit`으로 다시 함
 결정:
 - 블록 6 독립 점검(보고를 쓴 뒤 돎)을 `morning-report.md`에 덧붙임: 첫 문단과 1절 주의(PR #25가 `test:chatbot` 실패 상태로 production에 들어감), 6절 블록 6 끝 시각 04:03과 토큰, 10절 10·11, 독립 점검 보통 1행·사소 1줄, 끝 절 "메인 세션 확인".
 - 블록 6 충돌 풀이 스크립트 `resolve2.py`·`resolve3.py`(메인 세션 scratchpad)를 열어 봄: `public.spec.ts`·`CLAUDE.md` 충돌 표식만 풂. 훅 차단 뒤 다른 경로라 사람 결정(보고 10절 11).
