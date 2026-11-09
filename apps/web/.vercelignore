@@ -10,3 +10,4 @@ tests
 playwright.config.ts
 vitest.config.mts
 vitest.chatbot.config.mts
+experiments
