@@ -134,3 +134,33 @@ PR: #22 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/22 (base `stage/demo
 db push 허락: 예
 통합 배포 푸시 허락: 예
 토큰: 미측정, 예상 대비 미측정
+
+## 02:58 블록 3 플로우 A PR 1 질문 3개
+상태: 미완료(Codex 3회 미통과로 멈춤: axe 범위 지적 3회째. 기능 시험은 모두 통과)
+PR: #23 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/23 (base `stage/demo1`, head `feat/demo1/questions` `eee9ed3`, 라벨 `hold-morning`), 실패 횟수: 4
+시작 02:02 워크플로(끝 상한 03:12 = min(02:02+70, 05:40), 작업 멈춤 03:02. 실제 끝 02:58)
+실패 목록:
+- 02:14 `npm run test:e2e`(커밋 전) 71/76 — 매칭 요청 버튼 초점 단언 5건(WebKit은 누른 버튼에 초점을 주지 않음) → onClick에서 버튼에 초점
+- 02:25 Codex 1차(`cf11170`) 미통과, 심각 2: 답하는 동안 네트워크 검사가 `/api/**`만 봄 / axe가 critical·serious만 → `page.route("**/*")` 전체 기록, 이용자 화면 axe 위반 전체 0건
+- 02:46 Codex 2차(`6241773`) 미통과, 심각 1: axe가 WCAG 태그 한정, match.spec 연결 화면은 critical·serious만 → 이용자 화면 axe 태그 제한 없이 0건(user-screen 전체, match.spec 이용자 화면 2곳)
+- 02:57 Codex 3차(`eee9ed3`) 미통과, 심각 1: 봉사자 화면·챗봇 axe(`match.spec.ts:46`, `chat.spec.ts:42`의 기존 함수)가 태그·critical/serious 한정이라 "각 화면 axe 0건" 판정 불가(실제 위반 발견 아님) → axe 관련 3회째라 멈춤, 미수정
+실패로 세지 않은 것: 02:35 Codex 2차 첫 실행이 stdin 대기로 10분 넘게 멈춤(판정 전 중지, `< /dev/null`로 다시 실행). 이때 남은 codex.exe 프로세스가 있을 수 있음(종료 확인 못 함).
+검증(`eee9ed3`): `npm run check` 종료 0(unit 175/175), `npm run test:e2e` 종료 0(76/76, chat.spec 20/20, 가짜 음성 입력·가짜 응답 기준). 이용자 화면 axe 태그·영향도 무관 위반 0건. 답하는 동안 모든 요청 0건(`page.route("**/*")`). C13 diff(`prompt.ts`·`chat.ts`·`api/chat`) 0줄. Codex 미통과 3회(PR 댓글 3개, 시험 기록 판정). 스크린샷 2장(evidence/23/user-question-1.png, user-summary.png). 비밀·접근 코드 패턴 검사 0건. `git ls-files test-results` 0개. `test:public` 안 돌림(배포 없음, `public.spec.ts`는 경로만 `completeFlowA`로 바꿈 → 블록 4가 처음 실행).
+배포: 없음(블록 3은 배포하지 않음)
+결정:
+- 화면: intro(h1, 안내, 시작하기) → 질문 h2 "질문 N/3. …"(초점) → 음성 확인 "다음 질문"/"완료"·"다시 말하기", 입력창 확인 "입력한 내용: …"·"다시 입력" → 요약 h2 "요청 내용", 목록 3줄, "봉사자 매칭 요청" → 기존 `requestMatch(제품 답)` → `saveMatch` → DemoHandoff. 입력창 이름은 "찾는 제품"/"예산"/"새 제품 또는 중고".
+- `requestFlow.ts` 상태: `intro|asking|summary|matching|connected`, `question 0|1|2`, `answers{product,budget,condition}`, `inputMode`, `status`. 블록 4는 `summary` 다음을 `registering/queued`로 바꾸고 `checking`을 더한다. `checkAnswer`(200자, 질문 1 품목)는 기기 안.
+- `speech.ts`: STATUS 끝에 `typedBack`, `needProduct`, `answerTooLong`, `summary` 4개(블록 4는 이 뒤에 붙인다. 단위 시험이 키 순서를 단언하므로 블록 4는 `speech.test.ts`의 `keys.slice(18)` 기대값에 새 키를 덧붙여야 한다). 액션 `reset`(text면 `fellBack: true`), `typed`, `reenter`. 동작 변경 2개: `unavailable`은 text+fellBack이면 무시, `matchRejected`는 fellBack이면 입력창으로(챗봇에서는 생기지 않는 조건).
+- e2e 도우미 `tests/e2e/helpers/flowA.ts`: `answerFlowA(page, answers?)`(요약까지), `completeFlowA(page, answers?, {timeout})`(이어 보기 버튼까지), `DEFAULT_ANSWERS`, `MATCH_REQUEST_NAME`. 블록 4는 `completeFlowA`가 대기번호 화면을 거치도록 고치면 chat.spec·public.spec이 따라간다.
+- match.spec의 품목 없음·201자 사례는 서버 422/400 대신 질문 1 기기 안 검사를 단언(PR "시험 변경"). 서버 계약 사례는 그대로.
+- 판정 문구: `보류(이유: 실패 4회 — 개발 중 e2e 실패 1회, Codex 미통과 3회(axe 범위). 같은 실패 3회로 멈춤, Codex 통과 없음(미완료). 훅 guard.js:158 때문에도 사람 병합)`.
+- 단계 PR 안 엶(훅 수정 허락 아니오). `bd ready`: 열린 이슈 없음.
+다음 할 일: 블록 4 플로우 A PR 2 대기열 접수(`feat/demo2/queue`). PR #23이 보류이고 블록 4가 그 코드에 의존하므로 `github/feat/demo1/questions`에서 따고 base를 그 브랜치로(블록 4 분기 표). 아침: 봉사자 화면·챗봇 axe를 전체 위반 0건으로 넓힐지 결정(PR #22 match.spec 변경과 겹침) 뒤 Codex 재판정, 실기기 VoiceOver(C9).
+호출: luna 0장(누계 24/500), Upstage 0장(누계 0/500), Groq qwen 0회(누계 18), Groq gpt-oss 0회(누계 13/200)
+시작 브랜치 분기 근거: 블록 3은 앞 블록 의존 없음(4절 표) → `stage/demo1`을 `github/main`(`a4fdd26`)에서 새로 만들어 푸시하고 `feat/demo1/questions`를 땀
+다음 블록: 4
+이어 달리기 명령: 메인 세션 local_317d473e-56b7-4ce2-8976-dfd8dfcb2955의 Workflow 스크립트 overnight-1109가 블록 에이전트를 차례로 띄운다(블록 에이전트는 3.5의 6에서 block-<M>.started만 만들고 자식을 띄우지 않으며, 7을 하지 않는다)
+훅 수정 허락: 아니오
+db push 허락: 예
+통합 배포 푸시 허락: 예
+토큰: 미측정, 예상 대비 미측정
