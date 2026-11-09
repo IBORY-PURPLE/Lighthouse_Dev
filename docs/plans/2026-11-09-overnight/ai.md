@@ -641,10 +641,10 @@ human.md:46, 92, 133을 따른다. 단 46행의 "유료 모델"은 결정 9(1.5�
 
 | 날짜 | 단계 | 결과 | 근거 |
 |---|---|---|---|
-| 11/9 | 블록 0 사전 점검 | | |
-| 11/10 | 블록 1 비전 실험 | | |
-| 11/10 | 블록 2 ④ 올리기·요약 | | |
-| 11/10 | 블록 3 플로우 A 질문 3개 | | |
-| 11/10 | 블록 4 플로우 A 대기열 접수 | | |
-| 11/10 | 블록 5 ③ 탐색 조언(조건부) | | |
-| 11/10 | 블록 6 마무리 | | |
+| 11/9 | 블록 0 사전 점검 | 완료(00:17~00:38). 세 허락: 훅 아니오, db push 예, 통합 배포 푸시 예. 캡처 없음 → 합성 이미지. 이어 달리기 워크플로 방식 | progress.md 블록 0 |
+| 11/10 | 블록 1 비전 실험 | 미완료(00:53~01:17). PR #21 hold-morning, 실패 3(Codex 3회), 1위 `gpt-6-luna`(합성 1개, C6 미완료) | progress.md 블록 1, PR #21, results-vision.md(`feat/demo4/experiment`) |
+| 11/10 | 블록 2 ④ 올리기·요약 | 완료(01:17~02:02, C7 합성 이미지라 미완료). PR #22 hold-morning, 실패 7, Codex 3차 통과 | progress.md 블록 2, PR #22 |
+| 11/10 | 블록 3 플로우 A 질문 3개 | 미완료(02:02~02:58). PR #23 hold-morning, 실패 4(Codex 3회 axe 범위) | progress.md 블록 3, PR #23 |
+| 11/10 | 블록 4 플로우 A 대기열 접수 | 완료(02:58~03:27). PR #24 hold-morning(#23 위에 쌓임), 실패 1, Codex 1차 통과, db push 적용 | progress.md 블록 4, PR #24 |
+| 11/10 | 블록 5 ③ 탐색 조언(조건부) | 실행, 미완료(03:27~03:50). PR #25 hold-morning, 실패 4(실제 Groq v1 질문 위반) | progress.md 블록 5, PR #25 |
+| 11/10 | 블록 6 마무리 | 완료(03:50~). 통합 배포 `deploy/overnight-1109` `975d673` → production `dpl_99XdwEoqBP8gk5WgfhbhofMLmBhZ`, check 293/293·e2e 93/93·public 5/5, morning-report.md | progress.md 블록 6, morning-report.md |
