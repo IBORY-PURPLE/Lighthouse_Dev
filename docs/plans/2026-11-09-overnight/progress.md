@@ -99,3 +99,38 @@ PR: #21 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/21 (base `stage/demo
 db push 허락: 예
 통합 배포 푸시 허락: 예
 토큰: 미측정, 예상 대비 미측정
+
+## 02:02 블록 2 ④ 올리기·요약
+상태: 완료(C7은 미완료: 실제 캡처 없음, 합성 이미지로 완주)
+PR: #22 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/22 (base `stage/demo4`, head `feat/demo4/upload-summary` `9bd0e87`, 라벨 `hold-morning`), 실패 횟수: 7
+시작 01:17 워크플로(끝 상한 03:47 = min(01:17+150, 04:30), 작업 멈춤 03:37. 실제 끝 02:02)
+실패 목록:
+- 01:26 `npx vitest run tests/unit`(커밋 전) routes.test.ts health 2건 — 기대값 갱신 치환이 CRLF로 적용 안 됨
+- 01:34 `npm run test:e2e`(`317803f`) 77/78 — match.spec.ts:341 봉사자 화면 input·textarea 0개 기대 vs ④ 파일 선택 1개 → 시험을 "정확히 1개, type=file, 라벨 상세 이미지 올리기"로 바꿈(PR "시험 변경")
+- 01:38 `vercel deploy --prod --yes`(apps/web) 종료 1 — 프로젝트 Root Directory가 `apps/web`라 `apps/web/apps/web` 경로 없음
+- 01:42 Codex 1차(`18d1c12`) 미통과, 심각 2: 값과 무관한 근거도 matched / axe 전체 0건 판정 불가 → 값 낱말이 근거에 모두 있어야 matched, axe 전체 영향도 0건 단언
+- 01:45 `npx eslint`(커밋 전) prefer-const 1건 — 편집 치환 미적용
+- 01:53 Codex 2차(`784f401`) 미통과, 심각 2: 부분 문자열 검사로 30시간이 130시간에 걸림 / 200자 넘는 근거 → 낱말 경계 검사, 200자 넘는 근거 unverified
+- 01:57 `npx vitest run tests/unit`(커밋 전) evidenceCheck.test.ts 구문 오류 — 편집 스크립트 이스케이프 실수
+실패로 세지 않은 것: 01:30 스테이징 이름 검사 grep 패턴에 키 파일 이름 글자 → 안전 훅 차단(우회 없이 패턴 없이 확인)
+검증(`9bd0e87`): `npm run check` 종료 0(unit 217/217), `npm run test:e2e` 종료 0(78/78, 가짜 음성 입력·가짜 응답 기준, 봉사자 화면 axe 위반 전체 영향도 0건), `test:public` 종료 0(4/4). Codex 3차 통과(심각 0, PR 댓글 3개, 시험 기록 판정). 스크린샷 2장(evidence/22/synthetic-summary.png, synthetic-manual.png, 합성). C10 grep 0건. 비밀·접근 코드 패턴 검사 0건. `git ls-files test-results` 0개.
+배포: Vercel API Git 소스 배포(`feat/demo4/upload-summary` `9bd0e87`, target production, 프로젝트 lighthouse-web) `dpl_2QjgKtJNFqpTAN6oQUdi5GyJBML5` → https://lighthouse-web-five.vercel.app 별칭 확인. health `extractEngine=openai`, `groqKeyConfigured=true`. CLI 배포는 Root Directory 때문에 실패했고, 저장소 루트 CLI 배포는 추적 안 된 파일(키 파일, test-results)이 올라갈 위험이 있어 하지 않음. 프로젝트 설정·환경 변수 안 바꿈. Vercel `OPENAI_API_KEY`는 `vercel env ls`로 이름만 확인(production·preview·development).
+공개 완주(C7·C15 AI 쪽, **실제 캡처 없음, 합성 이미지로 완주**): 엔진 `gpt-6-luna`, 조각 4(모두 200), engine ms 1906/3057/2174/1771(중앙값 2174), 왕복 ms 3460/4229/3538/3241, summarize 1회 llm 2040ms, 올리기→초안 17,964ms, 항목 5·확인 안 됨 0, key·label 가격·재고·할인 0건. Supabase 시간은 해당 없음(블록 4).
+결정:
+- 엔진 순서 mock(운영 아님+`EXTRACT_MODE=mock`) → openai → upstage → null. 요약은 Groq gpt-oss-120b JSON 모드(블록 1 요약 429 0회), 상한 4,000자, 넘으면 화면 안내 후 앞부분만.
+- summarize 요청에 선택 칸 `lowConfidence`·`unreadable` 추가(TSD 밖, PR 본문).
+- ④ 낭독 영역은 `aria-live` 문단(role=status 아님): 봉사자 화면에 role=status가 둘이면 chat.spec의 `getByRole("status")`가 깨짐.
+- 근거 대조는 보수적: 근거가 원문에 낱말 경계로 있고, 값의 낱말이 모두 근거에 있어야 matched. 200자 넘는 근거는 unverified. 아침에 실제 요약의 "확인 안 됨" 비율을 보고 조정 여부 결정.
+- Vercel Root Directory가 `apps/web`로 바뀌어 있음(11/4 기록 `.`). 블록 4·6도 CLI 배포가 같은 오류를 낼 것 → 같은 Git 소스 배포 방식(브랜치를 원격에 푸시한 뒤 그 커밋을 production으로)을 쓰면 된다. 아침 보고 대상.
+- `experiments/`는 `stage/demo4`의 `.vercelignore`에 없어 배포에 포함됨(블록 1 PR #21이 추가).
+- 판정 문구: `보류(이유: 실패 7회 — 개발 중 시험·검사 실패 4회, 배포 실패 1회, Codex 미통과 2회. 훅 guard.js:158 때문에도 사람 병합)`.
+- `bd ready`: 열린 이슈 없음.
+다음 할 일: 블록 3 플로우 A PR 1 질문 3개(`feat/demo1/questions` ← `stage/demo1` ← `github/main`). 아침: 실제 캡처로 ④ 재완주(C7), 아이폰 실기기 파일 선택·자르기 확인.
+호출: luna 12장(누계 24/500), Upstage 0장(누계 0/500), Groq qwen 0회(누계 18), Groq gpt-oss 6회(누계 13/200)
+시작 브랜치 분기 근거: 블록 1이 `apps/web/src`·`tests`를 바꾸지 않아(progress 블록 1, C5 diff 0) `github/stage/demo4`(`a4fdd26`)에서 시작
+다음 블록: 3
+이어 달리기 명령: 메인 세션 local_317d473e-56b7-4ce2-8976-dfd8dfcb2955의 Workflow 스크립트 overnight-1109가 블록 에이전트를 차례로 띄운다(블록 에이전트는 3.5의 6에서 block-<M>.started만 만들고 자식을 띄우지 않으며, 7을 하지 않는다)
+훅 수정 허락: 아니오
+db push 허락: 예
+통합 배포 푸시 허락: 예
+토큰: 미측정, 예상 대비 미측정
