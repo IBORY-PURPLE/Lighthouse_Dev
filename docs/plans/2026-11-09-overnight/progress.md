@@ -68,3 +68,34 @@ db push 허락: 예
 토큰: 미측정, 예상 대비 미측정
 추가 00:38 이용자: Vercel `OPENAI_API_KEY`를 production·preview·development에 등록함(이용자 화면 캡처로 확인, 값은 보지 않음. 블록 2는 배포 전 `vercel env ls`로 이름만 다시 본다).
 추가 00:38 이용자 결정: 테스트(블록 1 실험, 블록 2·6 공개 완주)의 OpenAI 엔진은 **가장 저렴한 luna 모델**로 한다. 블록 1이 OpenAI 모델 목록(`GET /v1/models`, 키는 실험 서버 쪽 코드가 읽는다)과 공식 가격 페이지로 luna 계열 중 가장 싼 모델 ID를 확정해 결과표·진행 기록에 적고, 블록 2는 그 ID를 쓴다. 확정하지 못하면 결정 9의 `gpt-5.6-luna`. Groq qwen은 무료 비교 기준선으로 유지(C6 엔진 2개).
+
+## 01:17 블록 1 비전 실험
+상태: 미완료(Codex 3회 미통과로 멈춤, C6 정답 메모 없음)
+PR: #21 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/21 (base `stage/demo4`, head `feat/demo4/experiment` `ab6447a`, 라벨 `hold-morning`), 실패 횟수: 3
+시작 00:53 워크플로(작업 메모 기준 끝 상한 02:00, 작업 멈춤 01:50. 실제 끝 01:17)
+실패 목록:
+- 01:07 Codex 1차(`484c63e`) 미통과, 심각 3: C6 정답 메모 상품 3개 미달 / 키 비노출이 접두사 가림뿐 / 재시작 간 호출 상한 취약 → 실제 키 값 가림, 호출 전 임시 기록으로 고침
+- 01:12 Codex 2차(`cb6707a`) 미통과, 심각 3: C6 미달(반복) / 로그에 검증 안 된 kind / 예산 검사에 OpenAI 재시도 미반영 → 고침
+- 01:15 Codex 3차(`ab6447a`) 미통과, 심각 3: C6 미달(3회째) / 화면 429 재시도까지 합치면 실행기 예약량 초과 가능(서버 500 거부는 유지) / 겹침 ≥ 타일 높이 입력 시 자르기 반복 무한 → 같은 실패 3회로 멈춤, 코드 지적 2건은 미수정
+실패로 세지 않은 것: 00:54 `openai/package.json` 버전 조회 명령의 exports 오류(검사·시험·빌드 아님)
+검증: `npm run check` 종료 0(unit 160/160) 3개 커밋 모두(`test-results/21-check.txt` = `ab6447a`). `test:e2e` 안 돌림(C5, src·tests diff 0줄). axe 해당 없음. Codex 미통과 3회(PR 댓글 3개, 시험 기록 판정). 스크린샷 https://github.com/IBORY-PURPLE/Lighthouse_Dev/blob/evidence/21/synthetic-vision-lab.png (합성). 비밀·접근 코드 패턴 검사 0건. `git ls-files test-results` 0개. 실험 서버(포트 4310, 다른 프로세스 없음)는 3회 띄우고 모두 종료 확인.
+배포: 없음(블록 1은 배포하지 않음)
+결정:
+- **OpenAI 엔진 모델 `gpt-6-luna`로 확정**(이용자 결정 00:38 "가장 저렴한 luna"). 근거: 실험 서버 `/api/openai-models`(OpenAI `GET /v1/models`, luna ID만) → `gpt-5.6-luna`, `gpt-6-luna`. 공식 가격표 https://developers.openai.com/api/docs/pricing (2026-11-10): `gpt-6-luna` 입력 $0.10/출력 $0.50, `gpt-5.6-luna` $0.20/$1.20 per 1M. 블록 2 `extract.ts`는 이 ID를 쓴다.
+- `gpt-6-luna`는 Chat Completions `image_url.detail: "original"`과 `reasoning_effort: "none"`을 거부 없이 받았다(`openai` 7.53.0, `dependencies`).
+- 결과(합성 LH-200 1개, 정답 메모 없음, 잠정): 1위 `gpt-6-luna` 15/15(100%), Groq qwen 11/15(73%, "방수"→"방송" 등 오독), 지어냄 둘 다 0. 전체 ms 중앙값 luna 13,018 / qwen 51,512(429 대기 포함). 통째·1200·800 모두 luna 정답 → 조각 높이 1,200 유지. 블록 2 기본 엔진은 OpenAI `gpt-6-luna`.
+- Groq: qwen 429 7회(대기 후 성공), 503 over capacity 1회(조각 1장 실패). 요약 `gpt-oss-120b` 7회, 429 0회.
+- C6 미완료(정답 메모 상품 3개 없음). 아침 보고 첫 줄 대상. Upstage 키 없음 → 미실행.
+- 근거 대조(`checkEvidence`): 근거가 원문에 없으면 `value: null`, `check: unverified`. 실제로 qwen 타일 800 사양 항목이 대조로 null이 됐다(블록 2 `evidenceCheck.ts` 초안).
+- 판정 문구: `보류(이유: 실패 3회 — Codex 미통과 3회 …, 같은 실패 3회로 멈춤. 훅 guard.js:158 때문에도 사람 병합)`.
+- `bd ready`: 열린 이슈 없음.
+다음 할 일: 블록 2 ④ 올리기·요약(`feat/demo4/upload-summary`). 엔진 `gpt-6-luna`. 블록 1 코드에 의존하지 않으면 `stage/demo4`에서 시작. 아침: 실제 캡처·정답 메모로 `run.mjs` 재실행, Codex 3차 코드 지적 2건(겹침 입력 검증, 429 재시도 예산 예약) 반영 여부.
+결과표 위치: feat/demo4/experiment
+호출: luna 12장(누계 12/500), Upstage 0장(누계 0/500), Groq qwen 18회(누계 18), Groq gpt-oss 7회(누계 7/200)
+시작 브랜치 분기 근거: 블록 0이 만든 `feat/demo4/experiment`(← `stage/demo4` = `a4fdd26`)에서 이어서 작업
+다음 블록: 2
+이어 달리기 명령: 메인 세션 local_317d473e-56b7-4ce2-8976-dfd8dfcb2955의 Workflow 스크립트 overnight-1109가 블록 에이전트를 차례로 띄운다(블록 에이전트는 3.5의 6에서 block-<M>.started만 만들고 자식을 띄우지 않으며, 7을 하지 않는다)
+훅 수정 허락: 아니오
+db push 허락: 예
+통합 배포 푸시 허락: 예
+토큰: 미측정, 예상 대비 미측정
