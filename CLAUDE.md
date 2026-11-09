@@ -12,6 +12,7 @@
 | `apps/web/src/lib/` | 서버 공용 코드(`access.ts`, `volunteers.ts`, `llm.ts`, `rateLimit.ts`), 챗봇 지시문(`prompt.ts`), 문장 분석(`parseRequest.ts`), 브라우저 음성 입력(`speech.ts`), 매칭 호출과 시연 이어 보기(`matchHandoff.ts`), 챗봇 호출(`chat.ts`), 답변 규칙 검사(`answerRules.ts`, 시험 전용) |
 | `apps/web/public/speech-probe/` | 0블록 음성 시험 정적 페이지(`/speech-probe/`) |
 | `apps/web/tests/{unit,e2e,chatbot}/` | Vitest 단위, Playwright 화면(가짜 음성: `e2e/helpers/fakeSpeech.ts`), 챗봇 고정 질문 |
+| `apps/web/experiments/vision/` | 비전 AI 육안 확인용 로컬 실험 서버(`server.mjs`, `index.html`). 제품 코드 아님, 배포하지 않음 |
 | `docs/plans/<날짜>-<이름>/` | 계획. `human.md`(사람용), `ai.md`(실행 기준), `progress.md`(진행 기록), `morning-report.md`(아침 보고) |
 | `docs/plans/2026-11-03-iphone-mvp/human.md` | 전체 개발 계획 |
 | `docs/TSD.md` | 기술 설계서 |
