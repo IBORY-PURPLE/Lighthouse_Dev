@@ -9,6 +9,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { InfoSummary } from "@/components/InfoSummary";
 import { StatusRegion } from "@/components/StatusRegion";
 import { VolunteerChat } from "@/components/VolunteerChat";
 import {
@@ -86,6 +87,12 @@ export default function VolunteerPage() {
             match={match}
             model={chatModel}
             dispatch={chatDispatch}
+          />
+          <h2 className="info-summary-title">상세 이미지 요약</h2>
+          <InfoSummary
+            requestId={match.requestId}
+            volunteerId={match.volunteer.id}
+            product={match.request.raw}
           />
         </>
       )}
