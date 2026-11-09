@@ -35,6 +35,12 @@ export const STATUS = {
   questionTooLong: "질문이 너무 깁니다. 짧게 다시 말해 주세요.",
   chatFailed: "답변 서버에 연결하지 못했습니다. 다시 시도해 주세요.",
   chatNotConfigured: "챗봇 설정이 끝나지 않았습니다.",
+  typedBack: (text: string) => `입력한 내용: ${text}`,
+  needProduct:
+    "어떤 제품인지 알아듣지 못했습니다. 제품 이름을 넣어 다시 말씀하세요.",
+  answerTooLong: "답이 너무 깁니다. 짧게 다시 말씀하세요.",
+  summary: (product: string, budget: string, condition: string) =>
+    `요청 내용입니다. 제품 ${product}. 예산 ${budget}. ${condition}. 맞으면 봉사자 매칭 요청 버튼을 누르세요.`,
 } as const;
 
 /** 입력창으로 바로 가는 오류. 그 밖의 오류는 못 들은 것으로 친다. */
@@ -79,7 +85,13 @@ export type SpeechInputAction =
   /** 봉사자 화면: 답변을 받았다. 초점은 답변 영역으로 가므로 입력 쪽에서 옮기지 않는다. */
   | { type: "answered"; status: string }
   | { type: "matchRejected"; status: string }
-  | { type: "matchFailed"; status: string };
+  | { type: "matchFailed"; status: string }
+  /** 이용자 질문 흐름: 질문이 바뀌면 새 질문의 시작 방식으로 처음부터. */
+  | { type: "reset"; mode: InputMode }
+  /** 입력창 답도 바로 보내지 않고 확인 단계를 거친다. */
+  | { type: "typed"; text: string }
+  /** 입력창 답 확인에서 "다시 입력". */
+  | { type: "reenter" };
 
 export function createInitialModel(mode: InputMode): SpeechInputModel {
   return {
@@ -123,7 +135,8 @@ export function speechInputReducer(
         : { ...model, state: "idle", misses, status: STATUS.missed };
     }
     case "unavailable":
-      return fallBack(model);
+      // 입력창으로 시작한 질문에서 같은 안내를 다시 읽지 않는다.
+      return model.state === "text" && model.fellBack ? model : fallBack(model);
     case "submit":
       return {
         ...model,
@@ -150,10 +163,11 @@ export function speechInputReducer(
         status: STATUS.connected(action.volunteerName),
       };
     // transcript가 있으면 음성으로 낸 요청이고, 없으면 입력창으로 낸 요청이다.
+    // 입력창 답을 확인 단계에 올렸으면(fellBack) transcript가 있어도 입력창으로 돌아간다.
     case "matchRejected":
       return {
         ...model,
-        state: model.transcript ? "idle" : "text",
+        state: model.transcript && !model.fellBack ? "idle" : "text",
         transcript: "",
         status: action.status,
         refocus: "reenter",
@@ -164,6 +178,24 @@ export function speechInputReducer(
         state: model.transcript ? "confirming" : "text",
         status: action.status,
         refocus: "resend",
+      };
+    case "reset":
+      return { ...createInitialModel(action.mode), fellBack: action.mode === "text" };
+    case "typed":
+      return {
+        ...model,
+        state: "confirming",
+        transcript: action.text,
+        status: STATUS.typedBack(action.text),
+        refocus: null,
+      };
+    case "reenter":
+      return {
+        ...model,
+        state: "text",
+        transcript: "",
+        status: "",
+        refocus: "reenter",
       };
   }
 }

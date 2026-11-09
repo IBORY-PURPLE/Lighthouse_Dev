@@ -5,6 +5,7 @@ import { expect, test } from "@playwright/test";
 import { checkAnswer } from "../../src/lib/answerRules";
 import { MATCH_TIMEOUT_MS } from "../../src/lib/matchHandoff";
 import { installFakeSpeech, say } from "./helpers/fakeSpeech";
+import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
 
 // 접근 코드는 저장소 루트 .demo-access.local의 첫 줄에서만 읽는다.
 function readAccessCode(): string {
@@ -82,11 +83,11 @@ test("공개 주소 완주: 가짜 음성, 매칭, 이어 보기, 실제 Groq �
   expect(new URL(page.url()).pathname).toBe("/");
   await shot("user-first-screen");
 
-  await page.getByRole("button", { name: "눌러서 말하기" }).click();
-  await say(page, "sony껄로 헤드셋 사고싶어");
-  await page.getByRole("button", { name: "이대로 요청" }).click();
+  await completeFlowA(page, DEFAULT_ANSWERS, {
+    timeout: MATCH_TIMEOUT_MS + 5_000,
+  });
   const handoff = page.getByRole("button", { name: "봉사자 화면으로(시연)" });
-  await expect(handoff).toBeFocused({ timeout: MATCH_TIMEOUT_MS + 5_000 });
+  await expect(handoff).toBeFocused();
   await shot("match-done");
 
   await handoff.click();

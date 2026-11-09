@@ -8,6 +8,7 @@ import {
 } from "@playwright/test";
 import { E2E_ACCESS_CODE } from "../../playwright.config";
 import { fail, installFakeSpeech, say } from "./helpers/fakeSpeech";
+import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
 
 // 전부 가짜 음성 입력과 가짜 답변(LLM_MODE=mock) 기준이다.
 // 실제 음성 인식, VoiceOver 낭독, 실제 Groq 답변은 여기서 판정하지 않는다.
@@ -65,9 +66,7 @@ async function openVolunteer(page: Page) {
   expect(access).toBeDefined();
   if (access) await context.addCookies([{ ...access, secure: false }]);
 
-  await page.getByRole("button", { name: "눌러서 말하기" }).click();
-  await say(page, REQUEST_SENTENCE);
-  await page.getByRole("button", { name: "이대로 요청" }).click();
+  await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
   const handoff = page.getByRole("button", { name: "봉사자 화면으로(시연)" });
   await expect(handoff).toBeFocused();
   await handoff.click();
@@ -424,9 +423,7 @@ test.describe("역할 분리", () => {
     );
     if (access) await context.addCookies([{ ...access, secure: false }]);
 
-    await page.getByRole("button", { name: "눌러서 말하기" }).click();
-    await say(page, REQUEST_SENTENCE);
-    await page.getByRole("button", { name: "이대로 요청" }).click();
+    await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
     await expect(
       page.getByRole("button", { name: "봉사자 화면으로(시연)" }),
     ).toBeFocused();
