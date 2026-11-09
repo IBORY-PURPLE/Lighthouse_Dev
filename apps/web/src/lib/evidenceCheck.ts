@@ -24,15 +24,26 @@ export function normalizeText(text: string): string {
 }
 
 /**
+ * needle이 haystack 안에 따로 선 낱말로 들어 있는지 본다. 앞뒤가 숫자·영문이면 다른 낱말이다
+ * ("30시간"은 "130시간"에, "LH-200"은 "LH-2000"에 맞지 않는다). 한글 조사가 붙는 것은 허용한다.
+ * 두 글은 normalizeText를 거친 것이어야 한다.
+ */
+export function containsBounded(haystack: string, needle: string): boolean {
+  if (!needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
+  return new RegExp(`(?<![0-9a-z.])${escaped}(?![0-9a-z]|\\.[0-9])`).test(haystack);
+}
+
+/**
  * 값의 낱말이 모두 근거 안에 있는지 본다. 근거가 원문에 있어도 값과 무관한 구절이면
- * 원문에 없는 값이 통과하므로, 값과 근거를 묶는다. 공백·문장부호 차이는 무시한다.
+ * 원문에 없는 값이 통과하므로, 값과 근거를 묶는다.
  */
 export function valueFollowsEvidence(value: string, evidence: string): boolean {
-  const compactEvidence = normalizeText(evidence).replace(/\s+/g, "");
+  const normalizedEvidence = normalizeText(evidence);
   const words = normalizeText(value)
     .split(/[\s,/·:;()[\]"'“”‘’]+/)
     .filter((word) => word !== "");
-  return words.length > 0 && words.every((word) => compactEvidence.includes(word));
+  return words.length > 0 && words.every((word) => containsBounded(normalizedEvidence, word));
 }
 
 function overlapsLowConfidence(
@@ -85,10 +96,11 @@ export function checkEvidence(
     const normalizedEvidence = normalizeText(evidence);
     if (
       !normalizedEvidence ||
-      !normalizedSource.includes(normalizedEvidence) ||
+      evidence.length > MAX_EVIDENCE_LENGTH ||
+      !containsBounded(normalizedSource, normalizedEvidence) ||
       !valueFollowsEvidence(raw.value, evidence)
     ) {
-      // 원문에 없는 근거, 또는 값이 근거에 없는 경우는 지어냈을 수 있으므로 값도 근거도 보여 주지 않는다.
+      // 원문에 없는 근거, 값이 근거에 없는 경우, 근거가 200자를 넘어 화면에서 값을 확인할 수 없는 경우는 지어냈을 수 있으므로 값도 근거도 보여 주지 않는다.
       return {
         key,
         label,
@@ -108,7 +120,7 @@ export function checkEvidence(
       key,
       label,
       value: raw.value,
-      evidence: evidence.slice(0, MAX_EVIDENCE_LENGTH),
+      evidence,
       check: "matched",
       needsCheck: lowConfidenceHit,
       reason: lowConfidenceHit ? REASON.lowConfidence : null,

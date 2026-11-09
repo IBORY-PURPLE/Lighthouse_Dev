@@ -156,14 +156,48 @@ describe("checkEvidence", () => {
     expect(draft.fields.find((f) => f.key === "spec")?.check).toBe("unverified");
   });
 
-  it("근거는 200자로 자르고 못 읽은 조각 번호는 정렬해 남긴다", () => {
+  it("근거가 200자를 넘으면 화면에서 값을 확인할 수 없으므로 unverified이고, 못 읽은 조각 번호는 정렬해 남긴다", () => {
     const long = "가".repeat(250);
     const draft = checkEvidence([field("caution", "가가가", long)], long, {
       source: "ocr",
       unreadable: [3, 1],
     });
-    expect(draft.fields.find((f) => f.key === "caution")?.evidence).toHaveLength(200);
+    expect(draft.fields.find((f) => f.key === "caution")).toMatchObject({
+      check: "unverified",
+      value: null,
+      evidence: null,
+    });
     expect(draft.unreadable).toEqual([1, 3]);
     expect(draft.draftVersion).toBe(1);
   });
+
+  it("숫자·영문 낱말은 앞뒤가 이어지면 다른 낱말로 본다(30시간 ≠ 130시간, LH-200 ≠ LH-2000)", () => {
+    const source = "최대 130시간 재생\n모델 LH-2000\n무게 2.5kg\n헤드셋은 접힙니다";
+    const draft = checkEvidence(
+      [
+        field("spec", "최대 30시간 재생", "최대 130시간 재생"),
+        field("productName", "LH-200", "모델 LH-2000"),
+        field("option", "2.5kg", "무게 2.5kg"),
+        field("caution", "헤드셋 접힘", "헤드셋은 접힙니다"),
+      ],
+      source,
+      { source: "ocr" },
+    );
+    const check = (key: string) => draft.fields.find((f) => f.key === key)?.check;
+    expect(check("spec")).toBe("unverified");
+    expect(check("productName")).toBe("unverified");
+    expect(check("option")).toBe("matched");
+    // "접힘"은 근거에 없는 낱말이라 unverified다(조사만 다른 "헤드셋"은 통과하지만 낱말 하나라도 없으면 안 된다).
+    expect(check("caution")).toBe("unverified");
+  });
+
+  it("근거 자체도 원문 안에서 숫자가 이어지면 다른 구절로 본다", () => {
+    const draft = checkEvidence(
+      [field("spec", "30시간 재생", "30시간 재생")],
+      "최대 130시간 재생",
+      { source: "ocr" },
+    );
+    expect(draft.fields.find((f) => f.key === "spec")?.check).toBe("unverified");
+  });
 });
+
