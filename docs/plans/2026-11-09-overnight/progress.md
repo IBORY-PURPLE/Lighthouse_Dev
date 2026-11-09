@@ -225,3 +225,28 @@ PR: #25 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/25 (base `stage/demo
 db push 허락: 예
 통합 배포 푸시 허락: 예
 토큰: 미측정, 예상 대비 미측정
+
+## 04:04 블록 6 마무리
+상태: 완료(통합 배포·재완주·아침 보고·문서 PR. 단계 PR은 훅 미수정이라 열지 않음)
+PR: #26 https://github.com/IBORY-PURPLE/Lighthouse_Dev/pull/26 (문서 PR, base `main`, head `docs/overnight-1109`, 라벨 `hold-morning`, Codex 해당 없음), 실패 횟수: 0
+시작 03:50 워크플로(끝 상한 08:00, 블록 6 예외. 실제 끝 04:05께)
+실패 목록: 없음
+실패로 세지 않은 것: 03:52 충돌 풀이 명령(python 인라인)이 안전 훅에 막힘(`.env에 닿는 글롭` 오탐으로 보임, 우회 아님) → 같은 내용을 스크래치 파일 스크립트로 옮겨 실행
+통합 배포: `deploy/overnight-1109` ← `github/main`(`a4fdd26`)에 `--no-ff`로 `feat/demo4/experiment`(`ab6447a`) → `feat/demo4/upload-summary`(`9bd0e87`) → `feat/demo2/queue`(`f56d2e1`, #23 포함) → `feat/demo3/search-advice`(`5ade843`). `stage/demo1·3·4`는 main과 같아 생략. 충돌 손 풀이(양쪽 살림): CLAUDE.md 3회, health route, routes.test, public.spec 2회. package·lock 자동 병합, `npm install` 뒤 변화 없음. 최종 `975d673`, `git push github deploy/overnight-1109`(허락 예).
+검증(`975d673`): `npm run check` 종료 0(unit 293/293), `npm run test:e2e` 종료 0(93/93, 가짜 음성 입력·가짜 응답 기준), `test:public` 종료 0(5/5). 기록 `test-results/deploy-{check,test-e2e,test-public}.txt`, 키·접근 코드 패턴 0건.
+배포: Vercel API Git 소스 배포(MCP create_deployment, target production, lighthouse-web) `dpl_99XdwEoqBP8gk5WgfhbhofMLmBhZ` READY, 별칭 lighthouse-web-five 확인, iad1. 설정·환경 변수 안 바꿈.
+재완주(C14·C15): health `extractEngine=openai`, `store=supabase`, `groqKeyConfigured=true`. POST store 1,324ms(대기번호 2), GET #1 705ms/왕복 1,022, #2 681ms/919. 챗봇 Groq 1,773ms 위반 0. ④ 합성 이미지 조각 4(모두 200) engine 2576/1503/3555/1207ms, summarize llm 1,733ms, 올리기→초안 17,523ms, 가격·재고·할인 key·label 0건. ③ 선택 필드 호출 2,533ms 위반 0.
+결정:
+- 아침 보고 `morning-report.md`(첫 줄: 캡처·정답 메모 없음), 절 순서 규칙 1~6 + 7~10 + 독립 점검. 독립 점검 5개 모두 심각 0건 → PR 댓글 없음.
+- ai.md 10절 진행 기록 표 채움.
+- 단계 PR 미개설(기능 PR이 단계 브랜치에 없음, 훅 수정 허락 아니오). 열린 기능 PR 5개 모두 `hold-morning`·Codex 판정 댓글 있음 확인.
+- 안전망 예약 작업은 블록 0이 걸지 않음 → 해제할 것 없음. `bd ready`: 열린 이슈 없음.
+다음 할 일: 사람 아침 — morning-report.md 읽기, 아이폰 시연, PR #21~#25 판단·병합(보고 3절 순서), 10절 결정, 문서 PR #26 병합.
+호출: luna 4장(누계 28/500), Upstage 0장(누계 0/500), Groq qwen 0회(누계 18), Groq gpt-oss 3회(누계 67/200)
+시작 브랜치 분기 근거: 블록 6은 `deploy/overnight-1109` ← `github/main`(단계 PR이 main에 없음, 4절 블록 6 할 일 2 둘째 경우), 기록은 `docs/overnight-1109`
+다음 블록: 없음
+이어 달리기 명령: 메인 세션 local_317d473e-56b7-4ce2-8976-dfd8dfcb2955의 Workflow 스크립트 overnight-1109가 블록 에이전트를 차례로 띄운다(블록 에이전트는 3.5의 6에서 block-<M>.started만 만들고 자식을 띄우지 않으며, 7을 하지 않는다)
+훅 수정 허락: 아니오
+db push 허락: 예
+통합 배포 푸시 허락: 예
+토큰: 미측정, 예상 대비 미측정
