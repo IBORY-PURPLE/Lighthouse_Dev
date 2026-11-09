@@ -35,7 +35,7 @@
 <body>
 <main>
   <h1>비전 AI 실험실</h1>
-  <p class="sub">상세 이미지를 올리면 Groq 비전 모델이 읽은 결과를 이미지 옆에 보여 줍니다. 로컬 실험용이며 이미지는 저장하지 않습니다.</p>
+  <p class="sub">상세 이미지를 올리면 고른 엔진(OpenAI luna · Upstage OCR · Groq qwen)이 읽은 결과를 이미지 옆에 보여 줍니다. 로컬 실험용이며 이미지는 저장하지 않습니다.</p>
 
   <section class="panel">
     <div class="row">
@@ -50,17 +50,34 @@
           <option value="tiles">잘라서(타일)</option>
         </select>
       </label>
+      <label>엔진
+        <select id="engine">
+          <option value="openai">OpenAI luna(유료)</option>
+          <option value="upstage">Upstage OCR(유료)</option>
+          <option value="groq">Groq qwen(무료 기준선)</option>
+        </select>
+      </label>
       <label>지시
         <select id="kind">
           <option value="summary">항목 요약</option>
           <option value="ocr">글자 그대로 읽기</option>
         </select>
       </label>
-      <label>최대 폭(px) <input id="maxWidth" type="number" value="1024" min="256" step="64"></label>
-      <label>타일 높이(px) <input id="tileHeight" type="number" value="1400" min="400" step="100"></label>
+      <label>최대 폭(px) <input id="maxWidth" type="number" value="1000" min="256" step="8"></label>
+      <label>타일 높이(px)
+        <select id="tileHeight">
+          <option value="1200">1200</option>
+          <option value="800">800</option>
+          <option value="1400">1400(이전 기본)</option>
+        </select>
+      </label>
+      <label>겹침(px) <input id="overlap" type="number" value="100" min="0" step="10"></label>
+      <label><input id="summarize" type="checkbox" checked> 읽은 글자로 항목 요약(Groq gpt-oss)</label>
       <button id="run" class="primary" type="button" disabled>분석하기</button>
     </div>
-    <p class="meta">Groq 제한으로 한 번에 이미지 3장까지 보냅니다. 더 많으면 3장씩 나눠 여러 번 호출합니다. iPhone HEIC 사진은 PNG/JPEG로 바꿔 올려 주세요.</p>
+    <p class="meta">요청당 이미지 1장(조각 1장 = 호출 1회)으로 보냅니다. 이전 값(폭 1024·겹침 80)도 입력으로 고를 수 있습니다. 엔진당 유료 호출은 서버가 500장에서 거부합니다. iPhone HEIC 사진은 PNG/JPEG로 바꿔 올려 주세요.</p>
+    <p id="calls" class="meta"></p>
+    <button id="download" type="button" disabled>결과 내려받기</button>
   </section>
 
   <section id="results"></section>
@@ -72,10 +89,13 @@ const $ = (id) => document.getElementById(id);
 let sampleFile = null;
 let keyOk = false;
 
+let lastResult = null;
+function showCalls(c) { if (c) $("calls").textContent = `호출 누계(이 서버 실행): luna ${c.openai} · Upstage ${c.upstage} · qwen ${c.groqQwen} · gpt-oss ${c.groqOss}`; }
 fetch("/api/status").then((r) => r.json()).then((s) => {
-  keyOk = s.keyConfigured;
-  $("status").textContent = s.keyConfigured ? `키 확인됨 · 모델 ${s.models.join(", ")}` : "GROQ_API_KEY가 없습니다(서버 콘솔 확인)";
-  $("status").classList.toggle("bad", !s.keyConfigured);
+  keyOk = s.keyConfigured || s.openaiKeyConfigured || s.upstageKeyConfigured;
+  $("status").textContent = `키: Groq ${s.keyConfigured ? "있음" : "없음"} · OpenAI ${s.openaiKeyConfigured ? "있음" : "없음"} · Upstage ${s.upstageKeyConfigured ? "있음" : "없음"} · luna 모델 ${s.models.openai}`;
+  $("status").classList.toggle("bad", !keyOk);
+  showCalls(s.calls);
   updateRunButton();
 }).catch(() => { $("status").textContent = "서버 연결 실패"; $("status").classList.add("bad"); });
 
@@ -97,7 +117,7 @@ function toJpeg(source, sx, sy, sw, sh, scale) {
   return { url: canvas.toDataURL("image/jpeg", 0.85), w: canvas.width, h: canvas.height };
 }
 
-async function prepare(file, mode, maxWidth, tileHeight) {
+async function prepare(file, mode, maxWidth, tileHeight, overlapPx = 100) {
   const bmp = await createImageBitmap(file);
   const scale = Math.min(1, maxWidth / bmp.width);
   const out = [];
@@ -105,7 +125,7 @@ async function prepare(file, mode, maxWidth, tileHeight) {
     out.push({ ...toJpeg(bmp, 0, 0, bmp.width, bmp.height, scale), label: `${file.name} 전체` });
   } else {
     const srcTile = Math.round(tileHeight / scale);
-    const overlap = Math.round(80 / scale);
+    const overlap = Math.round(overlapPx / scale);
     let y = 0, i = 1;
     while (y < bmp.height) {
       let h = Math.min(srcTile, bmp.height - y);
@@ -127,65 +147,117 @@ function el(tag, attrs = {}, text) {
   return node;
 }
 
+async function postJson(url, body) {
+  let res, data;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    data = await res.json();
+    if (res.status !== 429 || !data.retryAfterSec) break;
+    await new Promise((r) => setTimeout(r, data.retryAfterSec * 1000));
+  }
+  return { ok: res.ok, status: res.status, data };
+}
+
+// 조각 경계의 겹친 줄을 한 번만 남긴다(앞 조각의 마지막 줄들과 같은 줄은 뺀다).
+function joinTexts(texts) {
+  const out = [];
+  for (const t of texts) {
+    const lines = t.split(/\r?\n/);
+    const tail = new Set(out.slice(-8).map((l) => l.trim()).filter(Boolean));
+    let i = 0;
+    while (i < lines.length && (lines[i].trim() === "" || tail.has(lines[i].trim()))) i++;
+    out.push(...lines.slice(i));
+  }
+  return out.join("\n");
+}
+
+// 이미지 조각을 엔진에 1장씩 보내 글자를 읽고, 이어 붙인 글자를 요약 단계에 넘긴다. run.mjs도 이 함수를 쓴다.
+async function runAnalysis({ files, mode, kind, engine, maxWidth, tileHeight, overlap, summarize, onTile }) {
+  const tiles = [];
+  for (const f of files) tiles.push(...await prepare(f, mode, maxWidth, tileHeight, overlap));
+  const results = [];
+  for (const [i, tile] of tiles.entries()) {
+    const r = await postJson("/api/analyze", { images: [tile.url], kind, engine });
+    const { text, ...rest } = r.data;
+    results.push({ label: tile.label, w: tile.w, h: tile.h, kb: tile.kb, ok: r.ok, status: r.status, text: text ?? "", ...rest });
+    onTile?.(tile, r, i, tiles.length);
+    if (i < tiles.length - 1) await new Promise((res) => setTimeout(res, 1000));
+  }
+  const text = joinTexts(results.filter((r) => r.ok).map((r) => r.text));
+  let summary = null;
+  if (summarize && text.trim()) {
+    const r = await postJson("/api/summarize-text", { text });
+    summary = { ok: r.ok, status: r.status, ...r.data };
+  }
+  return {
+    engine, mode, kind, maxWidth, tileHeight: mode === "tiles" ? tileHeight : null, overlap,
+    tiles: results.length, failed: results.filter((r) => !r.ok).length,
+    readMs: results.reduce((a, r) => a + (r.ms ?? 0), 0), tileMs: results.map((r) => r.ms ?? null),
+    pages: results.reduce((a, r) => a + (r.pages ?? 0), 0) || null,
+    results, text, summary,
+  };
+}
+
 $("run").addEventListener("click", async () => {
-  const mode = $("mode").value, kind = $("kind").value;
-  const maxWidth = Number($("maxWidth").value), tileHeight = Number($("tileHeight").value);
+  const opts = {
+    files: selectedFiles(), mode: $("mode").value, kind: $("kind").value, engine: $("engine").value,
+    maxWidth: Number($("maxWidth").value), tileHeight: Number($("tileHeight").value), overlap: Number($("overlap").value),
+    summarize: $("summarize").checked,
+  };
   $("run").disabled = true;
   $("results").replaceChildren();
   try {
-    const images = [];
-    for (const f of selectedFiles()) images.push(...await prepare(f, mode, maxWidth, tileHeight));
-    const batches = [];
-    for (let i = 0; i < images.length; i += 3) batches.push(images.slice(i, i + 3));
-    for (const [bi, batch] of batches.entries()) {
-      const card = el("section", { className: "panel" });
-      card.append(el("h2", {}, `호출 ${bi + 1}/${batches.length} · ${mode === "whole" ? "통째로" : "타일"} · ${kind === "ocr" ? "글자 그대로" : "항목 요약"}`));
-      const grid = el("div", { className: "batch" });
-      const thumbs = el("div", { className: "thumbs" });
-      for (const img of batch) {
-        const wrap = el("div");
-        const im = el("img", { src: img.url, alt: img.label });
-        im.addEventListener("click", () => { $("zoom").querySelector("img").src = img.url; $("zoom").showModal(); });
-        wrap.append(im, el("div", { className: "meta" }, `${img.label} · 원본 ${img.orig} → 보냄 ${img.w}×${img.h} · ${img.kb}KB`));
-        thumbs.append(wrap);
+    const result = await runAnalysis({
+      ...opts,
+      onTile(tile, r, i, n) {
+        const card = el("section", { className: "panel" });
+        card.append(el("h2", {}, `조각 ${i + 1}/${n} · ${opts.engine} · ${opts.mode === "whole" ? "통째로" : `타일 ${opts.tileHeight}`}`));
+        const grid = el("div", { className: "batch" });
+        const thumbs = el("div", { className: "thumbs" });
+        const im = el("img", { src: tile.url, alt: tile.label });
+        im.addEventListener("click", () => { $("zoom").querySelector("img").src = tile.url; $("zoom").showModal(); });
+        thumbs.append(im, el("div", { className: "meta" }, `${tile.label} · 원본 ${tile.orig} → 보냄 ${tile.w}×${tile.h} · ${tile.kb}KB`));
+        const out = el("div");
+        const d = r.data;
+        out.append(el("pre", r.ok ? {} : { className: "err" }, r.ok ? d.text || "(빈 답변)" : `실패: ${d.error}`));
+        if (r.ok) out.append(el("p", { className: "meta" }, `${d.model} · ${(d.ms / 1000).toFixed(1)}초 · 입력 ${d.usage?.prompt_tokens ?? "?"} / 출력 ${d.usage?.completion_tokens ?? "?"} 토큰${d.pages ? ` · usage.pages ${d.pages}` : ""}${d.notes?.length ? ` · ${d.notes.join("; ")}` : ""}`));
+        showCalls(d.calls);
+        grid.append(thumbs, out);
+        card.append(grid);
+        $("results").append(card);
+      },
+    });
+    const card = el("section", { className: "panel" });
+    card.append(el("h2", {}, `합계 · 조각 ${result.tiles}장 · 글자 읽기 ${(result.readMs / 1000).toFixed(1)}초`));
+    if (result.summary?.ok) {
+      showCalls(result.summary.calls);
+      card.append(el("p", { className: "meta" }, `요약 ${result.summary.model} · ${(result.summary.ms / 1000).toFixed(1)}초`));
+      for (const f of result.summary.fields) {
+        const mark = f.check === "verified" ? "근거 확인" : f.check === "unverified" ? "확인 안 됨(근거가 원문에 없음)" : "이미지에서 못 찾음";
+        card.append(el("p", {}, `${f.key}: ${f.value ?? "—"} · ${mark}`));
       }
-      const out = el("div");
-      const pre = el("pre", {}, "분석 중…");
-      const meta = el("p", { className: "meta" });
-      out.append(pre, meta);
-      grid.append(thumbs, out);
-      card.append(grid);
-      $("results").append(card);
-      let res, data, waited = 0;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        res = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ images: batch.map((b) => b.url), kind }),
-        });
-        data = await res.json();
-        if (res.status !== 429 || !data.retryAfterSec) break;
-        for (let s = data.retryAfterSec; s > 0; s--) {
-          pre.textContent = `무료 한도(분당 입력 토큰) 대기 중… ${s}초`;
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        waited += data.retryAfterSec;
-      }
-      if (!res.ok) { pre.textContent = `실패: ${data.error}`; pre.className = "err"; continue; }
-      pre.textContent = data.text || "(빈 답변)";
-      const u = data.usage || {};
-      meta.textContent = `${data.model} · ${(data.ms / 1000).toFixed(1)}초 · 입력 ${u.prompt_tokens ?? "?"} / 출력 ${u.completion_tokens ?? "?"} 토큰 · 종료 ${data.finishReason}${waited ? ` · 한도 대기 ${waited}초` : ""}`;
+    } else if (result.summary) {
+      card.append(el("p", { className: "err" }, `요약 실패: ${result.summary.error}`));
     }
+    $("results").append(card);
+    lastResult = result;
+    $("download").disabled = false;
   } catch (e) {
     $("results").append(el("p", { className: "err" }, `오류: ${e.message}`));
   } finally {
     updateRunButton();
   }
 });
+// 사람이 눈으로 볼 때용. 브라우저 기본 다운로드 폴더에 저장되며 서버는 파일을 쓰지 않는다.
+$("download").addEventListener("click", () => {
+  if (!lastResult) return;
+  const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(lastResult, null, 2)], { type: "application/json" })), download: "vision-result.json" });
+  a.click();
+});
 $("zoom").addEventListener("click", () => $("zoom").close());
 
 // 시험용 합성 상세 이미지(세로로 긴 쇼핑몰 상세 이미지 흉내). 실제 상품 아님.
-$("sample").addEventListener("click", () => {
+function makeSampleCanvas() {
   const c = document.createElement("canvas");
   c.width = 860; c.height = 4200;
   const g = c.getContext("2d");
@@ -209,6 +281,14 @@ $("sample").addEventListener("click", () => {
     g.fillText(text, 40, y);
     y += 340;
   }
+  return c;
+}
+function makeSampleFile() {
+  return new Promise((resolve) => makeSampleCanvas().toBlob((blob) => resolve(new File([blob], "sample-headset.png", { type: "image/png" })), "image/png"));
+}
+window.visionLab = { prepare, runAnalysis, makeSampleFile };
+$("sample").addEventListener("click", () => {
+  const c = makeSampleCanvas();
   c.toBlob((blob) => {
     sampleFile = new File([blob], "sample-headset.png", { type: "image/png" });
     $("files").value = "";
