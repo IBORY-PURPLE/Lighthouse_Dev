@@ -15,7 +15,7 @@ PR: 없음(브랜치 `claude/cloud-brief-ai-plan-pim0gp`. human.md·notes·resea
 다음 할 일: 사람이 이 브랜치의 PR을 main에 병합하고, ai.md 5절 "자기 전" 표대로 준비(캡처·정답 메모, OpenAI·Upstage 키, 세 가지 허락)한 뒤 블록 0을 시작한다.
 토큰: 미측정(이 세션의 하위 에이전트 사용량 약 640만 토큰은 측정값, 메인 세션은 미측정). 예상 대비 미측정.
 
-## 00:40 블록 0 사전 점검
+## 00:38 블록 0 사전 점검
 상태: 완료
 PR: 없음(블록 1이 `feat/demo4/experiment`의 PR을 base `stage/demo4`로 연다), 실패 횟수: 0
 시작 00:17 사람(메인 세션 `local_317d473e-56b7-4ce2-8976-dfd8dfcb2955`, 이용자 깨어 있음)
@@ -37,7 +37,7 @@ PR: 없음(블록 1이 `feat/demo4/experiment`의 PR을 base `stage/demo4`로 �
 | claude CLI | 2.1.309(이 밤은 쓰지 않음, 아래 이어 달리기) |
 | 검사 기준선(`a4fdd26`) | `npm ci` 0, `npm run check` 0(unit 160/160, lint가 `experiments/` 포함 통과), `npx playwright install webkit` 0 |
 | PC 키(실험 서버 `/api/status`, `ed70cfe`) | Groq true, OpenAI true, Upstage **false** |
-| Vercel 변수 이름 | `GROQ_API_KEY`(production·development), `DEMO_ACCESS_CODE`(production), `SUPABASE_URL`·`SUPABASE_SECRET_KEY`·`NEXT_PUBLIC_SUPABASE_URL`(production·preview). **`OPENAI_API_KEY` 없음**(00:40 사람에게 production 등록 요청, 블록 2·4·6은 배포 전에 `vercel env ls`로 이름만 다시 본다), `UPSTAGE_API_KEY` 없음 |
+| Vercel 변수 이름 | `GROQ_API_KEY`(production·development), `DEMO_ACCESS_CODE`(production), `SUPABASE_URL`·`SUPABASE_SECRET_KEY`·`NEXT_PUBLIC_SUPABASE_URL`(production·preview). **`OPENAI_API_KEY` 없음**(00:37 사람에게 production 등록 요청, 블록 2·4·6은 배포 전에 `vercel env ls`로 이름만 다시 본다), `UPSTAGE_API_KEY` 없음 |
 | 캡처·정답 메모 | **없음**(`test-results/vision-samples/` 없음, `public/sample.jpg` 없음). 이용자 결정(00:30): 합성 이미지로 진행 |
 | 접근 코드 파일 | `.demo-access.local` 2줄 |
 | 공개 주소 | https://lighthouse-web-five.vercel.app 맞음(루트 200, `/api/health` 쿠키 없이 401 정상) |
@@ -52,7 +52,7 @@ PR: 없음(블록 1이 `feat/demo4/experiment`의 PR을 base `stage/demo4`로 �
 - 블록과 무관한 사전 로컬 변경(손대거나 커밋하지 않는다): 미추적 `.codex/`, `AGENTS.md`, `agent`, `status`, `supabase/`(11/9 낮 init·link한 `config.toml`·`.gitignore`. 블록 4가 계획대로 커밋한다), 추적 파일 삭제 `docs/plans/team_plan.pdf`(이용자 쪽 삭제. 되살리거나 커밋하지 않는다).
 - 훅 차단 1회(실패로 세지 않음): `feat/demo4/experiment` 첫 커밋 메시지에 키 파일 이름 글자가 들어가 `[guard] 차단: .env 접근`. 메시지에서 그 글자를 빼고 커밋(`ed70cfe`). 우회 아님.
 - `server.mjs` 키 파일 후보를 할 일 1의 2곳에서 3곳으로 늘렸다(`apps/web` 아래 두 곳과 루트. 위치 미확인 대응. 차이는 이 한 줄).
-- 시간: 블록 1은 00:45께 시작, 표 상한 02:00(작업 멈춤 01:50). 배정 120분보다 짧다(3.6 min 규칙).
+- 시간: 블록 1은 00:40께 시작, 표 상한 02:00(작업 멈춤 01:50). 배정 120분보다 짧다(3.6 min 규칙).
 다음 할 일: 블록 1 비전 실험(`feat/demo4/experiment` ← `stage/demo4`). 이미 `ed70cfe`(키 플래그) 1커밋이 있다.
 호출: luna 0장(누계 0/500), Upstage 0장(누계 0/500), Groq qwen 0회(누계 0), Groq gpt-oss 0회(누계 0/200)
 시작 브랜치 분기 근거: 해당 없음(블록 0)
@@ -66,5 +66,5 @@ PR: 없음(블록 1이 `feat/demo4/experiment`의 PR을 base `stage/demo4`로 �
 db push 허락: 예
 통합 배포 푸시 허락: 예
 토큰: 미측정, 예상 대비 미측정
-추가 00:45 이용자: Vercel `OPENAI_API_KEY`를 production·preview·development에 등록함(이용자 화면 캡처로 확인, 값은 보지 않음. 블록 2는 배포 전 `vercel env ls`로 이름만 다시 본다).
-추가 00:45 이용자 결정: 테스트(블록 1 실험, 블록 2·6 공개 완주)의 OpenAI 엔진은 **가장 저렴한 luna 모델**로 한다. 블록 1이 OpenAI 모델 목록(`GET /v1/models`, 키는 실험 서버 쪽 코드가 읽는다)과 공식 가격 페이지로 luna 계열 중 가장 싼 모델 ID를 확정해 결과표·진행 기록에 적고, 블록 2는 그 ID를 쓴다. 확정하지 못하면 결정 9의 `gpt-5.6-luna`. Groq qwen은 무료 비교 기준선으로 유지(C6 엔진 2개).
+추가 00:38 이용자: Vercel `OPENAI_API_KEY`를 production·preview·development에 등록함(이용자 화면 캡처로 확인, 값은 보지 않음. 블록 2는 배포 전 `vercel env ls`로 이름만 다시 본다).
+추가 00:38 이용자 결정: 테스트(블록 1 실험, 블록 2·6 공개 완주)의 OpenAI 엔진은 **가장 저렴한 luna 모델**로 한다. 블록 1이 OpenAI 모델 목록(`GET /v1/models`, 키는 실험 서버 쪽 코드가 읽는다)과 공식 가격 페이지로 luna 계열 중 가장 싼 모델 ID를 확정해 결과표·진행 기록에 적고, 블록 2는 그 ID를 쓴다. 확정하지 못하면 결정 9의 `gpt-5.6-luna`. Groq qwen은 무료 비교 기준선으로 유지(C6 엔진 2개).
