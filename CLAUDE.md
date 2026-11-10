@@ -17,6 +17,7 @@
 | `docs/plans/<날짜>-<이름>/` | 계획. `human.md`(사람용), `ai.md`(실행 기준), `progress.md`(진행 기록), `morning-report.md`(아침 보고) |
 | `docs/plans/2026-11-03-iphone-mvp/human.md` | 전체 개발 계획 |
 | `docs/TSD.md` | 기술 설계서 |
+| `docs/briefings/` | 핵심 정리 보고용 HTML(로컬 전용, git 제외) |
 | `.claude/rules/` | 개발 규칙(자동 로드) |
 | `.claude/hooks/guard.js` | 금지 명령 차단 훅. 이용자 허락 없이 수정 금지. 시험: `guard.test.js` |
 | `.github/ISSUE_TEMPLATE/` | 이슈 템플릿 |
@@ -38,6 +39,7 @@
 - 파일 탐색: `.claude/rules/file-navigation.md`
 - PR·Codex·병합·배포: `.claude/rules/pr-flow.md`
 - 밤샘 루프·금지선: `.claude/rules/overnight-loop.md`
+- 핵심 정리·점검 보고: `.claude/rules/briefing-html.md`
 - 작업 추적(`bd`): `.claude/rules/beads.md`, 사용 안내 `docs/beads-guide.md`. 아래 `BEGIN BEADS` 블록보다 이 규칙이 우선한다.
 
 

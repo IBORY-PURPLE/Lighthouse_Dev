@@ -155,8 +155,10 @@ function checkMerge(args, base) {
   } catch {
     block('PR 상태를 확인하지 못해 병합 불가');
   }
-  if (info.baseRefName !== 'main') block('main이 base가 아닌 쌓인 PR은 사람이 병합');
-  if (info.labels.some((l) => l.name === 'hold-morning')) block('hold-morning PR은 사람이 병합');
+  const names = info.labels.map((l) => l.name);
+  const reviewed = names.includes('reviewed-ok');
+  if (info.baseRefName !== 'main' && !reviewed) block('main이 base가 아닌 쌓인 PR은 사람이 점검(reviewed-ok) 후 병합');
+  if (names.includes('hold-morning') && !reviewed) block('hold-morning PR은 사람이 점검(reviewed-ok) 후 병합');
 }
 
 function checkShell(raw, base) {
