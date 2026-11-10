@@ -52,7 +52,7 @@ WBS #8 확정 전 가정: ③은 챗봇 대화, ④는 스크린샷 업로드만
       │   작업 중 값(대화, 이미지 조각, 읽은 글자, 요약 초안)은 이 탭의 메모리에만 있다
       ▼
 Vercel 서버 함수 (Next.js, Node 22, 기본 지역 iad1 — §11에서 icn1 검토)
-  /enter, /api/health, /api/match(시연 이어 보기)
+  /api/auth/{login,logout}, /api/health, /api/match(시연 이어 보기)
   /api/requests, /api/requests/{id}                         플로우 A
   /api/volunteer/queue, /api/volunteer/requests/{id}[/claim|/release|/result]   플로우 B ②⑥
   /api/chat                                                 ③ (스트리밍)
@@ -80,10 +80,12 @@ Supabase Postgres (서울)   Groq (gpt-oss-120b, qwen 비전)   OpenAI 또는 Up
 | 이용자 기기의 지난 요청 표시 | 이용자 `localStorage` `lh.request.v1` | "새 요청하기"까지 |
 | 챗봇 대화, 이미지 원본·조각, 글자 읽기 원문, 요약 초안, 근거 원문 | 봉사자 탭 메모리 | 탭을 닫으면 사라짐. 서버 저장 안 함 |
 | 이미지 원본(대체 경로일 때만) | Supabase Storage 비공개 버킷 | 글자 읽기 직후 서버가 삭제 |
+| 봉사자 계정(번호·비밀번호) | Vercel 환경 변수(Sensitive)와 개발 PC의 `apps/web` 로컬 환경 파일 | 서버만 읽음. 화면·로그·저장소에 남기지 않음 |
+| 봉사자 로그인 상태 | 봉사자 브라우저의 httpOnly 쿠키 `lh_volunteer` | 7일. 서버에는 저장하지 않는 서명 쿠키 |
 
 - 이미지와 상세페이지 원문을 서버에 남기지 않는 이유: 상세페이지 보관은 멘토가 지적한 법적 위험이다.
 - DB는 서버 라우트만 서버 키(secret 또는 service_role)로 SQL 함수(RPC)를 호출해 다룬다. 표는 RLS를 켜고 정책을 두지 않아 브라우저 직접 접근을 막는다. 브라우저에는 Supabase 키를 내보내지 않고 Realtime도 쓰지 않는다.
-- 봉사자 식별: 시연에서는 가상 봉사자 명단(`volunteers.ts`의 id·이름, `v-01` 형식)을 쓰고, 화면에서 고른 id를 `X-Demo-Volunteer` 헤더로 보낸다. 실제 로그인은 범위 밖이다.
+- 봉사자 식별: 로그인 세션의 `volunteerId`다(지금 등록 봉사자 `vol-01` 하나). 헤더로 고르지 않는다. 여러 봉사자 매칭은 봉사자를 추가할 때 한다(bd `lh-l2e`).
 
 ## 3. 기술 선택
 
@@ -113,17 +115,17 @@ supabase/                                   Supabase CLI 설정, link됨(.temp/�
   migrations/<시각>_<이름>.sql              표, SQL 함수. 추가만 한다(§11)
 apps/web/                                   Vercel Root Directory
   src/app/page.tsx                          이용자(플로우 A, ⑦)
-  src/app/volunteer/page.tsx                봉사자 대기열(②). ② 전에는 v1 시연 화면
+  src/app/volunteer/page.tsx                서버 컴포넌트. 로그인 세션이 있으면 `VolunteerView`, 없으면 `VolunteerLogin`. ② 전에는 v1 시연 화면
   src/app/volunteer/requests/[requestId]/page.tsx   요청 확인 → ③④⑤⑥
-  src/app/enter/route.ts
+  src/app/api/auth/{login,logout}/route.ts   봉사자 로그인·로그아웃(§8.9)
   src/app/api/{health,match,chat}/route.ts
   src/app/api/requests/route.ts, [requestId]/route.ts                 플로우 A
   src/app/api/volunteer/queue/route.ts
   src/app/api/volunteer/requests/[requestId]/{route,claim/route,release/route,result/route}.ts
   src/app/api/volunteer/{extract-text,summarize}/route.ts
-  src/components/{SpeechInput,StatusRegion,DemoHandoff,VolunteerChat}.tsx
+  src/components/{SpeechInput,StatusRegion,DemoHandoff,VolunteerChat,VolunteerLogin,VolunteerView}.tsx
   src/components/{InfoSummary,ResultForm}.tsx       ④⑤, ⑥
-  src/lib/{access,rateLimit,llm,prompt,chat,speech,parseRequest,matchHandoff,volunteers,answerRules}.ts
+  src/lib/{volunteerAuth,rateLimit,llm,prompt,chat,speech,parseRequest,matchHandoff,volunteers,answerRules}.ts
   src/lib/requestStore.ts                   서버 전용. 저장소 인터페이스, 메모리 구현, Supabase 구현
   src/lib/volunteerRequest.ts               ③④⑤⑥ 공용 요청 모양과 lh.match.v1 어댑터
   src/lib/imagePieces.ts                    브라우저 canvas 자르기
@@ -145,14 +147,15 @@ apps/web/                                   Vercel Root Directory
 | `OPENAI_API_KEY` | 같음(사람이 등록, 아직 없음) | ④ 글자 읽기를 OpenAI로 할 때 |
 | `UPSTAGE_API_KEY` | 같음(사람이 등록, 선택) | ④ 글자 읽기를 Upstage로 할 때 |
 | Supabase 연동 변수 | Vercel(Supabase 연동이 넣음) | 코드는 URL `SUPABASE_URL ?? NEXT_PUBLIC_SUPABASE_URL`, 키 `SUPABASE_SECRET_KEY ?? SUPABASE_SERVICE_ROLE_KEY`를 읽는다. 값은 보지 않는다 |
-| `DEMO_ACCESS_CODE` | Vercel, 로컬은 시험 설정 | v1 그대로 |
+| `VOLUNTEER_PHONE` | Vercel(Production·Preview, Sensitive), 개발 PC 로컬 환경 파일(사람이 등록). 시험은 설정 파일의 가짜 값 | 봉사자 전화번호. 하이픈 허용, 숫자만 비교 |
+| `VOLUNTEER_PASSWORD` | 같음 | 봉사자 비밀번호 원문, 12자 이상. 앞뒤 공백은 잘림. 서명 키도 여기서 나온다 |
 | `LLM_MODE` | 시험 설정 | `mock`이면 가짜 응답 |
 | `STORE_MODE` | 시험 설정 | `memory`면 서버 메모리 가짜 저장소 |
 | `EXTRACT_MODE` | 시험 설정 | `mock`이면 글자 읽기·요약 가짜 응답 |
 
 - 세 `*_MODE`는 모두 `VERCEL_ENV=production`에서 무시하고 실제로 동작한다(v1 `llm.ts:13-16`과 같은 규칙).
 - Supabase 키가 없으면 저장소는 메모리로 떨어지고, `/api/health`의 `store`가 `memory`라고 알린다.
-- 키 파일 규칙(`.env` 미커밋, `.vercelignore`, `.demo-access.local`)은 v1 그대로다.
+- 키 파일 규칙(`.env` 미커밋, `.vercelignore`)은 v1 그대로다. 옛 접근 코드 파일 `.demo-access.local`은 더 쓰지 않는다(`.gitignore`·`.vercelignore` 줄은 실수 업로드 방지로 남긴다).
 
 ## 6. 음성 입력
 
@@ -226,11 +229,11 @@ recognition.maxAlternatives = 1;
 
 ## 8. API
 
-공통: 접근 쿠키가 없으면 401. 사용자 문장, 이미지, 읽은 글자는 로그에 남기지 않고 상태 코드, 소요 시간, 조각 번호만 남긴다. 새 라우트의 실패 본문은 `{ "ok": false, "error": "<코드>" }`다. 봉사자 API(`/api/volunteer/*`)는 `X-Demo-Volunteer` 헤더가 없거나 명단 밖이면 403 `unknown_volunteer`, 경로의 id가 UUID가 아니면 400 `invalid_request`, 저장소 오류는 503 `store_unavailable`, 횟수 초과는 429 `rate_limited`(+`Retry-After`)다.
+공통: 봉사자 쪽(`/api/chat`, `/api/health`, `/api/volunteer/*`)은 로그인 쿠키가 없거나 틀리면 401 `unauthorized`다. 이용자 쪽(`/api/requests*`, `/api/match`)은 로그인 없이 열고 횟수 제한만 둔다. 사용자 문장, 이미지, 읽은 글자는 로그에 남기지 않고 상태 코드, 소요 시간, 조각 번호만 남긴다. 새 라우트의 실패 본문은 `{ "ok": false, "error": "<코드>" }`다. 봉사자 구분은 세션의 `volunteerId`로 한다. 봉사자 API(`/api/volunteer/*`)는 경로의 id가 UUID가 아니면 400 `invalid_request`, 저장소 오류는 503 `store_unavailable`, 횟수 초과는 429 `rate_limited`(+`Retry-After`)다.
 
 ### 8.1 v1에서 이어지는 것
 
-- `GET /enter?code=...`, `POST /api/match`: v1 그대로. `/api/match`와 `lh.match.v1`은 ②가 병합될 때까지 시연 이어 보기용이다.
+- `POST /api/match`: 품목 검사(422 `need_item`)와 횟수 제한은 v1 그대로. 로그인 없이 열려 있고 봉사자는 항상 등록 봉사자(`vol-01`, 표시 이름 `등록 봉사자`)로 고정한다. `/api/match`와 `lh.match.v1`은 ②가 병합될 때까지 시연 이어 보기용이다. `/enter`와 접근 코드는 없다.
 - `GET /api/health`: v1 응답에 `store: "supabase" | "memory"`, `extractEngine: "openai" | "upstage" | "mock" | null`을 더한다. 키 값은 반환하지 않는다.
 
 ### 8.2 공용 요청 모양
@@ -316,8 +319,8 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 
 | 경로 | 성공 | 실패 |
 |---|---|---|
-| `POST /api/requests` `{clientRequestId, product, budget, condition}` | 201 `{requestId, queueNumber, status:"waiting"}`, 같은 `clientRequestId` 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`, 422 `need_item`, 401, 429, 503 |
-| `GET /api/requests/{id}` | 200 `{requestId, queueNumber, status, product}`. `status="done"`이면 `result:{candidateName, purchaseUrl, guide, summary}`를 덧붙임(플로우 C 경계) | 400, 404 `not_found`, 401, 429, 503 |
+| `POST /api/requests` `{clientRequestId, product, budget, condition}` | 201 `{requestId, queueNumber, status:"waiting"}`, 같은 `clientRequestId` 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`, 422 `need_item`, 429, 503 |
+| `GET /api/requests/{id}` | 200 `{requestId, queueNumber, status, product}`. `status="done"`이면 `result:{candidateName, purchaseUrl, guide, summary}`를 덧붙임(플로우 C 경계) | 400, 404 `not_found`, 429, 503 |
 
 세부(검사 순서, 낭독 문구, 다시 열기)는 플로우 A 계획(`docs/plans/2026-11-09-overnight/`)을 따른다.
 
@@ -397,6 +400,23 @@ type SummaryDraft = {
 - 같은 조각이 3회 실패하거나 봉사자가 고르면 텍스트 입력창을 연다("추출 실패 → 텍스트 직접 입력").
 - 대체 경로(아이폰에서 canvas가 실패할 때): 서버가 Supabase Storage 비공개 버킷의 서명 업로드 주소를 발급하고, 브라우저가 원본을 올리고, `extract-text`가 서명 읽기 주소를 엔진에 넘긴 뒤 파일을 지운다. Python 없이 4.5MB 한도와 canvas 한도를 함께 피한다. 통이미지 정확도는 미확인이라 기본 경로가 아니다.
 
+### 8.9 봉사자 로그인
+
+계정은 환경 변수 `VOLUNTEER_PHONE`, `VOLUNTEER_PASSWORD` 한 쌍이다(DB 표 없음). 서버 모듈은 `lib/volunteerAuth.ts`다.
+
+| 경로 | 성공 | 실패 |
+|---|---|---|
+| `POST /api/auth/login` `{phone, password}` | 200 `{ok:true}` + 쿠키 `lh_volunteer` | 401 `invalid_credentials`(틀린 번호·틀린 비밀번호·설정 없음이 같은 본문), 400 `invalid_request`(JSON 아님, 문자열 아님, 번호 32자 초과, 비밀번호 256자 초과, 본문 1024바이트 초과), 429 `rate_limited`(+`Retry-After`) |
+| `POST /api/auth/logout` | 200 `{ok:true}` + 빈 쿠키(Max-Age=0) | 없음 |
+
+- 비교: 번호는 숫자만 남겨(하이픈 허용), 비밀번호는 앞뒤 공백을 잘라 입력과 설정 값을 각각 SHA-256으로 해시한 뒤 `timingSafeEqual`로 비교한다. 두 비교를 모두 계산한 뒤 합쳐 어느 쪽이 틀렸는지 시간으로 드러나지 않게 한다.
+- 설정 없음: 번호 숫자가 비었거나 비밀번호가 12자 미만이면 설정이 없는 것으로 본다. 로그인은 같은 401이고 서버 로그에는 `volunteer-auth not_configured reason=<phone_missing|password_missing|password_short>` 한 줄만 남는다(값은 남기지 않는다). 세션 확인(매 요청)에서는 로그를 남기지 않는다.
+- 세션: 쿠키 값은 `v1.<volunteerId>.<만료 unix초>.<서명>`이다. 서명은 HMAC-SHA256이고, 키는 `scrypt(비밀번호, "lighthouse/volunteer-session/v1|" + 번호 숫자)`로 서버가 만든다(인스턴스마다 한 번). 그래서 번호나 비밀번호를 바꾸면 모든 기기의 세션이 무효가 된다. 상태를 서버에 저장하지 않는다.
+- 쿠키: 이름 `lh_volunteer`, HttpOnly, SameSite=Lax, Path=/, Max-Age=604800(7일). `https`이거나 `VERCEL=1`이면 Secure다(http 개발·시험에서는 Secure 없음).
+- 횟수 제한: 같은 주소(`x-forwarded-for` 첫 값) 10분에 5번(성공도 센다). 본문을 읽기 전에 검사한다. 서버 메모리 기준이다.
+- 로그: `POST /api/auth/login <상태> <ms>ms`, `POST /api/auth/logout 200 <ms>ms`만 남긴다.
+- 한계: 로그아웃은 그 기기의 쿠키만 지운다(훔친 쿠키는 만료까지 유효). 전체 로그아웃은 비밀번호 변경뿐이다. 횟수 제한은 서버 인스턴스마다 따로라 분산 추측을 다 막지 못하므로 12자 이상 비밀번호로 완화한다.
+
 ## 9. 챗봇
 
 호출값, 클라이언트 설정, 스트림 처리, 횟수 제한은 v1 그대로다(`gpt-oss-120b`, `stream: true`, `max_completion_tokens: 800`, `maxRetries: 1`, `timeout: 20_000`, 분당 20회).
@@ -417,7 +437,7 @@ type SummaryDraft = {
 | `npm run check` | ESLint, `tsc --noEmit`, Vitest | 없음 |
 | `npm run test:e2e` | 로컬 서버 전체 흐름, 접근성 | 없음(`LLM_MODE=mock`, `STORE_MODE=memory`, `EXTRACT_MODE=mock`) |
 | `npm run test:chatbot` | 고정 질문 품질 | 실제 Groq, 7초 간격 |
-| `BASE_URL=... npm run test:public` | 공개 주소 1회 완주 | 실제 Groq·저장소·글자 읽기 각 1회 |
+| `BASE_URL=... npm run test:public` | 공개 주소 이용자 완주와 봉사자 쪽 잠금 확인 | 실제 저장소만(Groq 호출 없음) |
 | (새) 실제 Postgres 시험 | `claim_request` 동시 호출에서 하나만 `claimed`, `complete_request` 재전송 같은 결과 | 로컬 `supabase start` 또는 개발용 프로젝트(사람 결정) |
 
 - v1의 가짜 음성 입력, 화면 시험 환경(iPhone 15·WebKit), 필수 사례, 챗봇 품질 규칙은 그대로다. 통과 보고에는 "가짜 음성 입력 기준"을 밝힌다.
@@ -447,7 +467,8 @@ type SummaryDraft = {
 | 2 | `stage/demo1` | `feat/demo1/queue` | `requests` 표 전체(§8.3), `register_request`, 플로우 A API, 대기번호 | 1 |
 | 3a | `stage/demo3` | `feat/demo3/search-advice` | `volunteerRequest.ts`(어댑터 포함), `/api/chat` 선택 필드, 지시문 줄, 고정 질문 추가 | 없음 |
 | 3b | `stage/demo4` | `feat/demo4/experiment`, `feat/demo4/upload-summary` | 엔진 비교 실험, `imagePieces`, `extract`, `summaryDraft`, `evidenceCheck`, 두 API, `InfoSummary` 부품 | 공용 타입만(3a와 같은 파일을 고치지 않음) |
-| 4 | `stage/demo2` | `feat/demo2/volunteer-queue` | `claim`/`release` 함수, 대기열·선택·상세 API, `/volunteer` 목록, `/volunteer/requests/[id]` 뼈대, 3a·3b 부품을 이 화면에 연결 | 2가 main에 병합된 뒤 |
+| 4-0 | `stage/demo2` | `feat/demo2/volunteer-login` | 봉사자 로그인(계정 1개, 환경 변수), 접근 코드 제거, 시연 매칭을 등록 계정으로 | 없음 |
+| 4 | `stage/demo2` | `feat/demo2/volunteer-queue` | `claim`/`release` 함수, 대기열·선택·상세 API, `/volunteer` 목록, `/volunteer/requests/[id]` 뼈대, 3a·3b 부품을 이 화면에 연결 | 2가 main에 병합된 뒤, 4-0 다음 |
 | 5 | `stage/demo5` | `feat/demo5/verify` | ⑤ 요약 확인·수정 화면(3b에 넣을지는 그날 계획) | 3b |
 | 6 | `stage/demo6` | `feat/demo6/send-result` | `results` 표, `complete_request`, 결과 API, `ResultForm`, 플로우 C 응답 | 3b의 `SummaryDraft` 타입, 4 |
 
