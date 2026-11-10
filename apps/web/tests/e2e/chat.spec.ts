@@ -39,15 +39,14 @@ const answer = (page: Page) => page.locator(".chat-answer");
 
 const nextClient = () => `test-${randomUUID()}`;
 
-async function expectNoBlockingAxe(page: Page) {
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-    .analyze();
+/** 봉사자 챗봇 화면은 태그·영향도와 무관하게 axe 위반 0건이어야 한다. */
+async function expectNoAxeViolations(page: Page) {
+  const results = await new AxeBuilder({ page }).analyze();
   expect(
-    results.violations.filter(
-      (violation) =>
-        violation.impact === "critical" || violation.impact === "serious",
-    ),
+    results.violations.map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+    })),
   ).toEqual([]);
 }
 
@@ -123,7 +122,7 @@ test.describe("봉사자 챗봇", () => {
     await expect(askButton(page)).toBeVisible();
     await expect(page.getByText(REQUEST_SENTENCE, { exact: true })).toBeVisible();
 
-    await expectNoBlockingAxe(page);
+    await expectNoAxeViolations(page);
     await answer(page).scrollIntoViewIfNeeded();
     await page.screenshot({
       path: "test-results/volunteer-chat.png",
@@ -260,7 +259,7 @@ test.describe("봉사자 챗봇", () => {
     await confirmQuestion(page).click();
     await expect(status(page)).toHaveText(STATUS.arrived);
     await expect(answer(page)).toBeFocused();
-    await expectNoBlockingAxe(page);
+    await expectNoAxeViolations(page);
   });
 
   test("매칭 정보가 없으면 챗봇을 보여 주지 않는다", async ({ page }) => {
@@ -334,7 +333,7 @@ test.describe("챗봇 오류 안내", () => {
     await expect(status(page)).toHaveText(STATUS.failed);
     await expect(retryButton(page)).toBeFocused();
     await expect(retryButton(page)).not.toHaveAttribute("aria-disabled");
-    await expectNoBlockingAxe(page);
+    await expectNoAxeViolations(page);
 
     await page.unroute("**/api/chat");
     await retryButton(page).click();

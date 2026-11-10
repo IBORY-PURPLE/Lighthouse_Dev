@@ -43,18 +43,7 @@ const storedMatch = (page: Page) =>
  */
 const nextClient = () => `test-${randomUUID()}`;
 
-async function expectNoBlockingAxe(page: Page) {
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-    .analyze();
-  const blocking = results.violations.filter(
-    (violation) =>
-      violation.impact === "critical" || violation.impact === "serious",
-  );
-  expect(blocking).toEqual([]);
-}
-
-/** 이용자 화면(플로우 A)은 태그·영향도와 무관하게 axe 위반 0건이어야 한다. */
+/** 이용자·봉사자 화면 모두 태그·영향도와 무관하게 axe 위반 0건이어야 한다. */
 async function expectNoAxeViolations(page: Page) {
   const results = await new AxeBuilder({ page }).analyze();
   expect(
@@ -321,7 +310,7 @@ test.describe("봉사자 화면(시연)", () => {
     );
     await expect(page).toHaveTitle(/시연/);
     await expect(page.getByText(PASS_SENTENCE, { exact: true })).toBeVisible();
-    await expectNoBlockingAxe(page);
+    await expectNoAxeViolations(page);
     await page.screenshot({ path: "test-results/volunteer-skeleton.png" });
   });
 
@@ -362,7 +351,7 @@ test.describe("봉사자 화면(시연)", () => {
     await expect(heading(page)).toBeFocused();
     await expect(page).toHaveTitle(/시연/);
     await expect(status(page)).toHaveText("매칭 정보가 없습니다.");
-    await expectNoBlockingAxe(page);
+    await expectNoAxeViolations(page);
 
     const link = page.getByRole("link", { name: "이용자 화면으로 돌아가기" });
     const box = await link.boundingBox();
