@@ -5,7 +5,10 @@ import {
   speechInputReducer,
   SPEECH_LISTEN_TIMEOUT_MS,
   SPEECH_START_DELAY_MS,
+  SPEECH_FIRST_START_TIMEOUT_MS,
   SPEECH_START_TIMEOUT_MS,
+  hasSpeechStartedBefore,
+  rememberSpeechStarted,
   startRecognition,
   STATUS,
   type RecognitionHandlers,
@@ -90,6 +93,46 @@ describe("startRecognition", () => {
     vi.advanceTimersByTime(1);
     expect(handlers.onUnavailable).toHaveBeenCalledOnce();
     expect(FakeRecognition.last?.aborted).toBe(true);
+  });
+
+  it("처음 쓰는 기기는 긴 한도까지 기다리고, 그 안에 start가 오면 듣는다", () => {
+    const handlers = makeHandlers();
+    startRecognition(FakeRecognition, handlers, 0, SPEECH_FIRST_START_TIMEOUT_MS);
+    vi.advanceTimersByTime(SPEECH_START_TIMEOUT_MS * 3);
+    expect(handlers.onUnavailable).not.toHaveBeenCalled();
+
+    FakeRecognition.last?.onstart?.();
+    expect(handlers.onListening).toHaveBeenCalledOnce();
+    expect(handlers.onUnavailable).not.toHaveBeenCalled();
+  });
+
+  it("처음 쓰는 기기도 긴 한도를 넘기면 입력창으로 간다", () => {
+    const handlers = makeHandlers();
+    startRecognition(FakeRecognition, handlers, 0, SPEECH_FIRST_START_TIMEOUT_MS);
+    vi.advanceTimersByTime(SPEECH_FIRST_START_TIMEOUT_MS);
+    expect(handlers.onUnavailable).toHaveBeenCalledOnce();
+  });
+
+  it("허용 표시를 저장하고 읽는다(저장이 막히면 없는 것으로 본다)", () => {
+    const memory = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => memory.get(k) ?? null,
+      setItem: (k: string, v: string) => void memory.set(k, v),
+    };
+    expect(hasSpeechStartedBefore(storage)).toBe(false);
+    rememberSpeechStarted(storage);
+    expect(hasSpeechStartedBefore(storage)).toBe(true);
+
+    const blocked = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    expect(hasSpeechStartedBefore(blocked)).toBe(false);
+    expect(() => rememberSpeechStarted(blocked)).not.toThrow();
   });
 
   it("start 이벤트가 오면 무응답 타이머를 끈다", () => {
