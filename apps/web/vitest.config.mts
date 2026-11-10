@@ -12,5 +12,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/unit/**/*.test.ts"],
+    // 시험 전용 가짜 계정. 사람의 실제 값과 무관하다.
+    env: {
+      VOLUNTEER_PHONE: "010-0000-0000",
+      VOLUNTEER_PASSWORD: "unit-test-only-password",
+    },
   },
 });
