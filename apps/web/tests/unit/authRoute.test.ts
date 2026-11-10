@@ -3,10 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST as login } from "@/app/api/auth/login/route";
 import { POST as logout } from "@/app/api/auth/logout/route";
 
-// 값은 vitest.config.mts의 test.env에 있는 가짜 값이다.
-const PHONE = "010-0000-0000";
-const PHONE_DIGITS = "01000000000";
-const PASSWORD = "unit-test-only-password";
+import { fakeAccount } from "./helpers/volunteerSession";
+
+// 가짜 계정은 vitest.config.mts의 test.env에서만 정한다.
+const {
+  phone: PHONE,
+  phoneDigits: PHONE_DIGITS,
+  password: PASSWORD,
+} = fakeAccount();
 const WRONG_PASSWORD = "wrong-test-only-password";
 
 let nextClient = 1;

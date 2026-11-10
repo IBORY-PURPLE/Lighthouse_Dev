@@ -15,7 +15,11 @@ import {
 // 실제 아이폰 로그인과 실제 Groq 답변은 사람이 판정한다(B2).
 
 const WRONG_PASSWORD = "wrong-test-only-password";
-const HYPHEN_PHONE = "010-0000-0000";
+// 설정 파일(playwright.config.ts)의 가짜 번호를 하이픈 모양으로 바꾼 것.
+const HYPHEN_PHONE = E2E_VOLUNTEER_PHONE.replace(
+  /^(\d{3})(\d{4})(\d{4})$/,
+  "$1-$2-$3",
+);
 const LOGIN_FAILED = "전화번호 또는 비밀번호가 올바르지 않습니다.";
 const REGISTERED_NAME = "등록 봉사자";
 

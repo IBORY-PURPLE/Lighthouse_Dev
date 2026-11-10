@@ -2,8 +2,8 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { loginCookie } from "./helpers/volunteerLogin";
 
-// 접근 코드 주소는 없어졌다. 지운 주소 글자가 코드에 남지 않게 조각으로 만든다.
-const REMOVED_ACCESS_PATH = ["", "enter"].join("/");
+// PR #31에서 지운 접근 코드 주소. 404로 남아 있는지만 확인한다.
+const REMOVED_ACCESS_PATH = "/enter";
 
 test("첫 화면이 열리고 접근성 위반이 없다", async ({ page }) => {
   await page.goto("/");

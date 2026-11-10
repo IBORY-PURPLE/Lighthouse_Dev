@@ -7,11 +7,14 @@ import {
   VOLUNTEER_SESSION_MAX_AGE_SECONDS,
 } from "@/lib/volunteerAuth";
 import { REGISTERED_VOLUNTEER } from "@/lib/volunteers";
+import { fakeAccount } from "./helpers/volunteerSession";
 
-// 값은 vitest.config.mts의 test.env에 있는 가짜 값이다.
-const PHONE = "010-0000-0000";
-const PHONE_DIGITS = "01000000000";
-const PASSWORD = "unit-test-only-password";
+// 가짜 계정은 vitest.config.mts의 test.env에서만 정한다.
+const {
+  phone: PHONE,
+  phoneDigits: PHONE_DIGITS,
+  password: PASSWORD,
+} = fakeAccount();
 
 afterEach(() => {
   vi.unstubAllEnvs();

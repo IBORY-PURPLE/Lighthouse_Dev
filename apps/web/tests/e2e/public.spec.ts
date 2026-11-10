@@ -6,14 +6,19 @@ import { MATCH_TIMEOUT_MS } from "../../src/lib/matchHandoff";
 import { REQUEST_TIMEOUT_MS } from "../../src/lib/requestRecord";
 import { installFakeSpeech } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
+import {
+  E2E_VOLUNTEER_PASSWORD,
+  E2E_VOLUNTEER_PHONE,
+} from "./helpers/volunteerLogin";
 
 // 공개 주소 시험은 실제 봉사자 계정 값을 모른다. 실제 로그인과 챗봇은 사람이 본다(B2).
 // 로그인 시도는 그 주소의 10분 5회 제한에 들어가므로 가짜 값으로 1회만 시도한다.
-const FAKE_PHONE = "01000000000";
-const FAKE_PASSWORD = "public-test-fake-password";
+// 가짜 값은 설정 파일(playwright.config.ts)에서만 정한다.
+const FAKE_PHONE = E2E_VOLUNTEER_PHONE;
+const FAKE_PASSWORD = E2E_VOLUNTEER_PASSWORD;
 
-// 접근 코드 주소는 없어졌다. 지운 주소 글자가 코드에 남지 않게 조각으로 만든다.
-const REMOVED_ACCESS_PATH = ["", "enter"].join("/");
+// PR #31에서 지운 접근 코드 주소. 404로 남아 있는지만 확인한다.
+const REMOVED_ACCESS_PATH = "/enter";
 
 // Playwright가 apps/web/test-results를 비우므로 기록은 저장소 루트에 둔다.
 const RECORD_DIR = path.resolve(__dirname, "../../../../test-results/public");
