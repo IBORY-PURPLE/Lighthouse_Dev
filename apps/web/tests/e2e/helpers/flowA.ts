@@ -44,15 +44,25 @@ export async function answerFlowA(
   ).toBeFocused();
 }
 
-/** 세 질문에 답하고 매칭을 요청해 "봉사자 화면으로(시연)"까지 간다. */
+export const HANDOFF_NAME = "봉사자 화면으로(시연)";
+
+/**
+ * 세 질문에 답하고 매칭을 요청해 대기번호 화면(접수 완료)까지 간다. 대기번호를 돌려준다.
+ * PR 2부터 매칭 요청은 대기열 접수다. "봉사자 화면으로(시연)"은 이 화면에 있다.
+ */
 export async function completeFlowA(
   page: Page,
   answers: FlowAAnswers = DEFAULT_ANSWERS,
   options: { timeout?: number } = {},
-): Promise<void> {
+): Promise<number> {
   await answerFlowA(page, answers);
   await page.getByRole("button", { name: MATCH_REQUEST_NAME }).click();
   await expect(
-    page.getByRole("button", { name: "봉사자 화면으로(시연)" }),
+    page.getByRole("heading", { level: 2, name: "접수 완료" }),
   ).toBeFocused({ timeout: options.timeout });
+  await expect(page.getByRole("button", { name: HANDOFF_NAME })).toBeVisible();
+  const text = await page.locator(".queue-number").innerText();
+  const match = /대기번호 (\d+)번/.exec(text);
+  expect(match, "대기번호 표시").not.toBeNull();
+  return Number(match?.[1]);
 }

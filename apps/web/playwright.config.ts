@@ -35,6 +35,8 @@ export default defineConfig({
         timeout: 180_000,
         env: {
           LLM_MODE: "mock",
+          STORE_MODE: "memory",
+          EXTRACT_MODE: "mock",
           DEMO_ACCESS_CODE: E2E_ACCESS_CODE,
         },
       },

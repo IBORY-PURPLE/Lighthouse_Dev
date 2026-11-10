@@ -1,4 +1,4 @@
-// 이용자 화면 플로우 A(PR 1): 질문 3개 → 요약 → 매칭. 순수 함수만 둔다.
+// 이용자 화면 플로우 A: 질문 3개 → 요약 → 접수 → 대기번호(PR 2). 순수 함수만 둔다.
 // 답하는 동안에는 아무것도 보내지 않는다. 답은 이 상태(메모리)에만 있다.
 
 import { parseRequest } from "@/lib/parseRequest";
@@ -44,7 +44,19 @@ export const QUESTIONS: readonly [Question, Question, Question] = [
 /** /api/match와 같은 상한. */
 export const MAX_ANSWER_LENGTH = 200;
 
-export type FlowStep = "intro" | "asking" | "summary" | "matching" | "connected";
+// PR 2: 요약 다음은 접수(registering) → 대기번호(queued). 앱을 다시 열면 checking에서 서버에 묻는다.
+export type FlowStep =
+  | "checking"
+  | "intro"
+  | "asking"
+  | "summary"
+  | "registering"
+  | "queued";
+
+export interface QueuedRequest {
+  requestId: string;
+  queueNumber: number;
+}
 
 export interface RequestFlowModel {
   step: FlowStep;
@@ -54,14 +66,25 @@ export interface RequestFlowModel {
   inputMode: InputMode;
   /** asking이 아닐 때 상태 영역에 읽을 문구. asking일 때는 음성 입력 쪽 문구를 쓴다. */
   status: string;
+  /** 첫 접수 시도 때 정하고, 실패 뒤 다시 보낼 때 그대로 쓴다(번호가 둘로 늘지 않게). */
+  clientRequestId: string | null;
+  queued: QueuedRequest | null;
 }
 
 export type RequestFlowAction =
   | { type: "start" }
   | { type: "answer"; text: string; inputMode: InputMode }
-  | { type: "requestMatch" }
-  | { type: "matched"; volunteerName: string }
-  | { type: "matchFailed"; status: string };
+  | { type: "register"; clientRequestId: string }
+  | { type: "registered"; requestId: string; queueNumber: number }
+  | { type: "registerFailed"; status: string }
+  /** 서버가 품목이 없다고 하면(422) 질문 1로 돌아간다. */
+  | { type: "backToProduct" }
+  | { type: "check" }
+  | { type: "resumed"; requestId: string; queueNumber: number; product: string }
+  | { type: "resumeGone" }
+  | { type: "resumeFailed"; requestId: string; queueNumber: number; product: string }
+  | { type: "handoffFailed"; status: string }
+  | { type: "newRequest" };
 
 export function createInitialFlow(inputMode: InputMode): RequestFlowModel {
   return {
@@ -70,6 +93,8 @@ export function createInitialFlow(inputMode: InputMode): RequestFlowModel {
     answers: { product: "", budget: "", condition: "" },
     inputMode,
     status: "",
+    clientRequestId: null,
+    queued: null,
   };
 }
 
@@ -113,18 +138,64 @@ export function requestFlowReducer(
         status: summaryStatus(answers),
       };
     }
-    case "requestMatch":
+    case "register":
       if (model.step !== "summary") return model;
-      return { ...model, step: "matching", status: STATUS.matching };
-    case "matched":
-      if (model.step !== "matching") return model;
       return {
         ...model,
-        step: "connected",
-        status: STATUS.connected(action.volunteerName),
+        step: "registering",
+        clientRequestId: model.clientRequestId ?? action.clientRequestId,
+        status: STATUS.registering,
       };
-    case "matchFailed":
-      if (model.step !== "matching") return model;
+    case "registered":
+      if (model.step !== "registering") return model;
+      return {
+        ...model,
+        step: "queued",
+        queued: { requestId: action.requestId, queueNumber: action.queueNumber },
+        status: STATUS.queued(action.queueNumber),
+      };
+    case "registerFailed":
+      // 답과 clientRequestId는 그대로 둔다.
+      if (model.step !== "registering") return model;
       return { ...model, step: "summary", status: action.status };
+    case "backToProduct":
+      if (model.step !== "registering") return model;
+      return {
+        ...model,
+        step: "asking",
+        question: 0,
+        clientRequestId: null,
+        status: "",
+      };
+    case "check":
+      if (model.step !== "intro") return model;
+      return { ...model, step: "checking", status: STATUS.checking };
+    case "resumed":
+      if (model.step !== "checking") return model;
+      return {
+        ...model,
+        step: "queued",
+        answers: { ...model.answers, product: action.product },
+        queued: { requestId: action.requestId, queueNumber: action.queueNumber },
+        status: STATUS.waiting(action.queueNumber),
+      };
+    case "resumeGone":
+      if (model.step !== "checking") return model;
+      return { ...model, step: "intro", status: STATUS.requestGone };
+    case "resumeFailed":
+      if (model.step !== "checking") return model;
+      return {
+        ...model,
+        step: "queued",
+        answers: { ...model.answers, product: action.product },
+        queued: { requestId: action.requestId, queueNumber: action.queueNumber },
+        status: STATUS.checkFailed(action.queueNumber),
+      };
+    case "handoffFailed":
+      if (model.step !== "queued") return model;
+      return { ...model, status: action.status };
+    case "newRequest":
+      if (model.step !== "queued") return model;
+      return createInitialFlow(model.inputMode);
   }
 }

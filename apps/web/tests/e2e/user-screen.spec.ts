@@ -12,7 +12,7 @@ import {
 import { answerFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
 
 // 전부 가짜 음성 입력 기준이다. 실제 음성 인식과 VoiceOver 낭독은 사람이 판정한다.
-// 플로우 A(PR 1): 시작하기 → 질문 1/3·2/3·3/3 → 요약 → 봉사자 매칭 요청.
+// 플로우 A: 시작하기 → 질문 1/3·2/3·3/3 → 요약 → 봉사자 매칭 요청(PR 2: 대기열 접수).
 // 기존 한 문장 요청 시험은 질문 1 기준으로 옮겼다(흐름 변경, PR 본문 "시험 변경").
 
 const PASS_SENTENCE = "sony껄로 헤드셋 사고싶어";
@@ -76,14 +76,14 @@ async function expectFellBackToInput(page: Page) {
 
 /**
  * 이 시점 뒤의 모든 네트워크 요청(주소 종류 무관)을 page.route로 모은다.
- * /api/match는 응답하지 않아 "찾고 있습니다"에 머물게 하고, 나머지는 그대로 보낸다.
+ * /api/requests는 응답하지 않아 "접수하고 있습니다"에 머물게 하고, 나머지는 그대로 보낸다.
  */
 async function recordApi(page: Page) {
   const calls: { url: string; body: unknown }[] = [];
   await page.route("**/*", (route) => {
     const request = route.request();
     calls.push({ url: request.url(), body: request.postDataJSON() });
-    if (!request.url().includes("/api/match")) return route.continue();
+    if (!request.url().includes("/api/requests")) return route.continue();
   });
   return calls;
 }
@@ -276,7 +276,7 @@ test.describe("음성 API가 있을 때", () => {
     expect(calls).toEqual([]);
   });
 
-  test("봉사자 매칭 요청: 찾는 중 안내, 초점 유지, 제품 답을 한 번만 보낸다", async ({
+  test("봉사자 매칭 요청: 접수 중 안내, 초점 유지, 세 답과 id를 한 번만 보낸다", async ({
     page,
   }) => {
     const calls = await recordApi(page);
@@ -285,13 +285,20 @@ test.describe("음성 API가 있을 때", () => {
 
     await matchButton(page).click();
 
-    await expect(status(page)).toHaveText("봉사자를 찾고 있습니다.");
+    await expect(status(page)).toHaveText("요청을 접수하고 있습니다.");
     await expect(matchButton(page)).toBeFocused();
     await expect(matchButton(page)).toHaveAttribute("aria-disabled", "true");
     await expect
       .poll(() => calls.map((call) => call.body))
-      .toEqual([{ text: DEFAULT_ANSWERS.product }]);
-    expect(new URL(calls[0].url).pathname).toBe("/api/match");
+      .toEqual([
+        {
+          clientRequestId: expect.stringMatching(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+          ),
+          ...DEFAULT_ANSWERS,
+        },
+      ]);
+    expect(new URL(calls[0].url).pathname).toBe("/api/requests");
 
     // aria-disabled라 Playwright의 click은 기다리기만 하므로 이벤트를 직접 보낸다.
     await matchButton(page).dispatchEvent("click");
