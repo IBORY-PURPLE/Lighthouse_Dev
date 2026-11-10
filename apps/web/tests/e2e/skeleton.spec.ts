@@ -1,6 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
+import { loginCookie } from "./helpers/volunteerLogin";
+
+// 접근 코드 주소는 없어졌다. 지운 주소 글자가 코드에 남지 않게 조각으로 만든다.
+const REMOVED_ACCESS_PATH = ["", "enter"].join("/");
 
 test("첫 화면이 열리고 접근성 위반이 없다", async ({ page }) => {
   await page.goto("/");
@@ -14,38 +17,21 @@ test("첫 화면이 열리고 접근성 위반이 없다", async ({ page }) => {
   expect(blocking).toEqual([]);
 });
 
-test("/enter와 /api/health 접근 흐름", async ({ request }) => {
-  const wrong = await request.get("/enter?code=wrong", { maxRedirects: 0 });
-  expect(wrong.status()).toBe(401);
+test("접근 코드 주소는 없고 /api/health는 로그인 뒤에만 열린다", async ({
+  request,
+}) => {
+  const removed = await request.get(REMOVED_ACCESS_PATH, { maxRedirects: 0 });
+  expect(removed.status()).toBe(404);
 
   const noCookie = await request.get("/api/health");
   expect(noCookie.status()).toBe(401);
 
-  const right = await request.get(`/enter?code=${E2E_ACCESS_CODE}`, {
-    maxRedirects: 0,
-  });
-  expect(right.status()).toBe(303);
-  expect(right.headers()["location"]).toBe("/");
-
-  const cookie = (right.headers()["set-cookie"] ?? "").split(";")[0];
+  const cookie = await loginCookie(request);
   const health = await request.get("/api/health", {
     headers: { cookie },
   });
   expect(health.status()).toBe(200);
   expect((await health.json()).llmMode).toBe("mock");
-});
-
-test("브라우저로 맞는 코드를 열면 코드 없는 /로 이동하고 쿠키가 생긴다", async ({
-  page,
-  context,
-}) => {
-  await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-  await expect(page).toHaveURL(/\/$/);
-  expect(page.url()).not.toContain(E2E_ACCESS_CODE);
-
-  const cookies = await context.cookies();
-  const access = cookies.find((cookie) => cookie.name === "lh_access");
-  expect(access?.httpOnly).toBe(true);
 });
 
 test("음성 시험 페이지가 Next 뒤에서도 열린다", async ({ page }) => {

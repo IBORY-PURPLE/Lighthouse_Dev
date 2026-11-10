@@ -1,7 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const E2E_PORT = 3100;
-export const E2E_ACCESS_CODE = "e2e-test-code";
+// 시험 전용 가짜 계정. 사람의 실제 값과 무관하다.
+export const E2E_VOLUNTEER_PHONE = "01000000000";
+export const E2E_VOLUNTEER_PASSWORD = "e2e-test-only-password";
 
 const baseURL = process.env.BASE_URL ?? `http://localhost:${E2E_PORT}`;
 
@@ -37,7 +39,8 @@ export default defineConfig({
           LLM_MODE: "mock",
           STORE_MODE: "memory",
           EXTRACT_MODE: "mock",
-          DEMO_ACCESS_CODE: E2E_ACCESS_CODE,
+          VOLUNTEER_PHONE: E2E_VOLUNTEER_PHONE,
+          VOLUNTEER_PASSWORD: E2E_VOLUNTEER_PASSWORD,
         },
       },
 });
