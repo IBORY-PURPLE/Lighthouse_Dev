@@ -56,7 +56,7 @@ describe("requestMatch", () => {
   }
 
   for (const [code, status] of [
-    [401, STATUS.noAccess],
+    [401, STATUS.matchFailed],
     [429, STATUS.tooMany],
     [500, STATUS.matchFailed],
   ] as const) {

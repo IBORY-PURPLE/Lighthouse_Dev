@@ -1,8 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import { isChatRequest, MAX_QUESTION_LENGTH } from "@/lib/chat";
 import { isLlmConfigured, LlmError, streamAnswer } from "@/lib/llm";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
+import {
+  readVolunteerSession,
+  VOLUNTEER_SESSION_COOKIE,
+} from "@/lib/volunteerAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,7 +100,7 @@ async function handleChat(
   request: NextRequest,
   onStreamFailed: () => void,
 ): Promise<Response> {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
+  if (!readVolunteerSession(request.cookies.get(VOLUNTEER_SESSION_COOKIE)?.value)) {
     return failure(401, "unauthorized");
   }
 

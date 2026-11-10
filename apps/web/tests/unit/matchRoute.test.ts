@@ -1,25 +1,18 @@
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/match/route";
-import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 
 const ORIGIN = "http://localhost:3000";
 const PASS_SENTENCE = "sony껄로 헤드셋 사고싶어";
 
 let nextClient = 1;
 
-function matchRequest(
-  body: string,
-  { cookie = true, client }: { cookie?: boolean; client?: string } = {},
-) {
+function matchRequest(body: string, { client }: { client?: string } = {}) {
   return new NextRequest(`${ORIGIN}/api/match`, {
     method: "POST",
     body,
     headers: {
       "x-forwarded-for": client ?? `203.0.113.${(nextClient += 1)}`,
-      ...(cookie
-        ? { cookie: `${ACCESS_COOKIE}=${hashAccessCode("right-code")}` }
-        : {}),
     },
   });
 }
@@ -27,7 +20,6 @@ function matchRequest(
 const textBody = (text: string) => JSON.stringify({ text });
 
 describe("POST /api/match", () => {
-  beforeEach(() => vi.stubEnv("DEMO_ACCESS_CODE", "right-code"));
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -43,8 +35,8 @@ describe("POST /api/match", () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
     expect(body.volunteer).toEqual({
-      id: "v-01",
-      displayName: "가상 봉사자 A",
+      id: "vol-01",
+      displayName: "등록 봉사자",
     });
     expect(body.request).toEqual({
       brand: "Sony",
@@ -59,12 +51,22 @@ describe("POST /api/match", () => {
     expect(first.requestId).not.toBe(second.requestId);
   });
 
-  it("쿠키가 없으면 내용을 보기 전에 401이다", async () => {
-    const response = await POST(
-      matchRequest(textBody(PASS_SENTENCE), { cookie: false }),
-    );
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ ok: false, error: "unauthorized" });
+  it("로그인 쿠키 없이 200이고 등록 봉사자로 연결한다", async () => {
+    const response = await POST(matchRequest(textBody(PASS_SENTENCE)));
+    expect(response.status).toBe(200);
+    expect((await response.json()).volunteer).toEqual({
+      id: "vol-01",
+      displayName: "등록 봉사자",
+    });
+  });
+
+  it("브랜드가 없는 요청도 같은 등록 봉사자로 연결한다", async () => {
+    const response = await POST(matchRequest(textBody("헤드폰 사고싶어")));
+    expect(response.status).toBe(200);
+    expect((await response.json()).volunteer).toEqual({
+      id: "vol-01",
+      displayName: "등록 봉사자",
+    });
   });
 
   it("200자는 통과하고 201자는 400이다", async () => {

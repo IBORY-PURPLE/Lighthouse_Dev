@@ -4,8 +4,8 @@ import { APIConnectionTimeoutError, RateLimitError } from "groq-sdk";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maxDuration, POST, runtime } from "@/app/api/chat/route";
-import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import { LLM_MODEL, TRUNCATED_NOTICE } from "@/lib/llm";
+import { sessionCookieHeader } from "./helpers/volunteerSession";
 
 // 일반 시험은 실제 Groq를 부르지 않는다(.claude/rules/chatbot-quality.md).
 const { create, constructed } = vi.hoisted(() => ({
@@ -64,9 +64,7 @@ function chatRequest(
     body: typeof body === "string" ? body : JSON.stringify(body),
     headers: {
       "x-forwarded-for": client ?? `203.0.113.${(nextClient += 1)}`,
-      ...(cookie
-        ? { cookie: `${ACCESS_COOKIE}=${hashAccessCode("right-code")}` }
-        : {}),
+      ...(cookie ? { cookie: sessionCookieHeader() } : {}),
       ...headers,
     },
   });
@@ -77,7 +75,6 @@ const errorOf = async (response: Response) =>
 
 describe("POST /api/chat", () => {
   beforeEach(() => {
-    vi.stubEnv("DEMO_ACCESS_CODE", "right-code");
     vi.stubEnv("GROQ_API_KEY", "test-key");
     vi.stubEnv("LLM_MODE", "");
     vi.stubEnv("VERCEL_ENV", "");
@@ -211,7 +208,7 @@ describe("POST /api/chat", () => {
       duplex: "half",
       headers: {
         "x-forwarded-for": `203.0.113.${(nextClient += 1)}`,
-        cookie: `${ACCESS_COOKIE}=${hashAccessCode("right-code")}`,
+        cookie: sessionCookieHeader(),
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
 

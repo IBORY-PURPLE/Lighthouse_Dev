@@ -39,8 +39,6 @@ function outcomeForStatus(status: number): MatchOutcome {
       return { kind: "rejected", status: STATUS.tooLong };
     case 422:
       return { kind: "rejected", status: STATUS.needItem };
-    case 401:
-      return { kind: "failed", status: STATUS.noAccess };
     case 429:
       return { kind: "failed", status: STATUS.tooMany };
     default:
