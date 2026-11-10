@@ -12,3 +12,6 @@ playwright-report/
 *.log
 .demo-access.local
 supabase/.temp/
+
+# 보고용 HTML(로컬 전용)
+docs/briefings/
