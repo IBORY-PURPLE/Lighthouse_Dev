@@ -11,6 +11,30 @@ export const PRIMARY_INPUT: InputMode = "speech";
 export const SPEECH_START_DELAY_MS = 1000;
 /** start() 호출 뒤 이 시간 안에 start 이벤트가 없으면 입력창으로 간다. */
 export const SPEECH_START_TIMEOUT_MS = 3000;
+/**
+ * 이 기기에서 인식이 한 번도 시작된 적 없으면(마이크·음성 인식 허용 창이 뜰 수 있다) 허용을
+ * 누를 때까지 기다리는 시간. 허용 창이 떠 있는 동안에는 start 이벤트가 오지 않는다.
+ * 거부하면 not-allowed 오류가 바로 와서 입력창으로 간다.
+ */
+export const SPEECH_FIRST_START_TIMEOUT_MS = 60_000;
+/** 인식이 한 번 시작되면 기기에 남기는 표시(허용이 끝났다는 뜻). */
+export const SPEECH_STARTED_KEY = "lh.speech.started.v1";
+
+export function hasSpeechStartedBefore(storage: Pick<Storage, "getItem">): boolean {
+  try {
+    return storage.getItem(SPEECH_STARTED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function rememberSpeechStarted(storage: Pick<Storage, "setItem">): void {
+  try {
+    storage.setItem(SPEECH_STARTED_KEY, "1");
+  } catch {
+    // 저장이 막힌 브라우저에서는 매번 첫 사용처럼 오래 기다린다.
+  }
+}
 /** 듣기 시작 뒤 end 이벤트가 끝내 오지 않아도 버튼이 멈춰 있지 않게 끊는 시간. */
 export const SPEECH_LISTEN_TIMEOUT_MS = 15_000;
 /** no-speech, nomatch가 연속 이 횟수면 입력창으로 간다. */
@@ -35,6 +59,24 @@ export const STATUS = {
   questionTooLong: "질문이 너무 깁니다. 짧게 다시 말해 주세요.",
   chatFailed: "답변 서버에 연결하지 못했습니다. 다시 시도해 주세요.",
   chatNotConfigured: "챗봇 설정이 끝나지 않았습니다.",
+  typedBack: (text: string) => `입력한 내용: ${text}`,
+  needProduct:
+    "어떤 제품인지 알아듣지 못했습니다. 제품 이름을 넣어 다시 말씀하세요.",
+  answerTooLong: "답이 너무 깁니다. 짧게 다시 말씀하세요.",
+  summary: (product: string, budget: string, condition: string) =>
+    `요청 내용입니다. 제품 ${product}. 예산 ${budget}. ${condition}. 맞으면 봉사자 매칭 요청 버튼을 누르세요.`,
+  registering: "요청을 접수하고 있습니다.",
+  registerFailed:
+    "접수하지 못했습니다. 답은 그대로 있습니다. 봉사자 매칭 요청 버튼을 다시 누르세요.",
+  queued: (queueNumber: number) =>
+    `접수됐습니다. 대기번호 ${queueNumber}번입니다. 앱을 닫아도 됩니다. 다시 열면 대기번호를 알려 드립니다.`,
+  checking: "지난 요청을 확인하고 있습니다.",
+  waiting: (queueNumber: number) =>
+    `대기번호 ${queueNumber}번, 봉사자를 기다리고 있습니다.`,
+  requestGone:
+    "지난 요청을 찾지 못했습니다. 새로 요청하려면 시작하기를 누르세요.",
+  checkFailed: (queueNumber: number) =>
+    `대기번호 ${queueNumber}번입니다. 지금은 상태를 확인하지 못했습니다.`,
 } as const;
 
 /** 입력창으로 바로 가는 오류. 그 밖의 오류는 못 들은 것으로 친다. */
@@ -79,7 +121,13 @@ export type SpeechInputAction =
   /** 봉사자 화면: 답변을 받았다. 초점은 답변 영역으로 가므로 입력 쪽에서 옮기지 않는다. */
   | { type: "answered"; status: string }
   | { type: "matchRejected"; status: string }
-  | { type: "matchFailed"; status: string };
+  | { type: "matchFailed"; status: string }
+  /** 이용자 질문 흐름: 질문이 바뀌면 새 질문의 시작 방식으로 처음부터. */
+  | { type: "reset"; mode: InputMode }
+  /** 입력창 답도 바로 보내지 않고 확인 단계를 거친다. */
+  | { type: "typed"; text: string }
+  /** 입력창 답 확인에서 "다시 입력". */
+  | { type: "reenter" };
 
 export function createInitialModel(mode: InputMode): SpeechInputModel {
   return {
@@ -123,7 +171,8 @@ export function speechInputReducer(
         : { ...model, state: "idle", misses, status: STATUS.missed };
     }
     case "unavailable":
-      return fallBack(model);
+      // 입력창으로 시작한 질문에서 같은 안내를 다시 읽지 않는다.
+      return model.state === "text" && model.fellBack ? model : fallBack(model);
     case "submit":
       return {
         ...model,
@@ -150,10 +199,11 @@ export function speechInputReducer(
         status: STATUS.connected(action.volunteerName),
       };
     // transcript가 있으면 음성으로 낸 요청이고, 없으면 입력창으로 낸 요청이다.
+    // 입력창 답을 확인 단계에 올렸으면(fellBack) transcript가 있어도 입력창으로 돌아간다.
     case "matchRejected":
       return {
         ...model,
-        state: model.transcript ? "idle" : "text",
+        state: model.transcript && !model.fellBack ? "idle" : "text",
         transcript: "",
         status: action.status,
         refocus: "reenter",
@@ -164,6 +214,24 @@ export function speechInputReducer(
         state: model.transcript ? "confirming" : "text",
         status: action.status,
         refocus: "resend",
+      };
+    case "reset":
+      return { ...createInitialModel(action.mode), fellBack: action.mode === "text" };
+    case "typed":
+      return {
+        ...model,
+        state: "confirming",
+        transcript: action.text,
+        status: STATUS.typedBack(action.text),
+        refocus: null,
+      };
+    case "reenter":
+      return {
+        ...model,
+        state: "text",
+        transcript: "",
+        status: "",
+        refocus: "reenter",
       };
   }
 }
@@ -218,6 +286,7 @@ export function startRecognition(
   Ctor: SpeechRecognitionCtor,
   handlers: RecognitionHandlers,
   delayMs: number = SPEECH_START_DELAY_MS,
+  startTimeoutMs: number = SPEECH_START_TIMEOUT_MS,
 ): () => void {
   let recognition: SpeechRecognitionLike | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -282,7 +351,7 @@ export function startRecognition(
     }
     timer = setTimeout(
       () => giveUp(handlers.onUnavailable),
-      SPEECH_START_TIMEOUT_MS,
+      startTimeoutMs,
     );
   };
 

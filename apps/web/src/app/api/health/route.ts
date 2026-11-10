@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import { getLlmMode } from "@/lib/llm";
+import { getRequestStore } from "@/lib/requestStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +21,7 @@ export function GET(request: NextRequest) {
       ok: true,
       groqKeyConfigured: Boolean(process.env.GROQ_API_KEY?.trim()),
       llmMode: getLlmMode(),
+      store: getRequestStore().storeKind(),
     },
     { headers: NO_STORE },
   );

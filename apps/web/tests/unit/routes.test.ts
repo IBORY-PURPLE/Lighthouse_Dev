@@ -44,6 +44,8 @@ describe("GET /api/health", () => {
   beforeEach(() => {
     vi.stubEnv("DEMO_ACCESS_CODE", "right-code");
     vi.stubEnv("GROQ_API_KEY", FAKE_GROQ_KEY);
+    // 저장소 종류만 돌려준다. 시험은 메모리 저장소로 돈다.
+    vi.stubEnv("STORE_MODE", "memory");
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -63,6 +65,7 @@ describe("GET /api/health", () => {
       ok: true,
       groqKeyConfigured: true,
       llmMode: "live",
+      store: "memory",
     });
     expect(text).not.toContain(FAKE_GROQ_KEY);
   });
@@ -75,6 +78,7 @@ describe("GET /api/health", () => {
       ok: true,
       groqKeyConfigured: false,
       llmMode: "mock",
+      store: "memory",
     });
   });
 
