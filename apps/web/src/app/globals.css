@@ -162,6 +162,25 @@ main {
   outline: none;
 }
 
+/* 로그인·로그아웃 버튼은 세로로 늘어나지 않는다. */
+.volunteer-screen > .big-button {
+  flex: none;
+}
+
+/* 로그인 오류. 밝은 바탕 #8a1c1c(대비 7:1 이상), 어두운 바탕 #ff9b9b. */
+.form-error {
+  margin: 0;
+  color: #8a1c1c;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+@media (prefers-color-scheme: dark) {
+  .form-error {
+    color: #ff9b9b;
+  }
+}
+
 .volunteer-screen a {
   box-sizing: border-box;
   align-self: flex-start;

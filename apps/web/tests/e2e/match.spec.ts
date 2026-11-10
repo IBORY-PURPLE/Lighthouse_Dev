@@ -1,12 +1,6 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
+import { expect, test, type Page } from "@playwright/test";
 import { fail, installFakeSpeech, say } from "./helpers/fakeSpeech";
 import {
   answerFlowA,
@@ -14,6 +8,7 @@ import {
   DEFAULT_ANSWERS,
   MATCH_REQUEST_NAME,
 } from "./helpers/flowA";
+import { loginVolunteer } from "./helpers/volunteerLogin";
 
 // 전부 가짜 음성 입력 기준이다. 실제 음성 인식과 VoiceOver 낭독은 사람이 판정한다.
 
@@ -76,20 +71,11 @@ async function expectNoAxeViolations(page: Page) {
   ).toEqual([]);
 }
 
+/** 이용자 화면은 로그인 없이 열린다. */
 async function openUserScreen(page: Page) {
-  const context = page.context();
-  await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
   await installFakeSpeech(page);
-  await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-  await expect(page).toHaveURL(/\/$/);
-
-  // Windows WebKit은 Secure 쿠키를 저장은 해도 http://localhost로 보내지 않는다.
-  // /enter가 준 값을 그대로 두고 시험 안에서만 Secure를 뺀다. 운영은 HTTPS다.
-  const access = (await context.cookies()).find(
-    (cookie) => cookie.name === "lh_access",
-  );
-  expect(access).toBeDefined();
-  if (access) await context.addCookies([{ ...access, secure: false }]);
+  await page.goto("/");
 }
 
 /** 플로우 A로 세 질문에 답하고(질문 1 = sentence) 요약에서 매칭을 요청한다. */
@@ -274,23 +260,6 @@ test.describe("매칭 흐름", () => {
 });
 
 test.describe("접수 실패 안내", () => {
-  test("쿠키 없음: 접근 코드 안내, 답 유지, 매칭 요청에 초점", async ({
-    page,
-  }) => {
-    await installFakeSpeech(page);
-    await page.goto("/");
-    await hearAndConfirm(page, PASS_SENTENCE);
-
-    await expect(status(page)).toHaveText(
-      "접근 코드가 필요합니다. 시연 주소로 다시 열어 주세요.",
-    );
-    await expect(matchButton(page)).toBeFocused();
-    await expect(
-      page.getByText(`찾는 제품: ${PASS_SENTENCE}`, { exact: true }),
-    ).toBeVisible();
-    await expect(handoffButton(page)).toHaveCount(0);
-  });
-
   test("횟수 초과: 1분 뒤 안내, 매칭 요청에 초점", async ({ page }) => {
     await page.route("**/api/requests", (route) =>
       route.fulfill({
@@ -400,6 +369,7 @@ test.describe("접수 실패 안내", () => {
 
 test.describe("봉사자 화면(시연)", () => {
   test("전환 후 제목에 초점, 시연 안내, 같은 탭", async ({ page, context }) => {
+    await loginVolunteer(page);
     await matchThroughUi(page);
     await handoffButton(page).click();
 
@@ -416,6 +386,7 @@ test.describe("봉사자 화면(시연)", () => {
   });
 
   test("브랜드 없는 요청은 품목만 안내한다", async ({ page }) => {
+    await loginVolunteer(page);
     await matchThroughUi(page, "헤드셋 사고싶어");
     await handoffButton(page).click();
     await expect(status(page)).toHaveText(
@@ -424,6 +395,7 @@ test.describe("봉사자 화면(시연)", () => {
   });
 
   test("낭독 영역은 처음에 비어 있다가 채워진다", async ({ page }) => {
+    await loginVolunteer(page);
     await matchThroughUi(page);
     await page.evaluate(() => {
       const seen: (string | null)[] = [];
@@ -448,6 +420,7 @@ test.describe("봉사자 화면(시연)", () => {
   });
 
   test("저장값 없이 열면 매칭 정보 없음과 이용자 화면 링크", async ({ page }) => {
+    await loginVolunteer(page);
     await page.goto("/volunteer");
     await expect(heading(page)).toBeFocused();
     await expect(page).toHaveTitle(/시연/);
@@ -466,6 +439,7 @@ test.describe("봉사자 화면(시연)", () => {
   });
 
   test("깨진 저장값은 매칭 정보 없음으로 처리한다", async ({ page }) => {
+    await loginVolunteer(page);
     await page.addInitScript(() =>
       sessionStorage.setItem("lh.match.v1", "{broken"),
     );
@@ -483,6 +457,7 @@ test.describe("역할 분리", () => {
   });
 
   test("봉사자 화면에 이용자 요청 작성 UI가 없다", async ({ page }) => {
+    await loginVolunteer(page);
     await matchThroughUi(page);
     await handoffButton(page).click();
     await expect(heading(page)).toBeFocused();
@@ -494,6 +469,7 @@ test.describe("역할 분리", () => {
 
   test("봉사자 화면은 저장값을 바꾸지 않는다", async ({ page }) => {
     // PR 2: lh.match.v1은 이어 보기를 누를 때 저장된다. 저장된 응답 그대로 남는지 본다.
+    await loginVolunteer(page);
     await matchThroughUi(page);
     const matchPromise = page.waitForResponse("**/api/match");
     await handoffButton(page).click();
@@ -505,26 +481,22 @@ test.describe("역할 분리", () => {
 });
 
 test.describe("POST /api/match", () => {
-  async function accessCookie(request: APIRequestContext) {
-    const entered = await request.get(`/enter?code=${E2E_ACCESS_CODE}`, {
-      maxRedirects: 0,
-    });
-    return (entered.headers()["set-cookie"] ?? "").split(";")[0];
-  }
-
-  test("쿠키 없음 401", async ({ request }) => {
+  test("쿠키 없이 200, 봉사자는 등록 봉사자", async ({ request }) => {
     const response = await request.post("/api/match", {
-      headers: { cookie: "" },
+      headers: { cookie: "", "x-forwarded-for": nextClient() },
       data: { text: PASS_SENTENCE },
     });
-    expect(response.status()).toBe(401);
+    expect(response.status()).toBe(200);
+    expect((await response.json()).volunteer).toEqual({
+      id: "vol-01",
+      displayName: "등록 봉사자",
+    });
   });
 
   test("길이 초과 400, 200자는 통과, 품목 없음 422", async ({ request }) => {
-    const cookie = await accessCookie(request);
     const post = (text: string) =>
       request.post("/api/match", {
-        headers: { cookie, "x-forwarded-for": nextClient() },
+        headers: { "x-forwarded-for": nextClient() },
         data: { text },
       });
 
@@ -536,10 +508,9 @@ test.describe("POST /api/match", () => {
     expect((await needItem.json()).error).toBe("need_item");
   });
 
-  test("서버 전용 명단의 담당 품목을 응답에 넣지 않는다", async ({ request }) => {
-    const cookie = await accessCookie(request);
+  test("응답의 봉사자에 id와 표시 이름만 있다", async ({ request }) => {
     const response = await request.post("/api/match", {
-      headers: { cookie, "x-forwarded-for": nextClient() },
+      headers: { "x-forwarded-for": nextClient() },
       data: { text: PASS_SENTENCE },
     });
     expect(Object.keys((await response.json()).volunteer).sort()).toEqual([
@@ -551,11 +522,10 @@ test.describe("POST /api/match", () => {
   test("분당 31번째는 429이고 다른 접속 주소는 영향이 없다", async ({
     request,
   }) => {
-    const cookie = await accessCookie(request);
     const client = nextClient();
     const post = (forwardedFor: string) =>
       request.post("/api/match", {
-        headers: { cookie, "x-forwarded-for": forwardedFor },
+        headers: { "x-forwarded-for": forwardedFor },
         data: { text: PASS_SENTENCE },
       });
 

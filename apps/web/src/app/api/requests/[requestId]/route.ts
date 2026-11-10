@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
 import { getRequestStore, type StoredRequest } from "@/lib/requestStore";
 
@@ -29,10 +28,6 @@ interface Outcome {
 }
 
 async function handleGet(request: NextRequest, requestId: string): Promise<Outcome> {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
-    return { response: failure(401, { error: "unauthorized" }) };
-  }
-
   const limit = checkRateLimit(clientKey(request.headers));
   if (!limit.allowed) {
     return {

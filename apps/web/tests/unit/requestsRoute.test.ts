@@ -3,7 +3,6 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/requests/[requestId]/route";
 import { POST } from "@/app/api/requests/route";
-import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import * as requestStore from "@/lib/requestStore";
 
 const ORIGIN = "http://localhost:3000";
@@ -14,23 +13,20 @@ const CONDITION = "새 제품 원해요";
 let nextClient = 1;
 const freshClient = () => `198.51.100.${(nextClient += 1) % 250}-${randomUUID()}`;
 
-function headers(cookie: boolean, client?: string) {
-  return {
-    "x-forwarded-for": client ?? freshClient(),
-    ...(cookie ? { cookie: `${ACCESS_COOKIE}=${hashAccessCode("right-code")}` } : {}),
-  };
+function headers(client?: string) {
+  return { "x-forwarded-for": client ?? freshClient() };
 }
 
-function postRequest(body: unknown, { cookie = true, client }: { cookie?: boolean; client?: string } = {}) {
+function postRequest(body: unknown, { client }: { client?: string } = {}) {
   return new NextRequest(`${ORIGIN}/api/requests`, {
     method: "POST",
     body: typeof body === "string" ? body : JSON.stringify(body),
-    headers: headers(cookie, client),
+    headers: headers(client),
   });
 }
 
-function getRequest(id: string, { cookie = true, client }: { cookie?: boolean; client?: string } = {}) {
-  return GET(new NextRequest(`${ORIGIN}/api/requests/${id}`, { headers: headers(cookie, client) }), {
+function getRequest(id: string, { client }: { client?: string } = {}) {
+  return GET(new NextRequest(`${ORIGIN}/api/requests/${id}`, { headers: headers(client) }), {
     params: Promise.resolve({ requestId: id }),
   });
 }
@@ -47,7 +43,6 @@ function answers(overrides: Record<string, unknown> = {}) {
 
 describe("POST /api/requests (메모리 저장소)", () => {
   beforeEach(() => {
-    vi.stubEnv("DEMO_ACCESS_CODE", "right-code");
     vi.stubEnv("STORE_MODE", "memory");
     requestStore.resetRequestStoresForTest();
   });
@@ -81,10 +76,10 @@ describe("POST /api/requests (메모리 저장소)", () => {
     expect(next.queueNumber).toBe(first.queueNumber + 1);
   });
 
-  it("쿠키가 없으면 401", async () => {
-    const response = await POST(postRequest(answers(), { cookie: false }));
-    expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ ok: false, error: "unauthorized" });
+  it("로그인 쿠키 없이도 201로 접수한다(이용자 쪽은 열려 있다)", async () => {
+    const response = await POST(postRequest(answers()));
+    expect(response.status).toBe(201);
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("분당 31번째는 429와 Retry-After", async () => {
@@ -185,7 +180,6 @@ describe("POST /api/requests (메모리 저장소)", () => {
 
 describe("GET /api/requests/[requestId] (메모리 저장소)", () => {
   beforeEach(() => {
-    vi.stubEnv("DEMO_ACCESS_CODE", "right-code");
     vi.stubEnv("STORE_MODE", "memory");
     requestStore.resetRequestStoresForTest();
   });
@@ -219,8 +213,9 @@ describe("GET /api/requests/[requestId] (메모리 저장소)", () => {
     expect(await response.json()).toEqual({ ok: false, error: "not_found", persistent: false });
   });
 
-  it("쿠키가 없으면 401", async () => {
-    expect((await getRequest(randomUUID(), { cookie: false })).status).toBe(401);
+  it("로그인 쿠키 없이도 200으로 다시 열 수 있다(이용자 쪽은 열려 있다)", async () => {
+    const created = await (await POST(postRequest(answers()))).json();
+    expect((await getRequest(created.requestId)).status).toBe(200);
   });
 
   it("분당 61번째는 429와 Retry-After", async () => {

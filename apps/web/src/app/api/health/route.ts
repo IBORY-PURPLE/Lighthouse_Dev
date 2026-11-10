@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import { getLlmMode } from "@/lib/llm";
 import { getRequestStore } from "@/lib/requestStore";
+import {
+  readVolunteerSession,
+  VOLUNTEER_SESSION_COOKIE,
+} from "@/lib/volunteerAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,7 +12,7 @@ export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
 
 export function GET(request: NextRequest) {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
+  if (!readVolunteerSession(request.cookies.get(VOLUNTEER_SESSION_COOKIE)?.value)) {
     return NextResponse.json(
       { ok: false, error: "unauthorized" },
       { status: 401, headers: NO_STORE },

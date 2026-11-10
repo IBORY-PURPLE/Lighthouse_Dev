@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import type { MatchResponse } from "@/lib/matchHandoff";
 import { parseRequest } from "@/lib/parseRequest";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
-import { findVolunteerForItem } from "@/lib/volunteers";
+import { REGISTERED_VOLUNTEER } from "@/lib/volunteers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,10 +35,6 @@ async function readText(request: NextRequest): Promise<string | null> {
 }
 
 async function handleMatch(request: NextRequest): Promise<NextResponse> {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
-    return failure(401, "unauthorized");
-  }
-
   const limit = checkRateLimit(clientKey(request.headers));
   if (!limit.allowed) {
     return failure(429, "rate_limited", {
@@ -54,12 +49,13 @@ async function handleMatch(request: NextRequest): Promise<NextResponse> {
   const { brand, item } = parseRequest(text);
   if (!item) return failure(422, "need_item");
 
-  const volunteer = findVolunteerForItem(item);
-  if (!volunteer) return failure(500, "no_volunteer");
-
+  // 시연 매칭은 등록 봉사자 1명에게 고정한다(TSD §2). 여러 봉사자 매칭은 lh-l2e.
   const match: MatchResponse = {
     requestId: randomUUID(),
-    volunteer: { id: volunteer.id, displayName: volunteer.displayName },
+    volunteer: {
+      id: REGISTERED_VOLUNTEER.id,
+      displayName: REGISTERED_VOLUNTEER.displayName,
+    },
     request: { brand, item, raw: text.trim() },
   };
   return NextResponse.json(match, { headers: NO_STORE });

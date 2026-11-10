@@ -36,8 +36,6 @@ function isPositiveInteger(value: unknown): value is number {
 
 function failedStatus(status: number): string {
   switch (status) {
-    case 401:
-      return STATUS.noAccess;
     case 429:
       return STATUS.tooMany;
     default:

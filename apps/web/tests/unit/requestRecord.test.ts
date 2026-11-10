@@ -59,7 +59,7 @@ describe("registerRequest", () => {
 
   it("401·429·500·모양 이상·네트워크 실패는 다시 보낼 수 있는 실패, 422는 품목 없음", async () => {
     const cases: [ReturnType<typeof vi.fn>, unknown][] = [
-      [respond(401, { ok: false }), { kind: "failed", status: STATUS.noAccess }],
+      [respond(401, { ok: false }), { kind: "failed", status: STATUS.registerFailed }],
       [respond(429, { ok: false }), { kind: "failed", status: STATUS.tooMany }],
       [respond(500, { ok: false }), { kind: "failed", status: STATUS.registerFailed }],
       [respond(503, { ok: false }), { kind: "failed", status: STATUS.registerFailed }],

@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
 import { installFakeSpeech } from "./helpers/fakeSpeech";
 import { completeFlowA, HANDOFF_NAME } from "./helpers/flowA";
+import { loginVolunteer } from "./helpers/volunteerLogin";
 
 // 플로우 A PR 2: 앱을 다시 열면 지난 접수를 서버에 묻는다(notes-flow-a.md C2 checking·다시 열기 행).
 // 가짜 음성 입력·메모리 저장소 기준이다.
@@ -19,12 +19,7 @@ async function openUserScreen(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": `test-${randomUUID()}` });
   await installFakeSpeech(page);
-  await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-  await expect(page).toHaveURL(/\/$/);
-  // Windows WebKit은 Secure 쿠키를 http://localhost로 보내지 않는다(match.spec.ts 참고).
-  const access = (await context.cookies()).find((cookie) => cookie.name === "lh_access");
-  expect(access).toBeDefined();
-  if (access) await context.addCookies([{ ...access, secure: false }]);
+  await page.goto("/");
 }
 
 /** 기기 안 기록을 직접 넣고 다시 연다. */
@@ -42,6 +37,7 @@ test.describe("다시 열기", () => {
   test("접수 뒤 다시 열면 대기번호를 낭독하고 봉사자 화면으로 이어 볼 수 있다", async ({
     page,
   }) => {
+    await loginVolunteer(page);
     await openUserScreen(page);
     const queueNumber = await completeFlowA(page);
 

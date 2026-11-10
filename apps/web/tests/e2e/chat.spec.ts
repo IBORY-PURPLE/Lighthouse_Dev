@@ -1,14 +1,9 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
+import { expect, test, type Page } from "@playwright/test";
 import { fail, installFakeSpeech, say } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
+import { loginCookie, loginVolunteer } from "./helpers/volunteerLogin";
 
 // 전부 가짜 음성 입력과 가짜 답변(LLM_MODE=mock) 기준이다.
 // 실제 음성 인식, VoiceOver 낭독, 실제 Groq 답변은 여기서 판정하지 않는다.
@@ -20,7 +15,7 @@ const STATUS = {
   waiting: "답변을 만들고 있습니다.",
   arrived: "답변이 도착했습니다.",
   tooLong: "질문이 너무 깁니다. 짧게 다시 말해 주세요.",
-  noAccess: "접근 코드가 필요합니다. 시연 주소로 다시 열어 주세요.",
+  noAccess: "로그인이 풀렸습니다. 화면을 새로 고쳐 다시 로그인해 주세요.",
   tooMany: "요청이 많습니다. 1분 뒤 다시 시도해 주세요.",
   failed: "답변 서버에 연결하지 못했습니다. 다시 시도해 주세요.",
   notConfigured: "챗봇 설정이 끝나지 않았습니다.",
@@ -51,20 +46,13 @@ async function expectNoBlockingAxe(page: Page) {
   ).toEqual([]);
 }
 
-/** 이용자 화면에서 실제로 매칭한 뒤 같은 탭으로 봉사자 화면을 연다. */
+/** 로그인하고, 이용자 화면에서 실제로 매칭한 뒤 같은 탭으로 봉사자 화면을 연다. */
 async function openVolunteer(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
   await installFakeSpeech(page);
-  await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-  await expect(page).toHaveURL(/\/$/);
-
-  // Windows WebKit은 Secure 쿠키를 http://localhost로 보내지 않는다(match.spec.ts 참고).
-  const access = (await context.cookies()).find(
-    (cookie) => cookie.name === "lh_access",
-  );
-  expect(access).toBeDefined();
-  if (access) await context.addCookies([{ ...access, secure: false }]);
+  await loginVolunteer(page);
+  await page.goto("/");
 
   await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
   // PR 2: 대기번호 화면에서는 "접수 완료" 제목에 초점이 있다. 이어 보기 버튼은 그 아래에 있다.
@@ -265,6 +253,7 @@ test.describe("봉사자 챗봇", () => {
   });
 
   test("매칭 정보가 없으면 챗봇을 보여 주지 않는다", async ({ page }) => {
+    await loginVolunteer(page);
     await page.goto("/volunteer");
     await expect(status(page)).toHaveText("매칭 정보가 없습니다.");
     await expect(askButton(page)).toHaveCount(0);
@@ -273,7 +262,7 @@ test.describe("봉사자 챗봇", () => {
 });
 
 test.describe("챗봇 오류 안내", () => {
-  test("쿠키 없음: 접근 코드 안내, 다시 시도에 초점", async ({ page, context }) => {
+  test("로그인 끊김: 다시 로그인 안내, 다시 시도에 초점", async ({ page, context }) => {
     await openVolunteer(page);
     await context.clearCookies();
     await ask(page);
@@ -418,11 +407,7 @@ test.describe("역할 분리", () => {
     const context = page.context();
     await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
     await installFakeSpeech(page);
-    await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-    const access = (await context.cookies()).find(
-      (cookie) => cookie.name === "lh_access",
-    );
-    if (access) await context.addCookies([{ ...access, secure: false }]);
+    await page.goto("/");
 
     await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
     await expect(
@@ -441,13 +426,6 @@ test.describe("POST /api/chat", () => {
     context: { brand: "Sony", item: "헤드셋" },
   };
 
-  async function accessCookie(request: APIRequestContext) {
-    const entered = await request.get(`/enter?code=${E2E_ACCESS_CODE}`, {
-      maxRedirects: 0,
-    });
-    return (entered.headers()["set-cookie"] ?? "").split(";")[0];
-  }
-
   test("쿠키 없음 401", async ({ request }) => {
     const response = await request.post("/api/chat", {
       headers: { cookie: "" },
@@ -460,7 +438,7 @@ test.describe("POST /api/chat", () => {
   test("가짜 답변 text/plain, 질문 301자와 2KB 초과는 400", async ({
     request,
   }) => {
-    const cookie = await accessCookie(request);
+    const cookie = await loginCookie(request);
     const post = (data: unknown) =>
       request.post("/api/chat", {
         headers: { cookie, "x-forwarded-for": nextClient() },
@@ -490,7 +468,7 @@ test.describe("POST /api/chat", () => {
   test("분당 21번째는 429이고 다른 접속 주소는 영향이 없다", async ({
     request,
   }) => {
-    const cookie = await accessCookie(request);
+    const cookie = await loginCookie(request);
     const client = nextClient();
     const post = (forwardedFor: string) =>
       request.post("/api/chat", {
