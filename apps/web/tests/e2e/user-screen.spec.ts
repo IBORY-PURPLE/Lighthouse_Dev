@@ -1,8 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import {
+  delayStart,
   fail,
   installFakeSpeech,
+  markSpeechStarted,
   never,
   recognitionConfig,
   removeSpeechApi,
@@ -320,13 +322,44 @@ test.describe("음성 API가 있을 때", () => {
     });
   }
 
-  test("3초 무응답(never) → 입력창 전환과 초점", async ({ page }) => {
+  test("허용이 끝난 기기에서 3초 무응답(never) → 입력창 전환과 초점", async ({
+    page,
+  }) => {
     await startQuestions(page);
+    await markSpeechStarted(page);
     await never(page);
     await speechButton(page).click();
     // 시작 지연 1초 + 무응답 3초 전에는 바뀌지 않는다.
     await page.waitForTimeout(2000);
     await expect(speechButton(page)).toBeVisible();
+    await expectFellBackToInput(page);
+  });
+
+  test("처음 쓰는 기기: 마이크 허용 창을 누르기 전에는 입력창으로 바뀌지 않고, 허용하면 듣는다", async ({
+    page,
+  }) => {
+    await startQuestions(page);
+    // 허용 창이 8초 동안 떠 있는 상황(start 이벤트가 늦게 온다).
+    await delayStart(page, 8000);
+    await speechButton(page).click();
+    // 시작 지연 1초 + 기존 무응답 한도 3초를 훨씬 넘겨도 입력창으로 가지 않는다.
+    await page.waitForTimeout(5000);
+    await expect(productInput(page)).toHaveCount(0);
+    await expect(status(page)).not.toHaveText(FALLBACK_STATUS);
+    // 허용을 누른 뒤에는 듣기가 시작되고 말한 문장이 확인 단계로 간다.
+    await expect(status(page)).toHaveText("듣고 있습니다. 말씀하세요.", {
+      timeout: 10_000,
+    });
+    await say(page, "소니 헤드셋");
+    await expect(status(page)).toHaveText("이렇게 들었습니다: 소니 헤드셋");
+  });
+
+  test("처음 쓰는 기기에서 마이크를 거부하면 바로 입력창으로 간다", async ({
+    page,
+  }) => {
+    await startQuestions(page);
+    await speechButton(page).click();
+    await fail(page, "not-allowed");
     await expectFellBackToInput(page);
   });
 

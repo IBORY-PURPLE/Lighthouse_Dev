@@ -11,6 +11,30 @@ export const PRIMARY_INPUT: InputMode = "speech";
 export const SPEECH_START_DELAY_MS = 1000;
 /** start() 호출 뒤 이 시간 안에 start 이벤트가 없으면 입력창으로 간다. */
 export const SPEECH_START_TIMEOUT_MS = 3000;
+/**
+ * 이 기기에서 인식이 한 번도 시작된 적 없으면(마이크·음성 인식 허용 창이 뜰 수 있다) 허용을
+ * 누를 때까지 기다리는 시간. 허용 창이 떠 있는 동안에는 start 이벤트가 오지 않는다.
+ * 거부하면 not-allowed 오류가 바로 와서 입력창으로 간다.
+ */
+export const SPEECH_FIRST_START_TIMEOUT_MS = 60_000;
+/** 인식이 한 번 시작되면 기기에 남기는 표시(허용이 끝났다는 뜻). */
+export const SPEECH_STARTED_KEY = "lh.speech.started.v1";
+
+export function hasSpeechStartedBefore(storage: Pick<Storage, "getItem">): boolean {
+  try {
+    return storage.getItem(SPEECH_STARTED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function rememberSpeechStarted(storage: Pick<Storage, "setItem">): void {
+  try {
+    storage.setItem(SPEECH_STARTED_KEY, "1");
+  } catch {
+    // 저장이 막힌 브라우저에서는 매번 첫 사용처럼 오래 기다린다.
+  }
+}
 /** 듣기 시작 뒤 end 이벤트가 끝내 오지 않아도 버튼이 멈춰 있지 않게 끊는 시간. */
 export const SPEECH_LISTEN_TIMEOUT_MS = 15_000;
 /** no-speech, nomatch가 연속 이 횟수면 입력창으로 간다. */
@@ -262,6 +286,7 @@ export function startRecognition(
   Ctor: SpeechRecognitionCtor,
   handlers: RecognitionHandlers,
   delayMs: number = SPEECH_START_DELAY_MS,
+  startTimeoutMs: number = SPEECH_START_TIMEOUT_MS,
 ): () => void {
   let recognition: SpeechRecognitionLike | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -326,7 +351,7 @@ export function startRecognition(
     }
     timer = setTimeout(
       () => giveUp(handlers.onUnavailable),
-      SPEECH_START_TIMEOUT_MS,
+      startTimeoutMs,
     );
   };
 

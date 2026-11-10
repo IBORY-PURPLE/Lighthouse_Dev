@@ -9,6 +9,11 @@ import {
 } from "react";
 import {
   getSpeechRecognitionCtor,
+  hasSpeechStartedBefore,
+  rememberSpeechStarted,
+  SPEECH_FIRST_START_TIMEOUT_MS,
+  SPEECH_START_DELAY_MS,
+  SPEECH_START_TIMEOUT_MS,
   startRecognition,
   STATUS,
   type SpeechInputAction,
@@ -103,12 +108,25 @@ export function SpeechInput({
     // Safari는 눌린 버튼에 초점을 주지 않아, "이대로 요청"이 사라지면 초점이 body로 빠진다.
     speechRef.current?.focus();
     dispatch({ type: "press" });
-    cancelRef.current = startRecognition(Ctor, {
-      onListening: () => dispatch({ type: "listening" }),
-      onResult: (text) => dispatch({ type: "result", transcript: text }),
-      onMiss: () => dispatch({ type: "miss" }),
-      onUnavailable: () => dispatch({ type: "unavailable" }),
-    });
+    // 처음 쓰는 기기는 마이크·음성 인식 허용 창이 떠 있는 동안 start 이벤트가 오지 않는다.
+    // 허용을 누를 때까지 입력창으로 바꾸지 않고 기다린다. 거부하면 not-allowed로 바로 바뀐다.
+    const startTimeoutMs = hasSpeechStartedBefore(window.localStorage)
+      ? SPEECH_START_TIMEOUT_MS
+      : SPEECH_FIRST_START_TIMEOUT_MS;
+    cancelRef.current = startRecognition(
+      Ctor,
+      {
+        onListening: () => {
+          rememberSpeechStarted(window.localStorage);
+          dispatch({ type: "listening" });
+        },
+        onResult: (text) => dispatch({ type: "result", transcript: text }),
+        onMiss: () => dispatch({ type: "miss" }),
+        onUnavailable: () => dispatch({ type: "unavailable" }),
+      },
+      SPEECH_START_DELAY_MS,
+      startTimeoutMs,
+    );
   };
 
   const handleTextSubmit = (event: FormEvent) => {

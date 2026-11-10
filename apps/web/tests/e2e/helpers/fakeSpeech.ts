@@ -14,6 +14,8 @@ interface FakeSpeechControl {
   listening: boolean;
   /** 다음 start()부터 start 이벤트를 내지 않는다 */
   silent: boolean;
+  /** 다음 start()부터 start 이벤트를 이 시간(ms) 늦춘다(허용 창이 떠 있는 상황) */
+  startDelayMs: number;
   say(text: string): void;
   fail(code: string): void;
 }
@@ -34,6 +36,7 @@ export async function installFakeSpeech(page: Page): Promise<void> {
       config: null,
       listening: false,
       silent: false,
+      startDelayMs: 0,
       say() {},
       fail() {},
     };
@@ -62,7 +65,7 @@ export async function installFakeSpeech(page: Page): Promise<void> {
         setTimeout(() => {
           control.listening = true;
           this.onstart?.();
-        }, 0);
+        }, control.startDelayMs);
       }
 
       abort() {
@@ -125,6 +128,20 @@ export async function fail(page: Page, code: string): Promise<void> {
 export async function never(page: Page): Promise<void> {
   await page.evaluate(() => {
     window.__fakeSpeech.silent = true;
+  });
+}
+
+/** 앞으로 start 이벤트를 ms만큼 늦춘다(마이크 허용 창을 누르기 전 상황). */
+export async function delayStart(page: Page, ms: number): Promise<void> {
+  await page.evaluate((value) => {
+    window.__fakeSpeech.startDelayMs = value;
+  }, ms);
+}
+
+/** 이 기기에서 인식이 이미 시작된 적 있는 상태(허용이 끝난 뒤)로 만든다. */
+export async function markSpeechStarted(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.localStorage.setItem("lh.speech.started.v1", "1");
   });
 }
 
