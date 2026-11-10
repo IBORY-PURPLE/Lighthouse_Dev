@@ -34,6 +34,28 @@ main {
   outline: none;
 }
 
+/* 질문·요약 제목도 코드로만 초점을 받는 낭독 시작점이다. */
+.flow-question {
+  margin: 0;
+  font-size: 1.375rem;
+}
+
+.flow-question:focus {
+  outline: none;
+}
+
+.flow-guide {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.flow-summary {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
 /* 낭독 영역은 내용이 없어도 숨기지 않는다. 숨기면 VoiceOver가 변화를 읽지 못할 수 있다. */
 .status-region {
   min-height: 1.5em;

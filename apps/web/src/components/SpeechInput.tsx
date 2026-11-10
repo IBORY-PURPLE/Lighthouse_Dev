@@ -22,6 +22,8 @@ export interface SpeechInputLabels {
   retry: string;
   field: string;
   emptyStatus: string;
+  /** 입력창 답 확인 단계의 "다시 입력" 버튼 이름(confirmTyped일 때). */
+  reenter?: string;
 }
 
 const REQUEST_LABELS: SpeechInputLabels = {
@@ -37,6 +39,8 @@ interface SpeechInputProps {
   dispatch: Dispatch<SpeechInputAction>;
   onSubmit(text: string): void;
   labels?: SpeechInputLabels;
+  /** 켜면 입력창 답도 바로 보내지 않고 확인 단계를 거친다(이용자 질문 흐름). */
+  confirmTyped?: boolean;
 }
 
 export function SpeechInput({
@@ -44,12 +48,14 @@ export function SpeechInput({
   dispatch,
   onSubmit,
   labels = REQUEST_LABELS,
+  confirmTyped = false,
 }: SpeechInputProps) {
   const [typed, setTyped] = useState("");
   const confirmRef = useRef<HTMLButtonElement>(null);
   const speechRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
+  const reenterRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
 
   const { state, transcript } = model;
@@ -57,6 +63,8 @@ export function SpeechInput({
   const typing = state === "text" || (submitting && !transcript);
   const confirming = state === "confirming" || (submitting && !!transcript);
   const busy = state === "starting" || state === "listening";
+  // 입력창 답을 확인하는 중이면 "다시 말하기" 대신 "다시 입력"을 보인다.
+  const typedConfirm = confirmTyped && confirming && model.fellBack;
   const confirmLabel =
     model.refocus === "resend" ? labels.retry : labels.confirm;
 
@@ -107,7 +115,9 @@ export function SpeechInput({
     event.preventDefault();
     if (submitting) return;
     const text = typed.trim();
-    if (text) {
+    if (text && confirmTyped) {
+      dispatch({ type: "typed", text });
+    } else if (text) {
       onSubmit(text);
     } else {
       dispatch({ type: "emptyText", status: labels.emptyStatus });
@@ -135,7 +145,17 @@ export function SpeechInput({
           </button>
         </>
       )}
-      {!typing && (
+      {typedConfirm && (
+        <button
+          ref={reenterRef}
+          type="button"
+          className="big-button big-button--secondary"
+          onClick={() => dispatch({ type: "reenter" })}
+        >
+          {labels.reenter ?? "다시 입력"}
+        </button>
+      )}
+      {!typing && !typedConfirm && (
         // 초점이 있는 버튼의 이름이나 상태가 바뀌면 VoiceOver가 다시 읽어 마이크에 섞일 수 있다.
         // 그래서 듣는 동안 이름을 바꾸지 않고 비활성으로 표시하지도 않으며, 누름만 무시한다.
         // 같은 요소를 "다시 말하기"로도 써서 누른 뒤에도 초점이 유지된다.

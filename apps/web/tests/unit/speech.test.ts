@@ -391,3 +391,71 @@ describe("speechInputReducer", () => {
     );
   });
 });
+
+describe("speechInputReducer: 이용자 질문 흐름(플로우 A)", () => {
+  const speech = createInitialModel("speech");
+
+  it("reset은 새 질문을 처음 상태로 시작하고, 입력창이면 입력창 확인을 쓸 수 있게 둔다", () => {
+    const used = speechInputReducer(speech, { type: "result", transcript: "앞 질문 답" });
+    expect(speechInputReducer(used, { type: "reset", mode: "speech" })).toEqual(speech);
+    const text = speechInputReducer(used, { type: "reset", mode: "text" });
+    expect(text).toMatchObject({ state: "text", transcript: "", status: "", fellBack: true });
+  });
+
+  it("입력창으로 시작한 질문에서 unavailable은 안내를 다시 읽지 않는다", () => {
+    const text = speechInputReducer(speech, { type: "reset", mode: "text" });
+    expect(speechInputReducer(text, { type: "unavailable" })).toBe(text);
+  });
+
+  it("typed는 입력창 답을 확인 단계로 올리고 fellBack을 유지한다", () => {
+    const fellBack = speechInputReducer(speech, { type: "unavailable" });
+    const typed = speechInputReducer(fellBack, { type: "typed", text: "10만 원 이하" });
+    expect(typed).toMatchObject({
+      state: "confirming",
+      transcript: "10만 원 이하",
+      fellBack: true,
+      status: "입력한 내용: 10만 원 이하",
+      refocus: null,
+    });
+    expect(STATUS.typedBack("중고")).toBe("입력한 내용: 중고");
+  });
+
+  it("reenter는 입력창으로 돌아가 입력창에 초점을 보낸다", () => {
+    const fellBack = speechInputReducer(speech, { type: "unavailable" });
+    const typed = speechInputReducer(fellBack, { type: "typed", text: "중고" });
+    expect(speechInputReducer(typed, { type: "reenter" })).toMatchObject({
+      state: "text",
+      transcript: "",
+      status: "",
+      fellBack: true,
+      refocus: "reenter",
+    });
+  });
+
+  it("입력창 답 확인 뒤 matchRejected는 입력창으로, 음성 답은 말하기로 돌아간다", () => {
+    const fellBack = speechInputReducer(speech, { type: "unavailable" });
+    const typed = speechInputReducer(fellBack, { type: "typed", text: "소니" });
+    expect(
+      speechInputReducer(typed, { type: "matchRejected", status: STATUS.needProduct }),
+    ).toMatchObject({ state: "text", transcript: "", status: STATUS.needProduct, refocus: "reenter" });
+
+    const heard = speechInputReducer(speech, { type: "result", transcript: "소니" });
+    expect(
+      speechInputReducer(heard, { type: "matchRejected", status: STATUS.needProduct }),
+    ).toMatchObject({ state: "idle", transcript: "", refocus: "reenter" });
+  });
+
+  it("새 문구는 기존 문구를 바꾸지 않고 끝에 붙었다", () => {
+    const keys = Object.keys(STATUS);
+    expect(keys.slice(0, 18)).toEqual([
+      "listening", "heard", "fallback", "missed", "matching", "emptyText",
+      "connected", "needItem", "tooLong", "noAccess", "tooMany", "matchFailed",
+      "emptyQuestion", "chatWaiting", "chatArrived", "questionTooLong",
+      "chatFailed", "chatNotConfigured",
+    ]);
+    expect(keys.slice(18)).toEqual(["typedBack", "needProduct", "answerTooLong", "summary"]);
+    expect(STATUS.summary("소니 헤드셋", "10만 원", "중고")).toBe(
+      "요청 내용입니다. 제품 소니 헤드셋. 예산 10만 원. 중고. 맞으면 봉사자 매칭 요청 버튼을 누르세요.",
+    );
+  });
+});
