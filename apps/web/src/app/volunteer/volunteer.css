@@ -572,6 +572,13 @@
   cursor: pointer;
 }
 
+/* 큰 화면(노트북·프로젝터)에서는 가운데 열 바깥 오른쪽에 둔다. 열 안의 입력 칸과 버튼을 가리지 않게. */
+@media (min-width: 700px) {
+  .vol-ai {
+    right: calc(50% - 260px - 16px - 56px);
+  }
+}
+
 .vol-sheet-layer {
   position: fixed;
   inset: 0;

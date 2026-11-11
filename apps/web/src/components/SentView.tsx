@@ -9,6 +9,15 @@ import {
   type VolunteerRequestView,
 } from "@/lib/volunteerView";
 
+/** 링크를 사람이 읽기 좋게 보인다(%EC… 대신 한글). 주소 자체(href)는 바꾸지 않는다. */
+function readableUrl(url: string): string {
+  try {
+    return decodeURI(url);
+  } catch {
+    return url;
+  }
+}
+
 /** 화면 6: 보낸 요청의 사후 보기(읽기 전용). 이용자가 들음·구매 링크 열음은 서버 값이 없으면 "아직"이다. */
 export function SentView({
   request,
@@ -65,7 +74,7 @@ export function SentView({
                 <p className="vol-summary-label">구매 링크</p>
                 <p className="vol-sent-url">
                   <a href={candidate.url} target="_blank" rel="noopener noreferrer">
-                    {candidate.url}
+                    {readableUrl(candidate.url)}
                   </a>
                 </p>
                 {candidate.summary.length > 0 && (
