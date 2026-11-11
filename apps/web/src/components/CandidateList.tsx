@@ -2,10 +2,12 @@
 
 import { useId, useRef, useState, type FormEvent } from "react";
 import {
+  CANDIDATE_STATUS_LABELS,
   MANUAL_MESSAGES,
   MAX_MANUAL,
   MAX_NAME_LENGTH,
   validateManual,
+  type CandidateStatus,
   type ManualCandidate,
 } from "@/lib/candidateDraft";
 import type { CandidateView } from "@/lib/volunteerView";
@@ -19,7 +21,9 @@ interface CandidateListProps {
   manual: readonly ManualCandidate[];
   /** '쇼핑몰에서 보기'를 눌렀다(링크는 새 탭으로 열린다). */
   onOpenLink: (candidateId: string) => void;
-  /** 상태 칩을 눌렀다. 에이전트 창을 그 후보로 연다. */
+  /** 후보별 상태(캡처 필요 / 캡처 읽음 · 확인 전 / 요약 확인함). 없으면 캡처 필요. */
+  statuses: Readonly<Record<string, CandidateStatus>>;
+  /** 상태 칩을 눌렀다. 에이전트 창을 그 후보로 연다(요약 확인 화면은 다음 블록). */
   onCapture: (candidateId: string) => void;
   /** 직접 추가. 저장했으면 true. */
   onAddManual: (name: string, url: string) => boolean;
@@ -30,6 +34,7 @@ export function CandidateList({
   demo,
   manual,
   onOpenLink,
+  statuses,
   onCapture,
   onAddManual,
 }: CandidateListProps) {
@@ -60,6 +65,7 @@ export function CandidateList({
         <ul className="vol-list vol-cand-list">
           {rows.map((row, index) => {
             const nameId = `vol-cand-name-${row.id}`;
+            const status = statuses[row.id] ?? "needs_capture";
             return (
               <li key={row.id} className="vol-cand">
                 <span className="vol-cand-photo" aria-hidden="true" />
@@ -84,11 +90,11 @@ export function CandidateList({
                     </a>
                     <button
                       type="button"
-                      className="vol-chip-btn"
+                      className={`vol-chip-btn vol-chip-btn--${status}`}
                       aria-describedby={nameId}
                       onClick={() => onCapture(row.id)}
                     >
-                      캡처 필요
+                      {CANDIDATE_STATUS_LABELS[status]}
                     </button>
                   </div>
                 </div>

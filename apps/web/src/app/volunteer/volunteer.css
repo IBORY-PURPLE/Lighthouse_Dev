@@ -715,3 +715,102 @@
   flex: 1;
   min-width: 0;
 }
+
+/* ----- 후보 상태 칩: 캡처 필요(점선) → 캡처 읽음 · 확인 전(옅은 채움) → 요약 확인함(진한 채움) ----- */
+
+.vol-chip-btn--read {
+  border-style: solid;
+  border-color: var(--vol-ink);
+  background: var(--vol-soft);
+  color: var(--vol-ink);
+}
+
+.vol-chip-btn--confirmed {
+  border-style: solid;
+  border-color: var(--vol-ink);
+  background: var(--vol-ink);
+  color: #ffffff;
+}
+
+/* ----- 캡처 올리기(에이전트 창 안) ----- */
+
+.vol-capture {
+  margin-top: 8px;
+}
+
+.vol-capture .vol-foot {
+  margin-top: 6px;
+}
+
+.vol-capture-manual {
+  display: flex;
+  flex-direction: column;
+}
+
+.vol-capture-manual .vol-label {
+  margin-top: 4px;
+}
+
+.vol-textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.vol-capture-manual .vol-btn {
+  margin-top: 10px;
+}
+
+/* 캡처 저장 알림 */
+.vol-saved {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--vol-soft);
+}
+
+.vol-saved-title {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.vol-saved-hint,
+.vol-saved-warn {
+  margin: 0;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.vol-saved-hint {
+  color: var(--vol-sub);
+}
+
+.vol-saved-warn {
+  color: #8a1c14;
+  font-weight: 700;
+}
+
+.vol-pick {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vol-pick-btn {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.vol-saved .vol-btn:focus-visible,
+.vol-capture .vol-btn:focus-visible,
+.vol-textarea:focus-visible {
+  outline: 3px solid #2f6fed;
+  outline-offset: 2px;
+}

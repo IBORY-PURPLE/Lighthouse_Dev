@@ -2,18 +2,23 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentSheet } from "@/components/AgentSheet";
 import { CandidateList } from "@/components/CandidateList";
 import { StatusRegion } from "@/components/StatusRegion";
 import {
   addManualCandidate,
+  candidateStatus,
   clearDraftStore,
   emptyDraftStore,
+  moveCandidateDraft,
   readDraftStore,
+  setCandidateDraft,
   writeDraftStore,
+  type CandidateStatus,
   type DraftStore,
 } from "@/lib/candidateDraft";
+import type { SummaryDraft } from "@/lib/summaryDraft";
 import { searchQueryOf, SHOPS, shopSearchUrl } from "@/lib/shopLinks";
 import {
   fetchCandidates,
@@ -107,10 +112,27 @@ export function RequestDetail({ requestId }: { requestId: string }) {
     };
   }, [inProgress, requestId, router, candidateAttempt]);
 
-  const saveDrafts = (next: DraftStore) => {
-    setDrafts(next);
-    writeDraftStore(requestId, next);
-  };
+  // 초안 갱신은 늘 가장 최근 값에서 시작한다(글자 읽기가 끝나는 사이에 다른 후보 링크를 눌렀을 수 있다).
+  // 같은 값을 다시 써도 같은 결과라서 갱신 함수 안에서 기기 저장소에 쓴다.
+  const updateDrafts = useCallback(
+    (change: (current: DraftStore) => DraftStore) => {
+      setDrafts((current) => {
+        const next = change(current);
+        writeDraftStore(requestId, next);
+        return next;
+      });
+    },
+    [requestId],
+  );
+  const saveCapturedDraft = useCallback(
+    (candidateId: string, draft: SummaryDraft, captureCount: number) =>
+      updateDrafts((current) => setCandidateDraft(current, candidateId, draft, captureCount)),
+    [updateDrafts],
+  );
+  const moveCapturedDraft = useCallback(
+    (fromId: string, toId: string) => updateDrafts((current) => moveCandidateDraft(current, fromId, toId)),
+    [updateDrafts],
+  );
 
   const handleRelease = async () => {
     if (busy) return;
@@ -142,6 +164,9 @@ export function RequestDetail({ requestId }: { requestId: string }) {
       (candidate) => ({ id: candidate.id, name: candidate.name }),
     );
     const query = searchQueryOf(request);
+    const statuses: Record<string, CandidateStatus> = Object.fromEntries(
+      agentCandidates.map((candidate) => [candidate.id, candidateStatus(drafts, candidate.id)]),
+    );
     return (
       <div className="vol-root">
         <main className={`vol-page ${inProgress ? "vol-page--agent" : "vol-page--plain"}`}>
@@ -189,7 +214,10 @@ export function RequestDetail({ requestId }: { requestId: string }) {
                 <CandidateList
                   demo={candidateLoad.candidates}
                   manual={drafts.manual}
-                  onOpenLink={(candidateId) => saveDrafts({ ...drafts, lastOpened: candidateId })}
+                  onOpenLink={(candidateId) =>
+                    updateDrafts((current) => ({ ...current, lastOpened: candidateId }))
+                  }
+                  statuses={statuses}
                   onCapture={(candidateId) =>
                     setAgentTarget((current) => ({
                       candidateId,
@@ -197,7 +225,7 @@ export function RequestDetail({ requestId }: { requestId: string }) {
                     }))
                   }
                   onAddManual={(name, url) => {
-                    saveDrafts(addManualCandidate(drafts, name, url));
+                    updateDrafts((current) => addManualCandidate(current, name, url));
                     return true;
                   }}
                 />
@@ -230,7 +258,14 @@ export function RequestDetail({ requestId }: { requestId: string }) {
                   내려놓기
                 </button>
               </div>
-              <AgentSheet request={request} candidates={agentCandidates} target={agentTarget} />
+              <AgentSheet
+                request={request}
+                candidates={agentCandidates}
+                target={agentTarget}
+                drafts={drafts}
+                onSaveDraft={saveCapturedDraft}
+                onMoveDraft={moveCapturedDraft}
+              />
             </>
           ) : (
             result && (

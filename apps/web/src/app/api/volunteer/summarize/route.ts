@@ -1,10 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import { checkEvidence } from "@/lib/evidenceCheck";
 import { ExtractError, isSummaryConfigured, requestSummaryJson } from "@/lib/extract";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
 import { parseSummaryJson, SUMMARY_TEXT_LIMIT } from "@/lib/summaryDraft";
-import { VOLUNTEERS } from "@/lib/volunteers";
+import { requireVolunteer } from "@/lib/volunteerSession";
 
 // ④ 읽은 글자(또는 봉사자가 입력한 글)로 요약 초안을 만든다. 상태가 없다. TSD §8.8.
 // 글과 초안은 저장하지도 로그에 남기지도 않는다.
@@ -109,13 +108,8 @@ async function readSummarize(
 }
 
 async function handle(request: NextRequest): Promise<Response> {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
-    return failure(401, "unauthorized");
-  }
-  const volunteerId = request.headers.get("x-demo-volunteer");
-  if (!VOLUNTEERS.some((volunteer) => volunteer.id === volunteerId)) {
-    return failure(403, "unknown_volunteer");
-  }
+  // 입장한 기기(lh_vol)만 쓴다. 봉사자 ID는 쓰지 않고 로그에도 남기지 않는다.
+  if (!requireVolunteer(request)) return failure(401, "unauthorized");
   const limit = checkRateLimit(clientKey(request.headers));
   if (!limit.allowed) {
     return failure(429, "rate_limited", {

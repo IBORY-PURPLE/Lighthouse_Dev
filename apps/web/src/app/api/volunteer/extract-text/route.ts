@@ -1,8 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import { ExtractError, extractText } from "@/lib/extract";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
-import { VOLUNTEERS } from "@/lib/volunteers";
+import { requireVolunteer } from "@/lib/volunteerSession";
 
 // ④ 조각 하나의 글자를 읽는다. 상태가 없다. TSD §8.7.
 // 이미지와 읽은 글자는 저장하지도 로그에 남기지도 않는다. 로그는 상태·시간·조각 번호만(TSD §8).
@@ -99,13 +98,8 @@ async function handle(
   request: NextRequest,
   onPiece: (pieceIndex: number) => void,
 ): Promise<Response> {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
-    return failure(401, "unauthorized");
-  }
-  const volunteerId = request.headers.get("x-demo-volunteer");
-  if (!VOLUNTEERS.some((volunteer) => volunteer.id === volunteerId)) {
-    return failure(403, "unknown_volunteer");
-  }
+  // 입장한 기기(lh_vol)만 쓴다. 봉사자 ID는 쓰지 않고 로그에도 남기지 않는다.
+  if (!requireVolunteer(request)) return failure(401, "unauthorized");
   const limit = checkRateLimit(clientKey(request.headers));
   if (!limit.allowed) {
     return failure(429, "rate_limited", {

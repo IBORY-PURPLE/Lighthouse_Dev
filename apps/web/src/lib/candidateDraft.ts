@@ -1,7 +1,10 @@
 // 요청별 기기 초안: localStorage `lh.vol.draft.v1.<requestId>`. 브라우저에서만 쓴다.
 // 블록 2는 manual(직접 추가한 후보)과 lastOpened(마지막으로 '쇼핑몰에서 보기'를 누른 후보)를 쓴다.
-// drafts(후보별 요약 초안)는 블록 3, edits·confirmed는 블록 4가 채운다. 여기서는 객체면 그대로 보존한다.
+// drafts(후보별 요약 초안)는 블록 3이 채우고, edits·confirmed는 블록 4가 채운다. 여기서는 객체면 그대로 보존한다.
+// 이미지와 읽은 글자 원문은 저장하지 않는다. 요약 초안(SummaryDraft)만 둔다.
 // 값이 없거나 깨졌으면 빈 값으로 읽는다. 내려놓기나 보내기에 성공하면 지운다.
+
+import { isSummaryDraft, type SummaryDraft } from "./summaryDraft";
 
 export const DRAFT_VERSION = 1;
 export const MAX_MANUAL = 3;
@@ -127,6 +130,130 @@ export function addManualCandidate(store: DraftStore, name: string, url: string)
     if (!taken.has(id)) break;
   }
   return { ...store, manual: [...store.manual, { id, name, url }] };
+}
+
+// ----- 후보별 요약 초안(블록 3) -----
+
+/** 한 후보의 초안 칸. edits는 블록 4(요약 확인)가 쓴다. */
+export interface CandidateDraftEntry {
+  draft: SummaryDraft;
+  captureCount: number;
+  edits?: unknown;
+  confirmed: boolean;
+}
+
+export type CandidateStatus = "needs_capture" | "read" | "confirmed";
+
+export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
+  needs_capture: "캡처 필요",
+  read: "캡처 읽음 · 확인 전",
+  confirmed: "요약 확인함",
+};
+
+/** 후보의 초안 칸. 없거나 초안 모양이 아니면 null. */
+export function readCandidateDraft(store: DraftStore, candidateId: string): CandidateDraftEntry | null {
+  const entry = store.drafts[candidateId];
+  if (!entry || typeof entry !== "object" || !isSummaryDraft(entry.draft)) return null;
+  return {
+    draft: entry.draft,
+    captureCount: typeof entry.captureCount === "number" ? entry.captureCount : 0,
+    ...(entry.edits === undefined ? {} : { edits: entry.edits }),
+    confirmed: entry.confirmed === true,
+  };
+}
+
+/** 후보 상태: 초안이 없으면 캡처 필요, 초안이 있고 확인 전이면 읽음, 확인했으면 확인함. */
+export function candidateStatus(store: DraftStore, candidateId: string): CandidateStatus {
+  const entry = readCandidateDraft(store, candidateId);
+  if (!entry) return "needs_capture";
+  return entry.confirmed ? "confirmed" : "read";
+}
+
+/** 후보에 새 초안을 둔다(그 후보의 옛 초안은 바뀐다. 확인 표시는 지워진다). */
+export function setCandidateDraft(
+  store: DraftStore,
+  candidateId: string,
+  draft: SummaryDraft,
+  captureCount: number,
+): DraftStore {
+  return {
+    ...store,
+    drafts: { ...store.drafts, [candidateId]: { draft, captureCount, confirmed: false } },
+  };
+}
+
+/** 초안을 다른 후보로 옮긴다. 받는 후보에 있던 초안은 바뀌고, 보내는 후보는 '캡처 필요'로 돌아간다. */
+export function moveCandidateDraft(store: DraftStore, fromId: string, toId: string): DraftStore {
+  if (fromId === toId || !store.drafts[fromId]) return store;
+  const { [fromId]: moved, ...rest } = store.drafts;
+  return { ...store, drafts: { ...rest, [toId]: moved } };
+}
+
+/**
+ * 캡처를 저장할 후보. 마지막으로 '쇼핑몰에서 보기'를 누른 후보, 없으면 첫 '캡처 필요' 후보, 그것도 없으면 첫 후보.
+ * 후보가 없으면 null.
+ */
+export function captureTargetId(store: DraftStore, candidateIds: readonly string[]): string | null {
+  if (candidateIds.length === 0) return null;
+  if (store.lastOpened && candidateIds.includes(store.lastOpened)) return store.lastOpened;
+  return candidateIds.find((id) => candidateStatus(store, id) === "needs_capture") ?? candidateIds[0];
+}
+
+const normalizeName = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+/** 영문과 숫자가 모두 든 덩어리(WH-CH720N의 ch720n 같은 모델 글자). */
+function modelTokens(value: string): Set<string> {
+  const tokens = value.toLowerCase().split(/[^a-z0-9]+/);
+  return new Set(tokens.filter((token) => /[a-z]/.test(token) && /[0-9]/.test(token)));
+}
+
+/**
+ * 읽은 상품명이 후보 이름과 다른가. 공백과 기호를 빼고 소문자로 비교해서, 어느 쪽도 다른 쪽을 품지 않고
+ * 영문+숫자 모델 글자도 겹치지 않으면 다름이다. 어느 쪽이 비어 있으면 비교하지 않는다(false).
+ */
+export function nameMismatch(readName: string, candidateName: string): boolean {
+  const read = normalizeName(readName);
+  const candidate = normalizeName(candidateName);
+  if (!read || !candidate) return false;
+  if (read.includes(candidate) || candidate.includes(read)) return false;
+  const candidateModels = modelTokens(candidateName);
+  for (const token of modelTokens(readName)) {
+    if (candidateModels.has(token)) return false;
+  }
+  return true;
+}
+
+export type NameCheck =
+  | { kind: "ok" }
+  | { kind: "mismatch"; readName: string }
+  | { kind: "missing" };
+
+/** 초안의 상품명 항목을 후보 이름과 견준다. 읽지 못했으면 missing(어느 후보인지 물어야 한다). */
+export function checkProductName(draft: SummaryDraft, candidateName: string): NameCheck {
+  const field = draft.fields.find((entry) => entry.key === "productName");
+  const value = field?.value?.trim();
+  if (!value) return { kind: "missing" };
+  return nameMismatch(value, candidateName) ? { kind: "mismatch", readName: value } : { kind: "ok" };
+}
+
+export const CAPTURE_MESSAGES = {
+  noCandidates: "후보를 먼저 추가해 주세요",
+  saved: (count: number, candidateNumber: number) =>
+    count > 0
+      ? `캡처 ${count}장을 후보 ${candidateNumber}에 저장했습니다`
+      : `요약 초안을 후보 ${candidateNumber}에 저장했습니다`,
+  savedHint:
+    "마지막으로 ‘쇼핑몰에서 보기’를 누른 후보입니다. 읽은 상품명이 후보와 다르면 알려 드립니다.",
+  mismatch: (readName: string, candidateName: string) =>
+    `읽은 상품명 ‘${readName}’이 후보 ‘${candidateName}’와 다릅니다. 맞는 후보로 바꾸세요.`,
+  missingName: "상품명을 읽지 못했습니다. 어느 후보의 캡처인지 골라 주세요.",
+} as const;
+
+/** 상품명 확인 결과에 맞는 경고 글자. 문제가 없으면 null. */
+export function nameWarning(check: NameCheck, candidateName: string): string | null {
+  if (check.kind === "mismatch") return CAPTURE_MESSAGES.mismatch(check.readName, candidateName);
+  if (check.kind === "missing") return CAPTURE_MESSAGES.missingName;
+  return null;
 }
 
 // ----- 기기 저장소(실패해도 화면은 돌아가야 한다) -----

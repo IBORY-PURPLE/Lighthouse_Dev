@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maxDuration, POST, runtime } from "@/app/api/volunteer/summarize/route";
 import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
+import { issueDeviceCookie, VOLUNTEER_COOKIE } from "@/lib/volunteerSession";
 import { mockPieceText } from "@/lib/extract";
 import { LLM_MODEL } from "@/lib/llm";
 import { isSummaryDraft, SUMMARY_TEXT_LIMIT } from "@/lib/summaryDraft";
@@ -31,16 +32,16 @@ function summarizeRequest(
   body: unknown,
   {
     cookie = true,
-    volunteer = "v-01",
     client,
-  }: { cookie?: boolean; volunteer?: string | null; client?: string } = {},
+  }: { cookie?: boolean | string; client?: string } = {},
 ) {
   const headers: Record<string, string> = {
     "content-type": "application/json",
     "x-forwarded-for": client ?? `192.0.2.${(nextClient += 1)}`,
   };
-  if (cookie) headers.cookie = `${ACCESS_COOKIE}=${hashAccessCode("right-code")}`;
-  if (volunteer) headers["x-demo-volunteer"] = volunteer;
+  // true면 입장한 기기의 lh_vol, 문자열이면 그 쿠키 헤더 그대로.
+  if (cookie === true) headers.cookie = `${VOLUNTEER_COOKIE}=${issueDeviceCookie()}`;
+  else if (cookie) headers.cookie = cookie;
   return new NextRequest(`${ORIGIN}/api/volunteer/summarize`, {
     method: "POST",
     headers,
@@ -104,11 +105,14 @@ describe("POST /api/volunteer/summarize", () => {
     expect(draft.source).toBe("manual");
   });
 
-  it("쿠키 없음 401, 봉사자 헤더 없음 403이다", async () => {
-    expect((await POST(summarizeRequest(VALID, { cookie: false }))).status).toBe(401);
-    const response = await POST(summarizeRequest(VALID, { volunteer: null }));
-    expect(response.status).toBe(403);
-    expect(await errorOf(response)).toBe("unknown_volunteer");
+  it("lh_vol이 없거나 틀리면 401이다(lh_access만으로는 안 된다)", async () => {
+    const accessOnly = `${ACCESS_COOKIE}=${hashAccessCode("right-code")}`;
+    const tampered = `${VOLUNTEER_COOKIE}=${issueDeviceCookie()}x`;
+    for (const cookie of [false, accessOnly, tampered]) {
+      const response = await POST(summarizeRequest(VALID, { cookie }));
+      expect(response.status).toBe(401);
+      expect(await errorOf(response)).toBe("unauthorized");
+    }
   });
 
   it("빈 글은 400 empty_text, 상한을 넘으면 400 too_long, 형식이 틀리면 400 invalid_request다", async () => {
