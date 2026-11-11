@@ -3,8 +3,20 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { AgentSheet } from "@/components/AgentSheet";
+import { CandidateList } from "@/components/CandidateList";
 import { StatusRegion } from "@/components/StatusRegion";
 import {
+  addManualCandidate,
+  clearDraftStore,
+  emptyDraftStore,
+  readDraftStore,
+  writeDraftStore,
+  type DraftStore,
+} from "@/lib/candidateDraft";
+import { searchQueryOf, SHOPS, shopSearchUrl } from "@/lib/shopLinks";
+import {
+  fetchCandidates,
   fetchRequest,
   releaseRequest,
   saveFlash,
@@ -15,6 +27,7 @@ import {
   quoteOf,
   structuredLine,
   VOLUNTEER_MESSAGES,
+  type CandidateView,
 } from "@/lib/volunteerView";
 
 type Load =
@@ -23,7 +36,12 @@ type Load =
   | { kind: "denied" }
   | { kind: "failed"; message: string };
 
-/** 화면 3(이번 블록은 요청 요약과 내려놓기까지): 맡은 요청의 상세, 또는 보낸 요청의 읽기 전용 보기. */
+type CandidateLoad =
+  | { kind: "loading" }
+  | { kind: "ok"; candidates: CandidateView[] }
+  | { kind: "failed" };
+
+/** 화면 3: 맡은 요청의 상세(요청 요약·후보·직접 찾기·내려놓기·쇼핑 에이전트), 또는 보낸 요청의 읽기 전용 보기. */
 export function RequestDetail({ requestId }: { requestId: string }) {
   const router = useRouter();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -31,6 +49,12 @@ export function RequestDetail({ requestId }: { requestId: string }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [candidateLoad, setCandidateLoad] = useState<CandidateLoad>({ kind: "loading" });
+  const [candidateAttempt, setCandidateAttempt] = useState(0);
+  const [drafts, setDrafts] = useState<DraftStore>(emptyDraftStore);
+  const [agentTarget, setAgentTarget] = useState<{ candidateId: string; nonce: number } | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -54,10 +78,39 @@ export function RequestDetail({ requestId }: { requestId: string }) {
   }, [requestId, router, attempt]);
 
   // 불러온 뒤 제목에 초점을 둬서 낭독이 화면 이름부터 시작하게 한다.
+  // 그 사이 이용자가 이미 다른 곳을 눌렀으면 초점을 빼앗지 않는다.
   const loaded = load.kind !== "loading";
   useEffect(() => {
-    if (loaded) headingRef.current?.focus();
+    if (!loaded) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) headingRef.current?.focus();
   }, [loaded]);
+
+  // 맡은 요청이면 후보를 불러오고, 이 기기의 초안(직접 추가한 후보, 마지막으로 연 후보)을 읽는다.
+  const inProgress = load.kind === "ok" && load.detail.request.status === "in_progress";
+  useEffect(() => {
+    if (!inProgress) return;
+    let cancelled = false;
+    void fetchCandidates(requestId).then((result) => {
+      if (cancelled) return;
+      if (result.kind === "unauthorized") {
+        router.replace("/volunteer");
+      } else if (result.kind === "ok") {
+        setDrafts(readDraftStore(requestId));
+        setCandidateLoad({ kind: "ok", candidates: result.data.candidates });
+      } else {
+        setCandidateLoad({ kind: "failed" });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [inProgress, requestId, router, candidateAttempt]);
+
+  const saveDrafts = (next: DraftStore) => {
+    setDrafts(next);
+    writeDraftStore(requestId, next);
+  };
 
   const handleRelease = async () => {
     if (busy) return;
@@ -65,6 +118,7 @@ export function RequestDetail({ requestId }: { requestId: string }) {
     setMessage("");
     const outcome = await releaseRequest(requestId);
     if (outcome.kind === "released") {
+      clearDraftStore(requestId);
       saveFlash(VOLUNTEER_MESSAGES.releasedToQueue);
       router.push("/volunteer");
       return;
@@ -83,10 +137,14 @@ export function RequestDetail({ requestId }: { requestId: string }) {
 
   if (load.kind === "ok") {
     const { request, result } = load.detail;
-    const inProgress = request.status === "in_progress";
+    const demoCandidates = candidateLoad.kind === "ok" ? candidateLoad.candidates : [];
+    const agentCandidates = (demoCandidates.length > 0 ? demoCandidates : drafts.manual).map(
+      (candidate) => ({ id: candidate.id, name: candidate.name }),
+    );
+    const query = searchQueryOf(request);
     return (
       <div className="vol-root">
-        <main className="vol-page vol-page--plain">
+        <main className={`vol-page ${inProgress ? "vol-page--agent" : "vol-page--plain"}`}>
           <header className="vol-topbar">
             <span className="vol-topbar-title">
               <Link href="/volunteer?tab=mine" className="vol-back" aria-label="내 담당 목록으로">
@@ -106,16 +164,74 @@ export function RequestDetail({ requestId }: { requestId: string }) {
           </section>
 
           {inProgress ? (
-            <div className="vol-actions">
-              <button
-                type="button"
-                className="vol-btn vol-btn--secondary"
-                aria-disabled={busy ? true : undefined}
-                onClick={handleRelease}
-              >
-                내려놓기
-              </button>
-            </div>
+            <>
+              {candidateLoad.kind === "loading" && (
+                <p className="vol-empty">후보를 불러오는 중입니다.</p>
+              )}
+              {candidateLoad.kind === "failed" && (
+                <>
+                  <p className="vol-notice">{VOLUNTEER_MESSAGES.candidatesFailed}</p>
+                  <div className="vol-actions">
+                    <button
+                      type="button"
+                      className="vol-btn"
+                      onClick={() => {
+                        setCandidateLoad({ kind: "loading" });
+                        setCandidateAttempt((value) => value + 1);
+                      }}
+                    >
+                      후보 다시 불러오기
+                    </button>
+                  </div>
+                </>
+              )}
+              {candidateLoad.kind === "ok" && (
+                <CandidateList
+                  demo={candidateLoad.candidates}
+                  manual={drafts.manual}
+                  onOpenLink={(candidateId) => saveDrafts({ ...drafts, lastOpened: candidateId })}
+                  onCapture={(candidateId) =>
+                    setAgentTarget((current) => ({
+                      candidateId,
+                      nonce: (current?.nonce ?? 0) + 1,
+                    }))
+                  }
+                  onAddManual={(name, url) => {
+                    saveDrafts(addManualCandidate(drafts, name, url));
+                    return true;
+                  }}
+                />
+              )}
+
+              <section className="vol-shops" aria-labelledby="vol-shops-title">
+                <h2 id="vol-shops-title">직접 찾기</h2>
+                <div className="vol-shop-links">
+                  {SHOPS.map((shop) => (
+                    <a
+                      key={shop.id}
+                      className="vol-btn vol-btn--secondary"
+                      href={shopSearchUrl(shop.id, query)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {shop.name}
+                    </a>
+                  ))}
+                </div>
+              </section>
+
+              <div className="vol-actions">
+                <button
+                  type="button"
+                  className="vol-btn vol-btn--secondary"
+                  aria-disabled={busy ? true : undefined}
+                  onClick={handleRelease}
+                >
+                  내려놓기
+                </button>
+              </div>
+              <AgentSheet request={request} candidates={agentCandidates} target={agentTarget} />
+            </>
           ) : (
             result && (
               <>
