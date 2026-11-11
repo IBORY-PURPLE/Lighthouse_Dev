@@ -132,6 +132,8 @@ test.describe("봉사자 입장·목록·맡기", () => {
     await expect(page.getByText("새 요청", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^대기열 \d+$/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "내 담당 0" })).toBeVisible();
+    // 카드를 누르려고 아래로 스크롤됐을 수 있으므로 맨 위에서 찍는다.
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: "test-results/volunteer-queue.png" });
     await expectNoBlockingAxe(page);
 
