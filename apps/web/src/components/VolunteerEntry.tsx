@@ -20,7 +20,9 @@ export function VolunteerEntry({ needsCode, onEntered }: VolunteerEntryProps) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    headingRef.current?.focus();
+    // 낭독이 화면 이름부터 시작하게 제목에 초점을 둔다. 그 사이 이용자가 이미 칸을 눌렀으면 초점을 빼앗지 않는다.
+    const active = document.activeElement;
+    if (!active || active === document.body) headingRef.current?.focus();
   }, []);
 
   const handleSubmit = async (event: FormEvent) => {
