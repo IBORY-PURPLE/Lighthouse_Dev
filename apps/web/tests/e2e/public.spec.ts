@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
@@ -7,7 +8,12 @@ import { MATCH_TIMEOUT_MS } from "../../src/lib/matchHandoff";
 import { REQUEST_TIMEOUT_MS } from "../../src/lib/requestRecord";
 import { installFakeSpeech, say } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
-import { makeSyntheticDetailImage, openVolunteer } from "./helpers/volunteer";
+import {
+  claimDemo,
+  FIRST_DEMO_QUOTE,
+  makeSyntheticDetailImage,
+  refill,
+} from "./helpers/volunteerFlow";
 
 // 접근 코드는 저장소 루트 .demo-access.local의 첫 줄에서만 읽는다.
 function readAccessCode(): string {
@@ -173,8 +179,9 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
 });
 
 // ④ 실제 엔진으로 1회 완주한다(실행마다 엔진 호출이 조각 수만큼 든다. 돌리기 전에 누계를 본다).
-// 봉사자 화면은 이용자 화면을 거치지 않고 연다. 초안 값과 근거 원문은 기록하지 않는다(항목 이름과 check만).
-test("④ 올리기·요약 완주", async ({ page }) => {
+// 입장 → 시연용 요청 다시 채우기 → 헤드셋 맡기 → 에이전트 창에서 캡처 1장 올리기 → 후보 1에 초안 저장.
+// 끝에서 내려놓고 다시 채워 정리한다. 초안 값과 근거 원문은 기록하지 않는다(항목 이름과 check만).
+test("④ 입장·맡기·캡처 올리기·초안 완주", async ({ page }) => {
   test.setTimeout(300_000);
   const samplePath = path.resolve(
     process.cwd(),
@@ -182,7 +189,16 @@ test("④ 올리기·요약 완주", async ({ page }) => {
     "test-results/vision-samples/public/sample.jpg",
   );
   const hasSample = existsSync(samplePath);
-  await openVolunteer(page, { code: readAccessCode() });
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": `test-${randomUUID()}` });
+
+  // 입장(코드와 별명). 이 기기가 봉사자가 된다.
+  await page.goto("/volunteer");
+  await page.getByLabel("입장 코드").fill(readAccessCode());
+  await page.getByLabel("별명").fill("시험");
+  await page.getByRole("button", { name: "시작하기" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+  await refill(page);
+  await claimDemo(page, FIRST_DEMO_QUOTE);
 
   const pieces: Array<{ pieceIndex: number; status: number; engineMs: number | null; roundTripMs: number }> = [];
   let engine: string | null = null;
@@ -215,12 +231,16 @@ test("④ 올리기·요약 완주", async ({ page }) => {
     }
   });
 
+  await page.getByRole("button", { name: "쇼핑 에이전트 열기" }).click();
+  const dialog = page.getByRole("dialog", { name: "쇼핑 에이전트" });
+  await expect(dialog.getByRole("button", { name: "캡처 올리기 · 후보 1에 저장" })).toBeVisible();
+
   const startedAt = Date.now();
   if (hasSample) {
-    await page.getByLabel("상세 이미지 올리기").setInputFiles(samplePath);
+    await page.getByTestId("capture-input").setInputFiles(samplePath);
   } else {
     const buffer = await makeSyntheticDetailImage(page);
-    await page.getByLabel("상세 이미지 올리기").setInputFiles({
+    await page.getByTestId("capture-input").setInputFiles({
       name: "synthetic-detail.png",
       mimeType: "image/png",
       buffer,
@@ -228,11 +248,14 @@ test("④ 올리기·요약 완주", async ({ page }) => {
   }
   console.log(`이미지: ${hasSample ? "실제 캡처" : "합성 이미지 기준(실제 캡처 없음)"}`);
 
-  await expect(page.locator(".info-summary__status")).toHaveText(/^요약 초안이 도착했습니다\./, {
-    timeout: 240_000,
-  });
+  await expect(dialog.getByRole("status")).toHaveText(
+    /^캡처 1장을 후보 1에 저장했습니다\. 요약 초안이 도착했습니다\./,
+    { timeout: 240_000 },
+  );
   const totalMs = Date.now() - startedAt;
-  await expect(page.getByRole("heading", { level: 3, name: "요약 초안" })).toBeFocused();
+  await expect(page.locator(".vol-cand").first().locator(".vol-chip-btn")).toHaveText(
+    "캡처 읽음 · 확인 전",
+  );
 
   const engineMs = pieces.map((p) => p.engineMs).filter((v): v is number => v !== null).sort((a, b) => a - b);
   const median = engineMs.length ? engineMs[Math.floor(engineMs.length / 2)] : null;
@@ -253,4 +276,10 @@ test("④ 올리기·요약 완주", async ({ page }) => {
   expect(priceLike).toEqual([]);
   expect(fields.length).toBeGreaterThan(0);
   expect(pieces.length).toBeGreaterThan(0);
+
+  // 정리: 내려놓고(초안도 지워진다) 시연용 요청을 다시 채운다.
+  await dialog.getByRole("button", { name: "닫기" }).click();
+  await page.getByRole("button", { name: "내려놓기" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+  await refill(page);
 });

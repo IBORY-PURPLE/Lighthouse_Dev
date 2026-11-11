@@ -95,6 +95,12 @@ export function AgentSheet({
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [status, setStatus] = useState("");
+  // 저장 안내는 알림 상자와 같은 말이라 눈에는 숨기고 낭독 영역으로만 알린다.
+  const [quietStatus, setQuietStatus] = useState(false);
+  const announce = (message: string, quiet = false) => {
+    setStatus(message);
+    setQuietStatus(quiet);
+  };
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [aimedAt, setAimedAt] = useState<string | null>(null);
@@ -179,7 +185,7 @@ export function AgentSheet({
   const ask = async (text: string, retry: boolean) => {
     setBusy(true);
     setFailure(null);
-    setStatus(STATUS.chatWaiting);
+    announce(STATUS.chatWaiting);
 
     const volunteerId = nextId.current++;
     const agentId = nextId.current++;
@@ -211,7 +217,7 @@ export function AgentSheet({
     );
     setBusy(false);
     if (outcome.kind === "answered") {
-      setStatus(STATUS.chatArrived);
+      announce(STATUS.chatArrived);
       return;
     }
     // 잘린 답을 끝난 답처럼 두지 않는다. 받은 글자는 버린다.
@@ -221,7 +227,7 @@ export function AgentSheet({
           message.id !== agentId && !(outcome.kind === "rejected" && message.id === volunteerId),
       ),
     );
-    setStatus(outcome.status);
+    announce(outcome.status);
     if (outcome.kind === "rejected") {
       setQuestion(text);
       inputRef.current?.focus();
@@ -235,7 +241,7 @@ export function AgentSheet({
     if (busy) return;
     const text = question.trim();
     if (!text) {
-      setStatus(STATUS.emptyQuestion);
+      announce(STATUS.emptyQuestion);
       inputRef.current?.focus();
       return;
     }
@@ -253,7 +259,7 @@ export function AgentSheet({
   const capture = useCaptureUpload({
     requestId: request.requestId,
     product: request.product,
-    onStatus: setStatus,
+    onStatus: (message) => announce(message),
     onUnauthorized: () => router.replace("/volunteer"),
     onSaved: (result: CaptureSaved) => {
       onSaveDraft(result.candidateId, result.draft, result.captureCount);
@@ -266,7 +272,7 @@ export function AgentSheet({
       const index = candidateIds.indexOf(result.candidateId);
       const name = index >= 0 ? candidates[index].name : "";
       const warning = nameWarning(checkProductName(result.draft, name), name);
-      setStatus([savedStatus(result, index + 1), warning].filter(Boolean).join(" "));
+      announce([savedStatus(result, index + 1), warning].filter(Boolean).join(" "), true);
     },
   });
 
@@ -295,8 +301,9 @@ export function AgentSheet({
     setReturnFocus((value) => value + 1);
     const name = candidates[index].name;
     const warning = nameWarning(checkProductName(savedEntry.draft, name), name);
-    setStatus(
+    announce(
       [`${CAPTURE_MESSAGES.saved(saved.captureCount, index + 1)}.`, warning].filter(Boolean).join(" "),
+      true,
     );
   };
 
@@ -394,7 +401,9 @@ export function AgentSheet({
               )}
               <CaptureManualForm controller={capture} />
             </div>
-            <StatusRegion message={status} />
+            <div className={quietStatus ? "vol-sr" : undefined}>
+              <StatusRegion message={status} />
+            </div>
             {failure && (
               <div className="vol-sheet-retry">
                 <button

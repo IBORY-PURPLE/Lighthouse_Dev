@@ -57,6 +57,9 @@ const MAX_RETRY_AFTER_SECONDS = 60;
 
 const defaultWait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** 브라우저 fetch는 다른 객체의 메서드로 부르면 던지므로(Illegal invocation) 한 번 감싼다. */
+const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
+
 function retryAfterMs(response: Response): number {
   const seconds = Number(response.headers.get("retry-after") ?? 1);
   const bounded = Number.isFinite(seconds) ? seconds : 1;
@@ -147,7 +150,7 @@ export async function summarizeText(
   captureCount: number,
   deps: CaptureDeps = {},
 ): Promise<CaptureOutcome> {
-  const doFetch = deps.fetch ?? fetch;
+  const doFetch = deps.fetch ?? defaultFetch;
   const wait = deps.wait ?? defaultWait;
   let text = fullText;
   let notice = "";
@@ -200,7 +203,7 @@ export async function readCapture(
   deps: CaptureDeps = {},
 ): Promise<CaptureOutcome> {
   const resolved = {
-    fetch: deps.fetch ?? fetch,
+    fetch: deps.fetch ?? defaultFetch,
     wait: deps.wait ?? defaultWait,
     signal: deps.signal,
   };

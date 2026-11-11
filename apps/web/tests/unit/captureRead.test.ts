@@ -96,6 +96,23 @@ describe("readCapture: 캡처 여러 장 → 조각 → 글자 읽기 → 요약
     expect(statuses).toEqual([CAPTURE_STATUS.reading(1, 3)]);
   });
 
+  it("기본 fetch는 전역 fetch를 그대로 부른다(다른 객체의 메서드로 부르면 브라우저가 던진다)", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      calls.push(String(input));
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return Promise.resolve(String(input).endsWith("/extract-text") ? extractOk(body) : json(DRAFT));
+    });
+    try {
+      const outcome = await readCapture(CONTEXT, files(1), { cut: cutInto([1]), wait: noWait });
+      expect(kind(outcome)).toBe("draft");
+      expect(calls).toEqual(["/api/volunteer/extract-text", "/api/volunteer/summarize"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("봉사자 헤더를 보내지 않는다(입장 쿠키가 신분이다)", async () => {
     const { impl, calls } = fakeFetch((url, body) =>
       url.endsWith("/extract-text") ? extractOk(body) : json(DRAFT),

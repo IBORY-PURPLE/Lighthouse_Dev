@@ -100,3 +100,53 @@ export async function claimDemo(page: Page, quote: string): Promise<void> {
     page.getByRole("heading", { level: 1, name: "요청 상세" }),
   ).toBeVisible();
 }
+
+/**
+ * 긴 합성 상세 이미지(PNG)를 브라우저 canvas로 그려 돌려준다. Node에는 canvas가 없어서다.
+ * 글자를 넣고 잡음으로 파일 크기를 키운다. 실제 쇼핑몰 이미지는 쓰지 않는다(TSD §10).
+ */
+export async function makeSyntheticDetailImage(
+  page: Page,
+  { width = 860, height = 4500, noise = true } = {},
+): Promise<Buffer> {
+  const base64 = await page.evaluate(
+    ({ width, height, noise }) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("no canvas");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      if (noise) {
+        const image = context.getImageData(0, 0, width, height);
+        let seed = 12345;
+        for (let i = 0; i < image.data.length; i += 4) {
+          seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+          const value = 200 + (seed % 56);
+          image.data[i] = value;
+          image.data[i + 1] = (value * 7) % 256 | 0x80;
+          image.data[i + 2] = (value * 13) % 256 | 0x80;
+          image.data[i + 3] = 255;
+        }
+        context.putImageData(image, 0, 0);
+      }
+      context.fillStyle = "#111111";
+      context.font = "bold 40px sans-serif";
+      const lines = [
+        "합성 상세 이미지 (시험용)",
+        "상품명: 가짜 헤드셋 LH-200",
+        "색상 옵션: 블랙, 화이트",
+        "블루투스 5.3, 최대 30시간 재생",
+        "구성품: 본체, USB-C 케이블, 설명서",
+        "주의: 물에 닿지 않게 하세요",
+      ];
+      for (let y = 120, i = 0; y < height; y += 300, i++) {
+        context.fillText(lines[i % lines.length], 40, y);
+      }
+      return canvas.toDataURL("image/png").split(",")[1];
+    },
+    { width, height, noise },
+  );
+  return Buffer.from(base64, "base64");
+}
