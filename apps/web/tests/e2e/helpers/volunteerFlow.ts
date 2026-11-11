@@ -87,3 +87,16 @@ export async function expectNoRemaining(page: Page): Promise<void> {
   const text = await page.locator("body").innerText();
   expect(text).not.toContain("남음");
 }
+
+/** 대기열에서 인용문이 같은 시연 카드의 "이 요청 맡기"를 눌러 상세 화면까지 간다. */
+export async function claimDemo(page: Page, quote: string): Promise<void> {
+  await page
+    .locator(".vol-card")
+    .filter({ hasText: quote })
+    .getByRole("button", { name: CLAIM_NAME })
+    .click();
+  await expect(page).toHaveURL(/\/volunteer\/requests\/[0-9a-f-]{36}$/);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "요청 상세" }),
+  ).toBeVisible();
+}
