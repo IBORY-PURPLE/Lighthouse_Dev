@@ -207,15 +207,37 @@ export function captureTargetId(store: DraftStore, candidateIds: readonly string
 
 const normalizeName = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 
-/** 영문과 숫자가 모두 든 덩어리(WH-CH720N의 ch720n 같은 모델 글자). */
+/**
+ * 모델 글자. 영문·숫자 덩어리 가운데 영문과 숫자가 모두 들고 4자 이상인 것, 그리고 하이픈·공백만 사이에 둔
+ * 이웃한 두 덩어리를 붙인 것이다(WH-CH720N → ch720n, whch720n. LH 200 → lh200).
+ * 하이픈이나 띄어쓰기만 다른 표기(WHCH720N, WH CH720N)를 같은 모델로 보려는 것이다.
+ * 1.7L 같은 짧은 글자는 모델로 보지 않는다.
+ */
 function modelTokens(value: string): Set<string> {
-  const tokens = value.toLowerCase().split(/[^a-z0-9]+/);
-  return new Set(tokens.filter((token) => /[a-z]/.test(token) && /[0-9]/.test(token)));
+  const lower = value.toLowerCase();
+  const runs = [...lower.matchAll(/[a-z0-9]+/g)].map((match) => ({
+    text: match[0],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+  const isModel = (token: string) =>
+    token.length >= 4 && /[a-z]/.test(token) && /[0-9]/.test(token);
+  const tokens = new Set<string>();
+  runs.forEach((run, index) => {
+    if (isModel(run.text)) tokens.add(run.text);
+    const next = runs[index + 1];
+    if (next && /^[-\s]+$/.test(lower.slice(run.end, next.start))) {
+      const joined = run.text + next.text;
+      if (isModel(joined)) tokens.add(joined);
+    }
+  });
+  return tokens;
 }
 
 /**
  * 읽은 상품명이 후보 이름과 다른가. 공백과 기호를 빼고 소문자로 비교해서, 어느 쪽도 다른 쪽을 품지 않고
  * 영문+숫자 모델 글자도 겹치지 않으면 다름이다. 어느 쪽이 비어 있으면 비교하지 않는다(false).
+ * 모델 글자가 같으면 브랜드 표기가 달라도(SONY/소니) 같은 상품으로 본다.
  */
 export function nameMismatch(readName: string, candidateName: string): boolean {
   const read = normalizeName(readName);
