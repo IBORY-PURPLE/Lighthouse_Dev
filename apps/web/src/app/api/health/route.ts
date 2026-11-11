@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
+import { getExtractEngine } from "@/lib/extract";
 import { getLlmMode } from "@/lib/llm";
 import { getRequestStore } from "@/lib/requestStore";
 
@@ -22,6 +23,8 @@ export function GET(request: NextRequest) {
       groqKeyConfigured: Boolean(process.env.GROQ_API_KEY?.trim()),
       llmMode: getLlmMode(),
       store: getRequestStore().storeKind(),
+      // 엔진 이름만 돌려준다. 키 값은 돌려주지 않는다(TSD §8.1).
+      extractEngine: getExtractEngine(),
     },
     { headers: NO_STORE },
   );

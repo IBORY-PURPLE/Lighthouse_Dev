@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -9,9 +10,26 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import {
+  CaptureManualForm,
+  CaptureUpload,
+  savedStatus,
+  useCaptureUpload,
+  type CaptureSaved,
+} from "@/components/CaptureUpload";
 import { StatusRegion } from "@/components/StatusRegion";
+import {
+  CAPTURE_MESSAGES,
+  captureTarget,
+  checkProductName,
+  nameWarning,
+  readCandidateDraft,
+  type CaptureTargetReason,
+  type DraftStore,
+} from "@/lib/candidateDraft";
 import { MAX_QUESTION_LENGTH, requestAnswer } from "@/lib/chat";
 import { STATUS } from "@/lib/speech";
+import type { SummaryDraft } from "@/lib/summaryDraft";
 import type { VolunteerRequestView } from "@/lib/volunteerView";
 
 export const AGENT_GREETING =
@@ -25,10 +43,25 @@ export interface AgentCandidate {
 interface AgentSheetProps {
   /** 이 요청의 맥락. 챗봇에는 brand와 item만 보낸다(예산은 보내지 않는다). */
   request: VolunteerRequestView;
-  /** 요청 화면의 후보들(블록 3이 캡처 저장 대상으로 쓴다). */
+  /** 요청 화면의 후보들(캡처 저장 대상). */
   candidates: readonly AgentCandidate[];
   /** 값이 바뀔 때마다 창을 연다(후보 칩을 눌렀을 때). candidateId는 그 후보를 가리킨다. */
   target?: { candidateId: string; nonce: number } | null;
+  /** 이 기기의 요청별 초안(마지막으로 연 후보와 후보별 요약 초안). 읽기만 한다. */
+  drafts: DraftStore;
+  /** 캡처를 읽어 만든 초안을 후보에 저장한다(저장은 요청 화면이 한다). */
+  onSaveDraft: (candidateId: string, draft: SummaryDraft, captureCount: number) => void;
+  /** 저장한 초안을 다른 후보로 옮긴다. */
+  onMoveDraft: (fromId: string, toId: string) => void;
+}
+
+/** 방금 저장한 캡처 알림(어느 후보에, 몇 장). 초안과 경고는 현재 기기 초안에서 읽는다. */
+interface SavedNotice {
+  candidateId: string;
+  captureCount: number;
+  extra: string;
+  /** 이 후보에 저장한 까닭(직접 고름 / 마지막으로 연 후보 / 첫 캡처 필요). 안내 문장을 고른다. */
+  reason: CaptureTargetReason;
 }
 
 interface Message {
@@ -50,16 +83,34 @@ const FOCUSABLE =
  * 요청과 후보 목록만 받아 스스로 동작한다. 대화는 이 부품의 상태에만 있다
  * (창을 닫아도 남고, 부품이 사라지면 사라진다. 서버나 기기 저장소에 남기지 않는다).
  */
-export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
+export function AgentSheet({
+  request,
+  candidates,
+  target,
+  drafts,
+  onSaveDraft,
+  onMoveDraft,
+}: AgentSheetProps) {
+  const router = useRouter();
   const titleId = useId();
   const inputId = useId();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [status, setStatus] = useState("");
+  // 저장 안내는 알림 상자와 같은 말이라 눈에는 숨기고 낭독 영역으로만 알린다.
+  const [quietStatus, setQuietStatus] = useState(false);
+  const announce = (message: string, quiet = false) => {
+    setStatus(message);
+    setQuietStatus(quiet);
+  };
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [aimedAt, setAimedAt] = useState<string | null>(null);
+  const [saved, setSaved] = useState<SavedNotice | null>(null);
+  const [choosing, setChoosing] = useState(false);
+  const [returnFocus, setReturnFocus] = useState(0);
+  const switchRef = useRef<HTMLButtonElement>(null);
 
   const buttonRef = useRef<HTMLButtonElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -92,7 +143,12 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
   useEffect(() => {
     const body = bodyRef.current;
     if (open && body) body.scrollTop = body.scrollHeight;
-  }, [open, messages.length, lastText]);
+  }, [open, messages.length, lastText, saved, choosing]);
+
+  // 후보 고르기 목록이 닫히면 '다른 후보로 바꾸기' 버튼으로 초점을 돌린다.
+  useEffect(() => {
+    if (returnFocus > 0) switchRef.current?.focus();
+  }, [returnFocus]);
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -111,7 +167,11 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
     // 창 밖으로 초점이 나가지 않게 가둔다.
     const focusable = Array.from(
       sheetRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
-    ).filter((element) => element.getAttribute("aria-disabled") !== "true");
+    ).filter(
+      (element) =>
+        element.getAttribute("aria-disabled") !== "true" &&
+        element.getAttribute("aria-hidden") !== "true",
+    );
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -128,7 +188,7 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
   const ask = async (text: string, retry: boolean) => {
     setBusy(true);
     setFailure(null);
-    setStatus(STATUS.chatWaiting);
+    announce(STATUS.chatWaiting);
 
     const volunteerId = nextId.current++;
     const agentId = nextId.current++;
@@ -160,7 +220,7 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
     );
     setBusy(false);
     if (outcome.kind === "answered") {
-      setStatus(STATUS.chatArrived);
+      announce(STATUS.chatArrived);
       return;
     }
     // 잘린 답을 끝난 답처럼 두지 않는다. 받은 글자는 버린다.
@@ -170,7 +230,7 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
           message.id !== agentId && !(outcome.kind === "rejected" && message.id === volunteerId),
       ),
     );
-    setStatus(outcome.status);
+    announce(outcome.status);
     if (outcome.kind === "rejected") {
       setQuestion(text);
       inputRef.current?.focus();
@@ -184,7 +244,7 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
     if (busy) return;
     const text = question.trim();
     if (!text) {
-      setStatus(STATUS.emptyQuestion);
+      announce(STATUS.emptyQuestion);
       inputRef.current?.focus();
       return;
     }
@@ -193,6 +253,78 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
   };
 
   const aimedIndex = aimedAt ? candidates.findIndex((candidate) => candidate.id === aimedAt) : -1;
+
+  // 캡처를 저장할 후보: 칩을 눌러 연 후보, 아니면 마지막으로 '쇼핑몰에서 보기'를 누른 후보(없으면 첫 '캡처 필요').
+  const candidateIds = candidates.map((candidate) => candidate.id);
+  const targetChoice = captureTarget(
+    drafts,
+    candidateIds,
+    aimedIndex >= 0 ? candidates[aimedIndex].id : null,
+  );
+  const targetId = targetChoice?.id ?? null;
+  const targetNumber = targetId ? candidateIds.indexOf(targetId) + 1 : null;
+
+  const capture = useCaptureUpload({
+    requestId: request.requestId,
+    product: request.product,
+    onStatus: (message) => announce(message),
+    onUnauthorized: () => router.replace("/volunteer"),
+    onSaved: (result: CaptureSaved) => {
+      onSaveDraft(result.candidateId, result.draft, result.captureCount);
+      setSaved({
+        candidateId: result.candidateId,
+        captureCount: result.captureCount,
+        extra: result.notice,
+        // 올리기 시작할 때 버튼에 적혀 있던 후보와 그 까닭이다(읽는 동안 다른 후보를 눌러도 그대로).
+        reason: result.reason,
+      });
+      setChoosing(false);
+      const index = candidateIds.indexOf(result.candidateId);
+      const name = index >= 0 ? candidates[index].name : "";
+      const warning = nameWarning(checkProductName(result.draft, name), name);
+      announce([savedStatus(result, index + 1), warning].filter(Boolean).join(" "), true);
+    },
+  });
+
+  // 저장 알림: 후보 이름과 초안은 지금 기기 초안에서 읽는다(바꾸기로 옮겨도 맞게 보인다).
+  const savedIndex = saved ? candidateIds.indexOf(saved.candidateId) : -1;
+  const savedEntry = saved ? readCandidateDraft(drafts, saved.candidateId) : null;
+  const savedView =
+    saved && savedEntry && savedIndex >= 0
+      ? {
+          title: CAPTURE_MESSAGES.saved(saved.captureCount, savedIndex + 1),
+          warning: nameWarning(
+            checkProductName(savedEntry.draft, candidates[savedIndex].name),
+            candidates[savedIndex].name,
+          ),
+        }
+      : null;
+  const otherCandidates = saved ? candidates.filter((candidate) => candidate.id !== saved.candidateId) : [];
+
+  const handleSwitch = (toId: string) => {
+    if (!saved || !savedEntry) return;
+    const index = candidateIds.indexOf(toId);
+    if (index < 0) return;
+    // 받는 후보에 이미 초안이 있으면 덮어쓰지 않고 서로 바꾼다(moveCandidateDraft).
+    const fromIndex = candidateIds.indexOf(saved.candidateId);
+    const displaced = readCandidateDraft(drafts, toId) !== null;
+    onMoveDraft(saved.candidateId, toId);
+    setSaved({ ...saved, candidateId: toId, reason: "chosen" });
+    setChoosing(false);
+    setReturnFocus((value) => value + 1);
+    const name = candidates[index].name;
+    const warning = nameWarning(checkProductName(savedEntry.draft, name), name);
+    announce(
+      [
+        `${CAPTURE_MESSAGES.saved(saved.captureCount, index + 1)}.`,
+        displaced ? CAPTURE_MESSAGES.swapped(fromIndex + 1, index + 1) : null,
+        warning,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      true,
+    );
+  };
 
   return (
     <>
@@ -250,8 +382,49 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
                   {message.text}
                 </p>
               ))}
+              {saved && savedView && (
+                <div className="vol-saved" role="group" aria-labelledby={`${titleId}-saved`}>
+                  <p id={`${titleId}-saved`} className="vol-saved-title">
+                    {savedView.title}
+                  </p>
+                  <p className="vol-saved-hint">{CAPTURE_MESSAGES.savedHints[saved.reason]}</p>
+                  {saved.extra && <p className="vol-saved-hint">{saved.extra}</p>}
+                  {savedView.warning && <p className="vol-saved-warn">{savedView.warning}</p>}
+                  {otherCandidates.length > 0 && (
+                    <button
+                      ref={switchRef}
+                      type="button"
+                      className="vol-btn vol-btn--secondary vol-btn--small"
+                      aria-expanded={choosing}
+                      onClick={() => setChoosing((value) => !value)}
+                    >
+                      다른 후보로 바꾸기
+                    </button>
+                  )}
+                  {choosing && (
+                    <ul className="vol-pick">
+                      {otherCandidates.map((candidate) => (
+                        <li key={candidate.id}>
+                          <button
+                            type="button"
+                            className="vol-btn vol-btn--secondary vol-btn--block vol-pick-btn"
+                            onClick={() => handleSwitch(candidate.id)}
+                          >
+                            후보 {candidateIds.indexOf(candidate.id) + 1} · {candidate.name}
+                            {readCandidateDraft(drafts, candidate.id) !== null &&
+                              ` (${CAPTURE_MESSAGES.hasDraft})`}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <CaptureManualForm controller={capture} />
             </div>
-            <StatusRegion message={status} />
+            <div className={quietStatus ? "vol-sr" : undefined}>
+              <StatusRegion message={status} />
+            </div>
             {failure && (
               <div className="vol-sheet-retry">
                 <button
@@ -288,6 +461,12 @@ export function AgentSheet({ request, candidates, target }: AgentSheetProps) {
                 보내기
               </button>
             </form>
+            <CaptureUpload
+              controller={capture}
+              candidateId={targetId}
+              candidateNumber={targetNumber}
+              reason={targetChoice?.reason ?? null}
+            />
           </div>
         </div>
       )}
