@@ -71,7 +71,7 @@ async function openVolunteer(page: Page) {
   const handoff = page.getByRole("button", { name: "봉사자 화면으로(시연)" });
   await expect(handoff).toBeVisible();
   await handoff.click();
-  await expect(page).toHaveURL(/\/volunteer$/);
+  await expect(page).toHaveURL(/\/volunteer\/demo$/);
   await expect(heading(page)).toBeFocused();
 }
 
@@ -265,7 +265,7 @@ test.describe("봉사자 챗봇", () => {
   });
 
   test("매칭 정보가 없으면 챗봇을 보여 주지 않는다", async ({ page }) => {
-    await page.goto("/volunteer");
+    await page.goto("/volunteer/demo");
     await expect(status(page)).toHaveText("매칭 정보가 없습니다.");
     await expect(askButton(page)).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);

@@ -124,7 +124,7 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
   });
   await handoff.click();
   expect((await matchResponse).status()).toBe(200);
-  await expect(page).toHaveURL(/\/volunteer$/);
+  await expect(page).toHaveURL(/\/volunteer\/demo$/);
   await page.getByRole("button", { name: "눌러서 질문하기" }).click();
   await say(page, "sony 헤드셋 제품을 찾는 가이드 알려줘");
   const confirm = page.getByRole("button", { name: "이대로 질문" });

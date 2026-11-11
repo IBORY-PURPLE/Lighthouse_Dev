@@ -151,7 +151,7 @@ export function RequestDetail({ requestId }: { requestId: string }) {
       <main className="vol-page vol-page--plain">
         <header className="vol-topbar">
           <span className="vol-topbar-title">
-            <Link href="/volunteer" className="vol-back" aria-label="목록으로">
+            <Link href="/volunteer" className="vol-back" aria-label="대기열로">
               &lt;
             </Link>
             <h1 ref={headingRef} tabIndex={-1}>
