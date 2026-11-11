@@ -25,6 +25,9 @@ const MISMATCH_C2 = `읽은 상품명 ‘${FAKE_NAME}’이 후보 ‘소니 WH-
 const MISMATCH_C3 = `읽은 상품명 ‘${FAKE_NAME}’이 후보 ‘소니 WH-1000XM4’와 다릅니다. 맞는 후보로 바꾸세요.`;
 const SAVED_HINT =
   "마지막으로 ‘쇼핑몰에서 보기’를 누른 후보입니다. 읽은 상품명이 후보와 다르면 알려 드립니다.";
+// 쇼핑몰을 본 후보가 없을 때(첫 캡처 필요 후보에 저장)의 안내.
+const FIRST_NEEDED_HINT =
+  "‘쇼핑몰에서 보기’를 누른 후보가 없어 첫 ‘캡처 필요’ 후보에 저장했습니다. 읽은 상품명이 후보와 다르면 알려 드립니다.";
 const MANUAL_TEXT = `상품명: ${FAKE_NAME}\n색상 옵션: 블랙, 화이트\n주의: 물에 닿지 않게 하세요`;
 
 const agentDialog = (page: Page) => page.getByRole("dialog", { name: "쇼핑 에이전트" });
@@ -145,7 +148,7 @@ test.describe("봉사자 캡처 올리기 → 후보별 요약 초안(가짜 응
     // 저장 알림: 몇 장을 어느 후보에, 다른 후보로 바꾸기, 상품명이 다르다는 경고.
     const notice = savedNotice(page);
     await expect(notice).toContainText("캡처 1장을 후보 1에 저장했습니다");
-    await expect(notice).toContainText(SAVED_HINT);
+    await expect(notice).toContainText(FIRST_NEEDED_HINT);
     await expect(notice).toContainText(MISMATCH_C1);
     await expect(notice.getByRole("button", { name: "다른 후보로 바꾸기" })).toBeVisible();
 
@@ -329,6 +332,43 @@ test.describe("봉사자 캡처 올리기 → 후보별 요약 초안(가짜 응
     });
     // 후보 1에는 상품명을 못 읽은 초안이, 후보 2에는 처음 후보 1에 있던 초안이 있다.
     expect(names).toEqual([null, "소니 WH-CH720N 블랙"]);
+    await page.context().close();
+  });
+
+  test("3-2. 저장 대상은 버튼에 적힌 후보다: 후보 칩으로 열면 그 후보, AI 버튼으로 열면 마지막으로 연 후보", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await openSonyDetail(browser, baseURL);
+    const image = await makeSyntheticDetailImage(page, { height: 900, noise: false });
+
+    // AI 버튼으로 열었고 쇼핑몰을 본 후보가 없다: 첫 '캡처 필요' 후보(후보 1)이고, 안내도 그렇게 말한다.
+    await openAgent(page);
+    const dialog = agentDialog(page);
+    await expect(dialog.getByRole("button", { name: "캡처 올리기 · 후보 1에 저장" })).toBeVisible();
+    await dialog.getByRole("button", { name: "닫기" }).click();
+
+    // 후보 2의 쇼핑몰을 본 뒤(마지막으로 연 후보 = 후보 2) 후보 3의 칩으로 창을 연다 → 후보 3에 저장한다.
+    const popupPromise = page.waitForEvent("popup");
+    await page.locator(".vol-cand").nth(1).getByRole("link", { name: "쇼핑몰에서 보기" }).click();
+    await (await popupPromise).close();
+    await chip(page, 2).click();
+    await expect(dialog.getByRole("button", { name: "캡처 올리기 · 후보 3에 저장" })).toBeVisible();
+    await captureInput(page).setInputFiles(png("a.png", image));
+    await expect(savedNotice(page)).toContainText("캡처 1장을 후보 3에 저장했습니다", { timeout: 30_000 });
+    await expect(savedNotice(page)).toContainText("직접 고른 후보입니다.");
+    await expect(savedNotice(page)).not.toContainText("마지막으로 ‘쇼핑몰에서 보기’를 누른 후보입니다.");
+    await expect(chip(page, 2)).toHaveText("캡처 읽음 · 확인 전");
+    await expect(chip(page, 1)).toHaveText("캡처 필요");
+    await dialog.getByRole("button", { name: "닫기" }).click();
+
+    // AI 버튼으로 다시 열면 마지막으로 '쇼핑몰에서 보기'를 누른 후보 2가 대상이고, 안내는 와이어프레임 문구다.
+    await openAgent(page);
+    await expect(dialog.getByRole("button", { name: "캡처 올리기 · 후보 2에 저장" })).toBeVisible();
+    await captureInput(page).setInputFiles(png("b.png", image));
+    await expect(savedNotice(page)).toContainText("캡처 1장을 후보 2에 저장했습니다", { timeout: 30_000 });
+    await expect(savedNotice(page)).toContainText(SAVED_HINT);
+    await expect(chip(page, 1)).toHaveText("캡처 읽음 · 확인 전");
     await page.context().close();
   });
 
