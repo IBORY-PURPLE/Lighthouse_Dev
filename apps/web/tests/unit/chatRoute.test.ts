@@ -361,6 +361,29 @@ describe("POST /api/chat", () => {
       expect.stringMatching(/^POST \/api\/chat stream_failed \d+ms$/),
     ]);
   });
+
+  it("상위 AI 서버 호출이 실패하면 그 서버의 상태 코드만 로그에 덧붙인다", async () => {
+    const logged: string[] = [];
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args) => {
+        logged.push(args.join(" "));
+      });
+    }
+    const { AuthenticationError } = await import("groq-sdk");
+
+    create.mockRejectedValue(
+      new AuthenticationError(401, {}, "비밀 오류", new Headers()),
+    );
+    expect((await POST(chatRequest(VALID))).status).toBe(502);
+    create.mockRejectedValue(new Error("비밀 오류"));
+    expect((await POST(chatRequest(VALID))).status).toBe(502);
+
+    expect(logged).toEqual([
+      expect.stringMatching(/^POST \/api\/chat 502 \d+ms upstream=401$/),
+      expect.stringMatching(/^POST \/api\/chat 502 \d+ms upstream=none$/),
+    ]);
+    expect(logged.join("\n")).not.toContain("비밀");
+  });
 });
 
 describe("역할 분리", () => {

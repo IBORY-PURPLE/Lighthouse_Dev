@@ -107,7 +107,10 @@ async function readSummarize(
   };
 }
 
-async function handle(request: NextRequest): Promise<Response> {
+async function handle(
+  request: NextRequest,
+  onUpstreamFailed: (status: number | undefined) => void,
+): Promise<Response> {
   // 입장한 기기(lh_vol)만 쓴다. 봉사자 ID는 쓰지 않고 로그에도 남기지 않는다.
   if (!requireVolunteer(request)) return failure(401, "unauthorized");
   const limit = checkRateLimit(clientKey(request.headers));
@@ -130,6 +133,12 @@ async function handle(request: NextRequest): Promise<Response> {
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(28_000)]),
     });
   } catch (error) {
+    if (
+      error instanceof ExtractError &&
+      (error.kind === "failed" || error.kind === "rate_limited")
+    ) {
+      onUpstreamFailed(error.upstreamStatus);
+    }
     if (error instanceof ExtractError && error.kind === "rate_limited") {
       return failure(429, "rate_limited", { "Retry-After": "60" });
     }
@@ -154,9 +163,13 @@ async function handle(request: NextRequest): Promise<Response> {
 
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
-  const response = await handle(request);
+  // 요약 AI 호출이 실패했을 때만 채운다(원인 확인용, 상위 서버의 상태 코드만).
+  let upstream = "";
+  const response = await handle(request, (status) => {
+    upstream = ` upstream=${status ?? "none"}`;
+  });
   console.info(
-    `POST /api/volunteer/summarize ${response.status} ${Date.now() - startedAt}ms`,
+    `POST /api/volunteer/summarize ${response.status} ${Date.now() - startedAt}ms${upstream}`,
   );
   return response;
 }

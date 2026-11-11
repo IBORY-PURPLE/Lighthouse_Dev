@@ -47,6 +47,8 @@ export function getExtractEngine(): ExtractEngine | null {
 export class ExtractError extends Error {
   constructor(
     readonly kind: "rate_limited" | "failed" | "not_configured" | "no_text",
+    /** 상위 서버(OpenAI·Upstage·Groq)가 돌려준 HTTP 상태 코드. 원인 확인용 로그에만 쓴다. */
+    readonly upstreamStatus?: number,
   ) {
     super(`extract_${kind}`);
   }
@@ -77,7 +79,8 @@ function statusOf(error: unknown): number | undefined {
 
 function toExtractError(error: unknown): ExtractError {
   if (error instanceof ExtractError) return error;
-  return new ExtractError(statusOf(error) === 429 ? "rate_limited" : "failed");
+  const status = statusOf(error);
+  return new ExtractError(status === 429 ? "rate_limited" : "failed", status);
 }
 
 async function extractWithOpenAI(image: string, signal?: AbortSignal): Promise<string> {
@@ -131,7 +134,10 @@ async function extractWithUpstage(
     ]),
   });
   if (!response.ok) {
-    throw new ExtractError(response.status === 429 ? "rate_limited" : "failed");
+    throw new ExtractError(
+      response.status === 429 ? "rate_limited" : "failed",
+      response.status,
+    );
   }
   const data = (await response.json()) as {
     text?: string;
@@ -254,9 +260,7 @@ export async function requestSummaryJson({
     );
     return completion.choices[0]?.message?.content ?? "";
   } catch (error) {
-    if (error instanceof GroqApiError && error.status === 429) {
-      throw new ExtractError("rate_limited");
-    }
-    throw new ExtractError("failed");
+    const status = error instanceof GroqApiError ? error.status : undefined;
+    throw new ExtractError(status === 429 ? "rate_limited" : "failed", status);
   }
 }

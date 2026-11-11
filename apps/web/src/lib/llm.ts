@@ -20,18 +20,19 @@ export function isLlmConfigured(): boolean {
 }
 
 export class LlmError extends Error {
-  constructor(readonly kind: "rate_limited" | "failed") {
+  constructor(
+    readonly kind: "rate_limited" | "failed",
+    /** 상위 AI 서버가 돌려준 HTTP 상태 코드. 원인 확인용 로그에만 쓴다(본문·키는 담지 않는다). */
+    readonly upstreamStatus?: number,
+  ) {
     super(`llm_${kind}`);
   }
 }
 
 function toLlmError(error: unknown): LlmError {
   if (error instanceof LlmError) return error;
-  return new LlmError(
-    error instanceof APIError && error.status === 429
-      ? "rate_limited"
-      : "failed",
-  );
+  const status = error instanceof APIError ? error.status : undefined;
+  return new LlmError(status === 429 ? "rate_limited" : "failed", status);
 }
 
 export interface AnswerRequest {

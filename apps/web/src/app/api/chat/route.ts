@@ -96,6 +96,7 @@ function answerResponse(
 async function handleChat(
   request: NextRequest,
   onStreamFailed: () => void,
+  onUpstreamFailed: (status: number | undefined) => void,
 ): Promise<Response> {
   if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
     return failure(401, "unauthorized");
@@ -129,6 +130,7 @@ async function handleChat(
     if (first.done) return failure(502, "llm_failed");
     return answerResponse(first.value, answer, abort, onStreamFailed);
   } catch (error) {
+    if (error instanceof LlmError) onUpstreamFailed(error.upstreamStatus);
     if (error instanceof LlmError && error.kind === "rate_limited") {
       return failure(429, "rate_limited", { "Retry-After": "60" });
     }
@@ -139,10 +141,18 @@ async function handleChat(
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   const elapsed = () => `${Date.now() - startedAt}ms`;
-  const response = await handleChat(request, () => {
-    console.info(`POST /api/chat stream_failed ${elapsed()}`);
-  });
-  // 사용자 문장과 답변은 남기지 않는다. 상태 코드와 소요 시간만.
-  console.info(`POST /api/chat ${response.status} ${elapsed()}`);
+  // 첫 글자 전에 상위 AI 서버 호출이 실패했을 때만 채운다(원인 확인용, 상태 코드만).
+  let upstream = "";
+  const response = await handleChat(
+    request,
+    () => {
+      console.info(`POST /api/chat stream_failed ${elapsed()}`);
+    },
+    (status) => {
+      upstream = ` upstream=${status ?? "none"}`;
+    },
+  );
+  // 사용자 문장과 답변은 남기지 않는다. 상태 코드와 소요 시간, 상위 서버의 상태 코드만.
+  console.info(`POST /api/chat ${response.status} ${elapsed()}${upstream}`);
   return response;
 }

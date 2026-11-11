@@ -199,6 +199,13 @@ describe("POST /api/volunteer/summarize", () => {
     const all = logs.join("\n");
     expect(all).not.toContain("가짜 헤드셋");
     expect(all).not.toContain("fake-groq-key-must-not-appear");
-    expect(logs.every((line) => /^POST \/api\/volunteer\/summarize \d{3} \d+ms$/.test(line))).toBe(true);
+    // 상위 AI 서버 호출이 실패한 줄에는 그 서버의 상태 코드만 덧붙는다(원인 확인용).
+    expect(
+      logs.every((line) =>
+        /^POST \/api\/volunteer\/summarize \d{3} \d+ms( upstream=(\d{3}|none))?$/.test(line),
+      ),
+    ).toBe(true);
+    expect(logs.filter((line) => line.endsWith(" upstream=none"))).toHaveLength(1);
+    expect(logs.filter((line) => line.endsWith(" upstream=429"))).toHaveLength(1);
   });
 });
