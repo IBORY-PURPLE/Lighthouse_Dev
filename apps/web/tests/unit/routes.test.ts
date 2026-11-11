@@ -6,6 +6,7 @@ import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 
 const ORIGIN = "http://localhost:3000";
 const FAKE_GROQ_KEY = "fake-key-value-must-not-appear";
+const FAKE_OPENAI_KEY = "fake-openai-value-must-not-appear";
 
 function healthRequest(cookie?: string) {
   return new NextRequest(`${ORIGIN}/api/health`, {
@@ -46,6 +47,9 @@ describe("GET /api/health", () => {
     vi.stubEnv("GROQ_API_KEY", FAKE_GROQ_KEY);
     // 저장소 종류만 돌려준다. 시험은 메모리 저장소로 돈다.
     vi.stubEnv("STORE_MODE", "memory");
+    vi.stubEnv("OPENAI_API_KEY", FAKE_OPENAI_KEY);
+    vi.stubEnv("UPSTAGE_API_KEY", "");
+    vi.stubEnv("EXTRACT_MODE", "");
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -66,19 +70,23 @@ describe("GET /api/health", () => {
       groqKeyConfigured: true,
       llmMode: "live",
       store: "memory",
+      extractEngine: "openai",
     });
     expect(text).not.toContain(FAKE_GROQ_KEY);
+    expect(text).not.toContain(FAKE_OPENAI_KEY);
   });
 
   it("키가 없으면 false, LLM_MODE=mock이면 mock이다", async () => {
     vi.stubEnv("GROQ_API_KEY", "");
     vi.stubEnv("LLM_MODE", "mock");
+    vi.stubEnv("EXTRACT_MODE", "mock");
     const response = health(healthRequest(hashAccessCode("right-code")));
     expect(await response.json()).toEqual({
       ok: true,
       groqKeyConfigured: false,
       llmMode: "mock",
       store: "memory",
+      extractEngine: "mock",
     });
   });
 
@@ -87,5 +95,11 @@ describe("GET /api/health", () => {
     vi.stubEnv("LLM_MODE", "mock");
     const response = health(healthRequest(hashAccessCode("right-code")));
     expect((await response.json()).llmMode).toBe("live");
+  });
+
+  it("글자 읽기 키가 없으면 extractEngine은 null이다", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    const response = health(healthRequest(hashAccessCode("right-code")));
+    expect((await response.json()).extractEngine).toBeNull();
   });
 });
