@@ -64,7 +64,7 @@ test.describe("다시 열기", () => {
 
     // 다시 연 뒤에도 기록의 제품으로 봉사자 화면(시연)까지 간다.
     await page.getByRole("button", { name: HANDOFF_NAME }).click();
-    await expect(page).toHaveURL(/\/volunteer$/);
+    await expect(page).toHaveURL(/\/volunteer\/demo$/);
     await expect(status(page)).toHaveText(
       "시연: 봉사자 화면으로 바뀌었습니다. 이용자 요청: Sony 헤드셋.",
     );

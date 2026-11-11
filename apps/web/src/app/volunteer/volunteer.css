@@ -1,0 +1,410 @@
+/*
+ * 봉사자 화면 v1(와이어프레임) 모양. 클래스는 모두 vol-로 시작한다.
+ * 기준 폭 390px, 최대 520px 가운데 정렬. 시스템 글꼴. 흰 바탕 + 진한 남색(와이어프레임 색).
+ * 어두운 모드에서도 와이어프레임 색을 지킨다(color-scheme: light).
+ */
+
+.vol-root {
+  --vol-ink: #21293d;
+  --vol-sub: #5c6375;
+  --vol-line: #d1d6e0;
+  --vol-soft: #f0f2f5;
+  --vol-lock: #e6e9ee;
+  --vol-bg: #ffffff;
+
+  box-sizing: border-box;
+  min-height: 100vh;
+  min-height: 100dvh;
+  color-scheme: light;
+  background: var(--vol-bg);
+  color: var(--vol-ink);
+  font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.vol-root *,
+.vol-root *::before,
+.vol-root *::after {
+  box-sizing: border-box;
+}
+
+.vol-page {
+  max-width: 520px;
+  margin: 0 auto;
+  /* 아래 탭 높이만큼 비워 목록이 가려지지 않게 한다. */
+  padding: 20px 21px 96px;
+}
+
+.vol-page--plain {
+  padding-bottom: 32px;
+}
+
+.vol-page h1 {
+  margin: 0;
+  font-size: 1.375rem;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+.vol-page h1:focus {
+  outline: none;
+}
+
+.vol-page h2 {
+  margin: 20px 0 8px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--vol-sub);
+}
+
+.vol-page .status-region {
+  margin: 0;
+  min-height: 0;
+  font-size: 1rem;
+}
+
+/* 안내가 있을 때만 상자로 보인다(비어 있어도 낭독 영역은 남는다). */
+.vol-page .status-region:not(:empty) {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--vol-soft);
+  font-weight: 600;
+}
+
+.vol-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.vol-topbar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vol-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-left: -10px;
+  color: var(--vol-ink);
+  font-size: 1.375rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.vol-state {
+  color: var(--vol-sub);
+  font-size: 0.9375rem;
+  white-space: nowrap;
+}
+
+/* ----- 버튼 ----- */
+
+.vol-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1.5px solid var(--vol-ink);
+  border-radius: 8px;
+  background: var(--vol-ink);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.vol-btn--secondary {
+  background: var(--vol-bg);
+  color: var(--vol-ink);
+}
+
+.vol-btn--small {
+  min-height: 44px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.9375rem;
+}
+
+.vol-btn--block {
+  display: flex;
+  width: 100%;
+}
+
+.vol-btn[aria-disabled="true"] {
+  border-color: var(--vol-lock);
+  background: var(--vol-lock);
+  color: var(--vol-sub);
+  cursor: not-allowed;
+}
+
+.vol-btn:focus-visible,
+.vol-tab:focus-visible,
+.vol-card-link:focus-visible,
+.vol-input:focus-visible,
+.vol-back:focus-visible {
+  outline: 3px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+/* ----- 입장 ----- */
+
+.vol-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 72px;
+}
+
+.vol-entry h1 {
+  font-size: 1.75rem;
+}
+
+.vol-lead {
+  margin: 8px 0 40px;
+  color: var(--vol-sub);
+}
+
+.vol-label {
+  display: block;
+  margin: 16px 0 6px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--vol-sub);
+}
+
+.vol-input {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--vol-line);
+  border-radius: 8px;
+  background: var(--vol-bg);
+  color: var(--vol-ink);
+  font: inherit;
+}
+
+.vol-input::placeholder {
+  color: var(--vol-sub);
+  opacity: 1;
+}
+
+.vol-entry .vol-btn {
+  margin-top: 8px;
+}
+
+.vol-foot {
+  margin: 14px 0 0;
+  color: var(--vol-sub);
+  font-size: 0.875rem;
+}
+
+/* ----- 카드 ----- */
+
+.vol-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vol-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 15px;
+  border: 1.5px solid var(--vol-line);
+  border-radius: 12px;
+  background: var(--vol-bg);
+}
+
+.vol-card-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.vol-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vol-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vol-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 1px 10px;
+  border: 1.5px solid var(--vol-ink);
+  border-radius: 999px;
+  background: var(--vol-ink);
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.vol-chip--outline {
+  background: var(--vol-bg);
+  color: var(--vol-ink);
+}
+
+.vol-meta {
+  color: var(--vol-ink);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.vol-meta--sub {
+  color: var(--vol-sub);
+  font-weight: 400;
+}
+
+.vol-quote {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.45;
+  /* 한국어는 낱말 중간에서 끊지 않는다. 아주 긴 낱말만 끊는다. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.vol-sub {
+  margin: 0;
+  color: var(--vol-sub);
+  font-size: 0.875rem;
+}
+
+.vol-empty {
+  margin: 0;
+  padding: 18px 0;
+  color: var(--vol-sub);
+}
+
+.vol-notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1.5px solid var(--vol-line);
+  border-radius: 8px;
+  color: var(--vol-ink);
+  font-size: 0.875rem;
+}
+
+.vol-demo {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--vol-line);
+}
+
+.vol-demo .vol-foot {
+  margin-top: 8px;
+}
+
+/* ----- 하단 탭 ----- */
+
+.vol-tabs {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 520px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--vol-line);
+  background: var(--vol-bg);
+  transform: translateX(-50%);
+}
+
+.vol-tab {
+  flex: 1;
+  min-height: 48px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--vol-sub);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.vol-tab[aria-current="page"] {
+  background: var(--vol-ink);
+  color: #ffffff;
+}
+
+/* ----- 요청 상세 ----- */
+
+.vol-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 14px 15px;
+  border-radius: 12px;
+  background: var(--vol-soft);
+}
+
+.vol-summary-label {
+  margin: 0;
+  color: var(--vol-sub);
+  font-size: 0.875rem;
+}
+
+.vol-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.vol-result {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vol-result-item {
+  padding: 12px 14px;
+  border: 1.5px solid var(--vol-line);
+  border-radius: 12px;
+}
+
+.vol-result-name {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.vol-result-line {
+  margin: 4px 0 0;
+  color: var(--vol-sub);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
