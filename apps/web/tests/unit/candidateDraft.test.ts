@@ -241,6 +241,18 @@ describe("후보별 요약 초안(블록 3)", () => {
     expect(moveCandidateDraft(store, "c1", "c3")).toBe(store);
   });
 
+  it("받는 후보에 이미 초안이 있으면 덮어쓰지 않고 두 초안을 서로 바꾼다", () => {
+    let store = setCandidateDraft(emptyDraftStore(), "c1", sampleDraft("첫째"), 1);
+    store = setCandidateDraft(store, "c2", sampleDraft("둘째"), 3);
+    const swapped = moveCandidateDraft(store, "c2", "c1");
+    expect(readCandidateDraft(swapped, "c1")).toEqual(readCandidateDraft(store, "c2"));
+    expect(readCandidateDraft(swapped, "c2")).toEqual(readCandidateDraft(store, "c1"));
+    expect(candidateStatus(swapped, "c1")).toBe("read");
+    expect(candidateStatus(swapped, "c2")).toBe("read");
+    // 다시 바꾸면 처음으로 돌아온다(잃은 초안이 없다).
+    expect(moveCandidateDraft(swapped, "c1", "c2").drafts).toEqual(store.drafts);
+  });
+
   it("저장할 후보: 마지막으로 연 후보, 없으면 첫 캡처 필요, 그것도 없으면 첫 후보, 후보가 없으면 null", () => {
     const ids = ["c1", "c2", "c3"];
     const empty = emptyDraftStore();
