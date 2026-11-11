@@ -179,9 +179,9 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
 });
 
 // ④ 실제 엔진으로 1회 완주한다(실행마다 엔진 호출이 조각 수만큼 든다. 돌리기 전에 누계를 본다).
-// 입장 → 시연용 요청 다시 채우기 → 헤드셋 맡기 → 에이전트 창에서 캡처 1장 올리기 → 후보 1에 초안 저장.
-// 끝에서 내려놓고 다시 채워 정리한다. 초안 값과 근거 원문은 기록하지 않는다(항목 이름과 check만).
-test("④ 입장·맡기·캡처 올리기·초안 완주", async ({ page }) => {
+// 입장 → 시연용 요청 다시 채우기 → 헤드셋 맡기 → 에이전트 창에서 캡처 1장 올리기 → 후보 1에 초안 저장
+// → 요약 확인(후보 1 확인) → 보내기 → 완료 화면 → 목록으로. 끝에서 다시 채워 정리한다. 초안 값과 근거 원문은 기록하지 않는다(항목 이름과 check만).
+test("④ 입장·맡기·캡처 올리기·초안·보내기 완주", async ({ page }) => {
   test.setTimeout(300_000);
   const samplePath = path.resolve(
     process.cwd(),
@@ -277,9 +277,22 @@ test("④ 입장·맡기·캡처 올리기·초안 완주", async ({ page }) => 
   expect(fields.length).toBeGreaterThan(0);
   expect(pieces.length).toBeGreaterThan(0);
 
-  // 정리: 내려놓고(초안도 지워진다) 시연용 요청을 다시 채운다.
+  // 보내기까지: 요약 확인 → 후보 1 확인 → 보내기 → 완료 화면 → 목록으로(보낸 요청이 보인다).
   await dialog.getByRole("button", { name: "닫기" }).click();
-  await page.getByRole("button", { name: "내려놓기" }).click();
+  await page.getByRole("link", { name: "요약 확인하기" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "요약 확인" })).toBeVisible();
+  await page.getByLabel("구매 가이드", { exact: true }).fill("쇼핑몰에서 ‘구매하기’를 누릅니다.");
+  await page.getByRole("button", { name: "후보 1 확인", exact: true }).click();
+  await page.getByRole("button", { name: "확인한 1개 보내기", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "완료된 요청" })).toBeVisible();
+  await expect(page.getByText("전달 완료", { exact: true })).toBeVisible();
+  await expect(page.getByText("이용자가 들음 아직", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "목록으로", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "이 기기에서 보낸 요청" })).toBeVisible();
+  await expect(page.locator(".vol-card").filter({ hasText: "소니 무선 헤드셋" })).toContainText("전달 완료");
+
+  // 정리: 시연용 요청을 다시 채운다(이 기기에서 보낸 요청도 시연 기본값으로 돌아간다).
+  await page.getByRole("button", { name: /^대기열/ }).click();
   await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
   await refill(page);
 });
