@@ -185,7 +185,11 @@ test.describe("봉사자 요약 확인 → 보내기 → 보낸 요청(가짜 �
     await expect(page.getByRole("heading", { name: "보낸 내용 (읽기 전용)" })).toBeVisible();
     await expect(page.getByText(FIRST_DEMO_QUOTE, { exact: true })).toBeVisible();
     await expect(page.getByText("보낸 후보 1개")).toBeVisible();
-    await expect(page.getByText("소니 WH-CH720N")).toBeVisible();
+    // 상품명은 후보 이름 줄에서 찾는다(구매 링크도 읽기 좋게 풀어 보여서 같은 글자가 들어 있다).
+    await expect(page.locator(".vol-sent-name").filter({ hasText: "소니 WH-CH720N" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "https://search.11st.co.kr/pc/total-search?kwd=소니 WH-CH720N" }),
+    ).toHaveAttribute("href", /kwd=%EC%86%8C%EB%8B%88%20WH-CH720N$/);
     await expect(page.getByRole("link", { name: /^https:\/\/search\.11st\.co\.kr\// })).toBeVisible();
     await expect(
       page.getByText("옵션 블랙, 화이트 · 핵심 사양 블루투스 5.3, 최대 30시간 · 주의사항 물에 닿지 않게 하세요", {
