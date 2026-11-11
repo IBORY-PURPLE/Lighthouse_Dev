@@ -408,3 +408,310 @@
   font-size: 0.875rem;
   overflow-wrap: anywhere;
 }
+
+/* ----- 요청 상세: 후보·직접 찾기 ----- */
+
+/* 오른쪽 아래 AI 버튼이 마지막 줄을 가리지 않게 비운다. */
+.vol-page--agent {
+  padding-bottom: 112px;
+}
+
+/* 화면 읽기 프로그램에만 읽히는 글자. */
+.vol-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.vol-cands-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 20px;
+}
+
+.vol-page .vol-cands-head h2 {
+  margin: 0;
+  color: var(--vol-ink);
+  font-size: 1.0625rem;
+}
+
+.vol-foot--tight {
+  margin: 4px 0 12px;
+}
+
+.vol-cand-list {
+  margin-top: 8px;
+}
+
+.vol-cand {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1.5px solid var(--vol-line);
+  border-radius: 12px;
+  background: var(--vol-bg);
+}
+
+.vol-cand-photo {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  background: var(--vol-soft);
+}
+
+.vol-cand-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.vol-cand-name {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.4;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.vol-cand-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.vol-btn--compact {
+  padding: 8px 12px;
+  font-size: 0.9375rem;
+}
+
+/* 상태 칩(눌러서 에이전트 창을 연다). 캡처 필요는 점선 테두리. */
+.vol-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1.5px dashed var(--vol-sub);
+  border-radius: 8px;
+  background: var(--vol-bg);
+  color: var(--vol-sub);
+  font: inherit;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.vol-chip-btn:focus-visible,
+.vol-sheet-body:focus-visible,
+.vol-ai:focus-visible,
+.vol-sheet-close:focus-visible {
+  outline: 3px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+.vol-manual {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+
+.vol-manual .vol-btn {
+  margin-top: 14px;
+}
+
+.vol-field-error {
+  margin: 6px 0 0;
+  color: #b3261e;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.vol-input[aria-invalid="true"] {
+  border-color: #b3261e;
+}
+
+.vol-shop-links {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.vol-shop-links .vol-btn {
+  padding-inline: 8px;
+}
+
+/* ----- 쇼핑 에이전트(AI 버튼과 아래에서 올라오는 창) ----- */
+
+.vol-ai {
+  position: fixed;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  /* 520px 가운데 열의 오른쪽 끝에 맞춘다. */
+  right: max(16px, calc(50% - 244px));
+  z-index: 20;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--vol-ink);
+  color: #ffffff;
+  font: inherit;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+  cursor: pointer;
+}
+
+.vol-sheet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.vol-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(33 41 61 / 55%);
+}
+
+.vol-sheet {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 520px;
+  height: 68dvh;
+  min-height: 360px;
+  max-height: 100%;
+  padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  background: var(--vol-bg);
+  color: var(--vol-ink);
+  transform: translateX(-50%);
+  animation: vol-sheet-up 180ms ease-out;
+}
+
+@keyframes vol-sheet-up {
+  from {
+    transform: translate(-50%, 24px);
+    opacity: 0.6;
+  }
+
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vol-sheet {
+    animation: none;
+  }
+}
+
+.vol-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.vol-sheet-head h2 {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--vol-ink);
+}
+
+.vol-sheet-head h2:focus {
+  outline: none;
+}
+
+.vol-sheet-close {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--vol-sub);
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.vol-sheet-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.vol-bubble {
+  max-width: 86%;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.vol-bubble--agent {
+  align-self: flex-start;
+  background: var(--vol-soft);
+  color: var(--vol-ink);
+}
+
+.vol-bubble--volunteer {
+  align-self: flex-end;
+  background: var(--vol-ink);
+  color: #ffffff;
+}
+
+.vol-sheet-target {
+  margin: 0;
+  color: var(--vol-sub);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.vol-sheet .status-region:not(:empty) {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--vol-soft);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.vol-sheet-retry {
+  margin-top: 8px;
+}
+
+.vol-sheet-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.vol-sheet-form .vol-input {
+  flex: 1;
+  min-width: 0;
+}
