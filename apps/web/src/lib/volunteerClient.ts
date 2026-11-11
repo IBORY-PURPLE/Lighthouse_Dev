@@ -2,6 +2,7 @@ import { STATUS } from "./speech";
 import {
   VOLUNTEER_MESSAGES,
   type QueueData,
+  type CandidateView,
   type SentResult,
   type VolunteerRequestView,
 } from "./volunteerView";
@@ -79,6 +80,15 @@ export function fetchQueue(): Promise<ApiOutcome<QueueResponse>> {
 
 export function fetchRequest(requestId: string): Promise<ApiOutcome<DetailResponse>> {
   return call<DetailResponse>(`/api/volunteer/requests/${requestId}`);
+}
+
+export interface CandidatesResponse {
+  source: "demo";
+  candidates: CandidateView[];
+}
+
+export function fetchCandidates(requestId: string): Promise<ApiOutcome<CandidatesResponse>> {
+  return call<CandidatesResponse>(`/api/volunteer/requests/${requestId}/candidates`);
 }
 
 export type ClaimResult =

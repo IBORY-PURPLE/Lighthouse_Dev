@@ -5,6 +5,7 @@ import { POST as enter } from "@/app/api/volunteer/enter/route";
 import { POST as reset } from "@/app/api/volunteer/demo/reset/route";
 import { GET as me } from "@/app/api/volunteer/me/route";
 import { GET as queue } from "@/app/api/volunteer/queue/route";
+import { GET as candidates } from "@/app/api/volunteer/requests/[requestId]/candidates/route";
 import { POST as claim } from "@/app/api/volunteer/requests/[requestId]/claim/route";
 import { POST as release } from "@/app/api/volunteer/requests/[requestId]/release/route";
 import { GET as detail } from "@/app/api/volunteer/requests/[requestId]/route";
@@ -57,7 +58,9 @@ function get(handler: typeof queue | typeof me, path: string, cookie?: string) {
   );
 }
 
-function idRoute<T extends typeof claim | typeof release | typeof detail>(
+function idRoute<
+  T extends typeof claim | typeof release | typeof detail | typeof candidates,
+>(
   handler: T,
   method: "GET" | "POST",
   id: string,
@@ -257,6 +260,7 @@ describe("봉사자 서버 함수", () => {
           await idRoute(detail, "GET", MISSING_ID, cookie),
           await idRoute(claim, "POST", MISSING_ID, cookie),
           await idRoute(release, "POST", MISSING_ID, cookie),
+          await idRoute(candidates, "GET", MISSING_ID, cookie),
           await post(reset, "/api/volunteer/demo/reset", cookie),
         ];
         for (const response of responses) {
@@ -445,6 +449,60 @@ describe("봉사자 서버 함수", () => {
       expect(lines[0]).toMatch(/^POST \/api\/volunteer\/requests\/\[id\]\/claim 200 \d+ms$/);
       expect(lines.join("\n")).not.toContain(waiting[0].requestId);
       expect(lines.join("\n")).not.toContain(volunteerId);
+    });
+  });
+
+  describe("GET …/requests/{id}/candidates", () => {
+    it("맡은 요청의 시연용 후보 3개(id c1~c3, 11번가 검색 링크)를 준다. 가격·재고는 없다", async () => {
+      const a = await signIn("가");
+      const { waiting } = await fillDemo(a);
+      const headset = waiting.find((item) => item.product.includes("헤드셋"));
+      expect(headset).toBeDefined();
+      const target = (headset as { requestId: string }).requestId;
+      await idRoute(claim, "POST", target, a);
+
+      const response = await idRoute(candidates, "GET", target, a);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      const body = await response.json();
+      expect(body.source).toBe("demo");
+      expect(body.candidates.map((entry: { id: string }) => entry.id)).toEqual(["c1", "c2", "c3"]);
+      expect(body.candidates[0]).toEqual({
+        id: "c1",
+        name: "소니 WH-CH720N",
+        seller: "11번가 검색",
+        url: `https://search.11st.co.kr/pc/total-search?kwd=${encodeURIComponent("소니 WH-CH720N")}`,
+      });
+      expect(JSON.stringify(body)).not.toMatch(/원|재고|가격/);
+    });
+
+    it("품목이 표에 없는 요청은 후보 0개다(내가 보낸 실내화 요청)", async () => {
+      const a = await signIn("가");
+      const { sent } = await fillDemo(a);
+      const response = await idRoute(candidates, "GET", sent[0].requestId, a);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ source: "demo", candidates: [] });
+    });
+
+    it("남의 요청은 403, 없는 요청은 404, UUID가 아니면 400", async () => {
+      const a = await signIn("가");
+      const b = await signIn("나");
+      const { waiting } = await fillDemo(a);
+      const target = waiting[0].requestId;
+      await idRoute(claim, "POST", target, a);
+      const others = await idRoute(candidates, "GET", target, b);
+      expect(others.status).toBe(403);
+      expect(await others.json()).toEqual({ ok: false, error: "not_yours" });
+      expect((await idRoute(candidates, "GET", MISSING_ID, a)).status).toBe(404);
+      const bad = await idRoute(candidates, "GET", "not-a-uuid", a);
+      expect(bad.status).toBe(400);
+      expect(await bad.json()).toEqual({ ok: false, error: "invalid_request" });
+    });
+
+    it("대기 중이라 아직 맡지 않은 요청의 후보는 볼 수 없다(403)", async () => {
+      const a = await signIn("가");
+      const { waiting } = await fillDemo(a);
+      expect((await idRoute(candidates, "GET", waiting[0].requestId, a)).status).toBe(403);
     });
   });
 });
