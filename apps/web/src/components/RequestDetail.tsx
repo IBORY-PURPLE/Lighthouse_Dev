@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentSheet } from "@/components/AgentSheet";
 import { CandidateList } from "@/components/CandidateList";
+import { SentView } from "@/components/SentView";
 import { StatusRegion } from "@/components/StatusRegion";
 import {
   addManualCandidate,
@@ -28,7 +29,6 @@ import {
   type DetailResponse,
 } from "@/lib/volunteerClient";
 import {
-  formatSentAt,
   quoteOf,
   structuredLine,
   VOLUNTEER_MESSAGES,
@@ -46,7 +46,7 @@ type CandidateLoad =
   | { kind: "ok"; candidates: CandidateView[] }
   | { kind: "failed" };
 
-/** 화면 3: 맡은 요청의 상세(요청 요약·후보·직접 찾기·내려놓기·쇼핑 에이전트), 또는 보낸 요청의 읽기 전용 보기. */
+/** 화면 3: 맡은 요청의 상세(요청 요약·후보·직접 찾기·내려놓기·요약 확인하기·쇼핑 에이전트), 보낸 요청이면 화면 6(SentView). */
 export function RequestDetail({ requestId }: { requestId: string }) {
   const router = useRouter();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -157,8 +157,12 @@ export function RequestDetail({ requestId }: { requestId: string }) {
     setMessage(outcome.message);
   };
 
+  if (load.kind === "ok" && load.detail.request.status === "done" && load.detail.result) {
+    return <SentView request={load.detail.request} result={load.detail.result} />;
+  }
+
   if (load.kind === "ok") {
-    const { request, result } = load.detail;
+    const { request } = load.detail;
     const demoCandidates = candidateLoad.kind === "ok" ? candidateLoad.candidates : [];
     const agentCandidates = (demoCandidates.length > 0 ? demoCandidates : drafts.manual).map(
       (candidate) => ({ id: candidate.id, name: candidate.name }),
@@ -218,6 +222,9 @@ export function RequestDetail({ requestId }: { requestId: string }) {
                     updateDrafts((current) => ({ ...current, lastOpened: candidateId }))
                   }
                   statuses={statuses}
+                  onVerify={(candidateId) =>
+                    router.push(`/volunteer/requests/${requestId}/summary?c=${candidateId}`)
+                  }
                   onCapture={(candidateId) =>
                     setAgentTarget((current) => ({
                       candidateId,
@@ -257,6 +264,12 @@ export function RequestDetail({ requestId }: { requestId: string }) {
                 >
                   내려놓기
                 </button>
+                <Link
+                  href={`/volunteer/requests/${requestId}/summary`}
+                  className="vol-btn"
+                >
+                  요약 확인하기
+                </Link>
               </div>
               <AgentSheet
                 request={request}
@@ -267,31 +280,7 @@ export function RequestDetail({ requestId }: { requestId: string }) {
                 onMoveDraft={moveCapturedDraft}
               />
             </>
-          ) : (
-            result && (
-              <>
-                <h2>보낸 내용 · {formatSentAt(result.sentAt)}</h2>
-                <ul className="vol-result">
-                  {result.candidates.map((candidate) => (
-                    <li key={`${candidate.name}-${candidate.url}`} className="vol-result-item">
-                      <p className="vol-result-name">{candidate.name}</p>
-                      {candidate.summary.length > 0 && (
-                        <p className="vol-result-line">
-                          {candidate.summary.map((entry) => `${entry.label} ${entry.value}`).join(" · ")}
-                        </p>
-                      )}
-                      {candidate.guide && <p className="vol-result-line">{candidate.guide}</p>}
-                    </li>
-                  ))}
-                </ul>
-                <div className="vol-actions">
-                  <Link href="/volunteer?tab=mine" className="vol-btn vol-btn--secondary">
-                    목록으로
-                  </Link>
-                </div>
-              </>
-            )
-          )}
+          ) : null}
         </main>
       </div>
     );

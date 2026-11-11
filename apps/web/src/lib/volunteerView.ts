@@ -161,5 +161,5 @@ export const VOLUNTEER_MESSAGES = {
   invalidNickname: "별명은 1~12자로 넣어 주세요",
   enterTooMany: "시도가 너무 많습니다. 10분 뒤 다시 해 주세요.",
   tempStore:
-    "임시 저장소를 쓰고 있습니다. 서버가 다시 뜨면 시연 요청과 맡은 상태가 사라질 수 있습니다.",
+    "임시 저장소를 쓰고 있습니다. 시연 요청과 맡은 상태가 갑자기 사라질 수 있습니다(DB 적용 전).",
 } as const;

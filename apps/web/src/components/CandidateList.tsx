@@ -23,8 +23,10 @@ interface CandidateListProps {
   onOpenLink: (candidateId: string) => void;
   /** 후보별 상태(캡처 필요 / 캡처 읽음 · 확인 전 / 요약 확인함). 없으면 캡처 필요. */
   statuses: Readonly<Record<string, CandidateStatus>>;
-  /** 상태 칩을 눌렀다. 에이전트 창을 그 후보로 연다(요약 확인 화면은 다음 블록). */
+  /** '캡처 필요' 칩을 눌렀다. 에이전트 창을 그 후보로 연다. */
   onCapture: (candidateId: string) => void;
+  /** '캡처 읽음 · 확인 전'·'요약 확인함' 칩을 눌렀다. 요약 확인 화면의 그 후보로 간다. */
+  onVerify: (candidateId: string) => void;
   /** 직접 추가. 저장했으면 true. */
   onAddManual: (name: string, url: string) => boolean;
 }
@@ -36,6 +38,7 @@ export function CandidateList({
   onOpenLink,
   statuses,
   onCapture,
+  onVerify,
   onAddManual,
 }: CandidateListProps) {
   const fromDemo = demo.length > 0;
@@ -92,7 +95,7 @@ export function CandidateList({
                       type="button"
                       className={`vol-chip-btn vol-chip-btn--${status}`}
                       aria-describedby={nameId}
-                      onClick={() => onCapture(row.id)}
+                      onClick={() => (status === "needs_capture" ? onCapture(row.id) : onVerify(row.id))}
                     >
                       {CANDIDATE_STATUS_LABELS[status]}
                     </button>

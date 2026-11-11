@@ -6,6 +6,7 @@ import {
   failureMessage,
   fetchQueue,
   releaseRequest,
+  sendResult,
 } from "@/lib/volunteerClient";
 
 function respond(status: number, body: unknown) {
@@ -55,6 +56,36 @@ describe("volunteerClient", () => {
     expect(await releaseRequest("r1")).toEqual({ kind: "not_yours" });
     respond(404, { ok: false, error: "not_found" });
     expect(await releaseRequest("r1")).toEqual({ kind: "not_yours" });
+  });
+
+  it("보내기: 201·200 sent, 400 invalid_url, 403·404 내 담당 아님, 401, 그 밖은 failed", async () => {
+    const candidates = [{ name: "N", url: "https://a.example", guide: "", summary: [] }];
+    respond(201, { requestId: "r1", status: "done", sentAt: "2026-11-12T00:00:00.000Z" });
+    expect(await sendResult("r1", candidates)).toEqual({ kind: "sent", sentAt: "2026-11-12T00:00:00.000Z" });
+    const fetchMock = vi.mocked(fetch);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/volunteer/requests/r1/result");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ candidates });
+    respond(200, { requestId: "r1", status: "done", sentAt: "2026-11-12T00:00:00.000Z" });
+    expect((await sendResult("r1", candidates)).kind).toBe("sent");
+    respond(400, { ok: false, error: "invalid_url" });
+    expect(await sendResult("r1", candidates)).toEqual({ kind: "invalid_url" });
+    respond(400, { ok: false, error: "too_long" });
+    expect(await sendResult("r1", candidates)).toMatchObject({ kind: "failed" });
+    respond(403, { ok: false, error: "not_yours" });
+    expect(await sendResult("r1", candidates)).toEqual({ kind: "not_yours" });
+    respond(404, { ok: false, error: "not_found" });
+    expect(await sendResult("r1", candidates)).toEqual({ kind: "not_yours" });
+    respond(401, { ok: false, error: "unauthorized" });
+    expect(await sendResult("r1", candidates)).toEqual({ kind: "unauthorized" });
+    respond(503, { ok: false, error: "store_unavailable" });
+    expect(await sendResult("r1", candidates)).toEqual({
+      kind: "failed",
+      message: "서버에 연결하지 못했습니다. 다시 시도해 주세요.",
+    });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect((await sendResult("r1", candidates)).kind).toBe("failed");
   });
 
   it("입장: 정해진 문구", async () => {

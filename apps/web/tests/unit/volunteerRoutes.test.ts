@@ -8,6 +8,7 @@ import { GET as queue } from "@/app/api/volunteer/queue/route";
 import { GET as candidates } from "@/app/api/volunteer/requests/[requestId]/candidates/route";
 import { POST as claim } from "@/app/api/volunteer/requests/[requestId]/claim/route";
 import { POST as release } from "@/app/api/volunteer/requests/[requestId]/release/route";
+import { POST as result } from "@/app/api/volunteer/requests/[requestId]/result/route";
 import { GET as detail } from "@/app/api/volunteer/requests/[requestId]/route";
 import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import { resetRequestStoresForTest } from "@/lib/requestStore";
@@ -59,7 +60,7 @@ function get(handler: typeof queue | typeof me, path: string, cookie?: string) {
 }
 
 function idRoute<
-  T extends typeof claim | typeof release | typeof detail | typeof candidates,
+  T extends typeof claim | typeof release | typeof detail | typeof candidates | typeof result,
 >(
   handler: T,
   method: "GET" | "POST",
@@ -287,6 +288,7 @@ describe("봉사자 서버 함수", () => {
           await idRoute(claim, "POST", MISSING_ID, cookie),
           await idRoute(release, "POST", MISSING_ID, cookie),
           await idRoute(candidates, "GET", MISSING_ID, cookie),
+          await idRoute(result, "POST", MISSING_ID, cookie),
           await post(reset, "/api/volunteer/demo/reset", cookie),
         ];
         for (const response of responses) {
@@ -324,7 +326,7 @@ describe("봉사자 서버 함수", () => {
       const body = await (await get(queue, "/api/volunteer/queue", cookie)).json();
       expect(body.persistent).toBe(false);
       expect(body.notice).toBe(
-        "임시 저장소를 쓰고 있습니다. 서버가 다시 뜨면 시연 요청과 맡은 상태가 사라질 수 있습니다.",
+        "임시 저장소를 쓰고 있습니다. 시연 요청과 맡은 상태가 갑자기 사라질 수 있습니다(DB 적용 전).",
       );
     });
   });

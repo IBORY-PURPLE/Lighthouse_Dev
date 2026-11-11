@@ -1,6 +1,7 @@
 // 요청별 기기 초안: localStorage `lh.vol.draft.v1.<requestId>`. 브라우저에서만 쓴다.
 // 블록 2는 manual(직접 추가한 후보)과 lastOpened(마지막으로 '쇼핑몰에서 보기'를 누른 후보)를 쓴다.
-// drafts(후보별 요약 초안)는 블록 3이 채우고, edits·confirmed는 블록 4가 채운다. 여기서는 객체면 그대로 보존한다.
+// drafts(후보별 요약 초안)는 블록 3이 채우고, edits(요약 확인 화면에서 고친 값)와 confirmed(후보 확인)는 블록 4가 채운다.
+// 캡처가 없는 후보는 draft 없이 `{ confirmed, edits }`만 둘 수 있다.
 // 이미지와 읽은 글자 원문은 저장하지 않는다. 요약 초안(SummaryDraft)만 둔다.
 // 값이 없거나 깨졌으면 빈 값으로 읽는다. 내려놓기나 보내기에 성공하면 지운다.
 
@@ -132,13 +133,32 @@ export function addManualCandidate(store: DraftStore, name: string, url: string)
   return { ...store, manual: [...store.manual, { id, name, url }] };
 }
 
-// ----- 후보별 요약 초안(블록 3) -----
+// ----- 후보별 요약 초안(블록 3)과 확인·고침(블록 4) -----
 
-/** 한 후보의 초안 칸. edits는 블록 4(요약 확인)가 쓴다. */
+/** 요약 확인 화면에서 봉사자가 고친 값. 없는 칸은 후보·초안의 기본값을 쓴다. values의 키는 요약 항목 키(option 등). */
+export interface CandidateEdits {
+  name?: string;
+  url?: string;
+  guide?: string;
+  values?: Record<string, string>;
+}
+
+/** 한 후보의 초안 칸(캡처를 읽은 초안이 있는 경우). */
 export interface CandidateDraftEntry {
   draft: SummaryDraft;
   captureCount: number;
-  edits?: unknown;
+  edits?: CandidateEdits;
+  confirmed: boolean;
+}
+
+/**
+ * 한 후보의 칸 전체. 캡처가 없는 후보도 상품명·링크만으로 확인할 수 있어서 draft가 없을 수 있다
+ * (이때 captureCount는 0, 칸은 `{ confirmed, edits }`로만 저장된다).
+ */
+export interface CandidateRecord {
+  draft: SummaryDraft | null;
+  captureCount: number;
+  edits: CandidateEdits | null;
   confirmed: boolean;
 }
 
@@ -150,43 +170,116 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
   confirmed: "요약 확인함",
 };
 
+/** 저장된 edits를 모양대로 거른다. 쓸 수 있는 값이 없으면 null. */
+export function readEdits(raw: unknown): CandidateEdits | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const source = raw as Record<string, unknown>;
+  const edits: CandidateEdits = {};
+  if (typeof source.name === "string") edits.name = source.name;
+  if (typeof source.url === "string") edits.url = source.url;
+  if (typeof source.guide === "string") edits.guide = source.guide;
+  const values = source.values;
+  if (values && typeof values === "object" && !Array.isArray(values)) {
+    const kept: Record<string, string> = {};
+    for (const [key, value] of Object.entries(values)) {
+      if (typeof value === "string") kept[key] = value;
+    }
+    edits.values = kept;
+  }
+  return Object.keys(edits).length > 0 ? edits : null;
+}
+
 /** 후보의 초안 칸. 없거나 초안 모양이 아니면 null. */
 export function readCandidateDraft(store: DraftStore, candidateId: string): CandidateDraftEntry | null {
   const entry = store.drafts[candidateId];
   if (!entry || typeof entry !== "object" || !isSummaryDraft(entry.draft)) return null;
+  const edits = readEdits(entry.edits);
   return {
     draft: entry.draft,
     captureCount: typeof entry.captureCount === "number" ? entry.captureCount : 0,
-    ...(entry.edits === undefined ? {} : { edits: entry.edits }),
+    ...(edits ? { edits } : {}),
     confirmed: entry.confirmed === true,
   };
 }
 
-/** 후보 상태: 초안이 없으면 캡처 필요, 초안이 있고 확인 전이면 읽음, 확인했으면 확인함. */
-export function candidateStatus(store: DraftStore, candidateId: string): CandidateStatus {
-  const entry = readCandidateDraft(store, candidateId);
-  if (!entry) return "needs_capture";
-  return entry.confirmed ? "confirmed" : "read";
+/** 후보의 칸 전체(초안이 없어도 확인·고침이 있으면 값이 있다). 아무것도 없으면 null. */
+export function readCandidateRecord(store: DraftStore, candidateId: string): CandidateRecord | null {
+  const entry = store.drafts[candidateId];
+  if (!entry || typeof entry !== "object") return null;
+  const draft = isSummaryDraft(entry.draft) ? entry.draft : null;
+  const edits = readEdits(entry.edits);
+  const confirmed = entry.confirmed === true;
+  if (!draft && !edits && !confirmed) return null;
+  return {
+    draft,
+    captureCount: draft && typeof entry.captureCount === "number" ? entry.captureCount : 0,
+    edits,
+    confirmed,
+  };
 }
 
-/** 후보에 새 초안을 둔다(그 후보의 옛 초안은 바뀐다. 확인 표시는 지워진다). */
+/**
+ * 후보 상태: 확인했으면 확인함, 초안이 있으면 읽음(확인 전), 아니면 캡처 필요.
+ * 캡처가 없는 후보도 상품명·링크를 맞게 넣고 확인하면 확인함이 된다.
+ */
+export function candidateStatus(store: DraftStore, candidateId: string): CandidateStatus {
+  const record = readCandidateRecord(store, candidateId);
+  if (!record) return "needs_capture";
+  if (record.confirmed) return "confirmed";
+  return record.draft ? "read" : "needs_capture";
+}
+
+/**
+ * 후보에 새 초안을 둔다(그 후보의 옛 초안은 바뀐다. 확인 표시는 지워진다).
+ * 상품명·링크·가이드를 고쳐 둔 것은 남기고, 항목 값은 옛 초안 것이라 버린다.
+ */
 export function setCandidateDraft(
   store: DraftStore,
   candidateId: string,
   draft: SummaryDraft,
   captureCount: number,
 ): DraftStore {
+  const kept = readEdits(store.drafts[candidateId]?.edits);
+  const carried: CandidateEdits = {};
+  if (kept?.name !== undefined) carried.name = kept.name;
+  if (kept?.url !== undefined) carried.url = kept.url;
+  if (kept?.guide !== undefined) carried.guide = kept.guide;
   return {
     ...store,
-    drafts: { ...store.drafts, [candidateId]: { draft, captureCount, confirmed: false } },
+    drafts: {
+      ...store.drafts,
+      [candidateId]: {
+        draft,
+        captureCount,
+        ...(Object.keys(carried).length > 0 ? { edits: carried } : {}),
+        confirmed: false,
+      },
+    },
   };
 }
 
-/** 초안을 다른 후보로 옮긴다. 받는 후보에 있던 초안은 바뀌고, 보내는 후보는 '캡처 필요'로 돌아간다. */
+/** 확인 화면에서 값을 고친다. 고치면 다시 확인 전이다. 초안이 있으면 그대로 둔다. */
+export function setCandidateEdits(
+  store: DraftStore,
+  candidateId: string,
+  edits: CandidateEdits,
+  confirmed = false,
+): DraftStore {
+  const previous = store.drafts[candidateId];
+  return {
+    ...store,
+    drafts: { ...store.drafts, [candidateId]: { ...previous, edits, confirmed } },
+  };
+}
+
+/** 초안을 다른 후보로 옮긴다. 받는 후보에 있던 초안은 바뀌고, 보내는 후보는 '캡처 필요'로 돌아간다. 고친 값과 확인 표시는 옮기지 않는다. */
 export function moveCandidateDraft(store: DraftStore, fromId: string, toId: string): DraftStore {
   if (fromId === toId || !store.drafts[fromId]) return store;
   const { [fromId]: moved, ...rest } = store.drafts;
-  return { ...store, drafts: { ...rest, [toId]: moved } };
+  return {
+    ...store,
+    drafts: { ...rest, [toId]: { draft: moved.draft, captureCount: moved.captureCount, confirmed: false } },
+  };
 }
 
 /**

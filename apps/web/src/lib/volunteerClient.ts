@@ -3,6 +3,7 @@ import {
   VOLUNTEER_MESSAGES,
   type QueueData,
   type CandidateView,
+  type SentCandidate,
   type SentResult,
   type VolunteerRequestView,
 } from "./volunteerView";
@@ -127,6 +128,30 @@ export async function releaseRequest(requestId: string): Promise<ReleaseResult> 
   if (result.kind === "ok") return { kind: "released" };
   if (result.kind === "unauthorized") return result;
   if (result.status === 403 || result.status === 404) return { kind: "not_yours" };
+  return { kind: "failed", message: result.message };
+}
+
+export type SendResult =
+  | { kind: "sent"; sentAt: string }
+  | { kind: "invalid_url" }
+  | { kind: "not_yours" }
+  | { kind: "unauthorized" }
+  | { kind: "failed"; message: string };
+
+/** 확인한 후보를 보낸다(요청이 완료된다). 같은 봉사자가 다시 보내도 같은 결과(200)다. */
+export async function sendResult(
+  requestId: string,
+  candidates: SentCandidate[],
+): Promise<SendResult> {
+  const result = await call<{ sentAt: string }>(`/api/volunteer/requests/${requestId}/result`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidates }),
+  });
+  if (result.kind === "ok") return { kind: "sent", sentAt: result.data.sentAt };
+  if (result.kind === "unauthorized") return result;
+  if (result.status === 403 || result.status === 404) return { kind: "not_yours" };
+  if (result.status === 400 && result.error === "invalid_url") return { kind: "invalid_url" };
   return { kind: "failed", message: result.message };
 }
 
