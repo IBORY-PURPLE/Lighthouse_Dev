@@ -18,9 +18,12 @@ import {
   nameWarning,
   parseDraftStore,
   readCandidateDraft,
+  readCandidateRecord,
   readDraftStore,
+  readEdits,
   serializeDraftStore,
   setCandidateDraft,
+  setCandidateEdits,
   validateManual,
   writeDraftStore,
 } from "@/lib/candidateDraft";
@@ -349,5 +352,72 @@ describe("상품명 확인과 경고 글자", () => {
       "마지막으로 ‘쇼핑몰에서 보기’를 누른 후보입니다. 읽은 상품명이 후보와 다르면 알려 드립니다.",
     );
     expect(CAPTURE_MESSAGES.noCandidates).toBe("후보를 먼저 추가해 주세요");
+  });
+});
+
+describe("후보 확인·고침(블록 4)", () => {
+  const draftOf = (name: string) => sampleDraft(name);
+
+  it("캡처가 없는 후보도 확인하면 확인함이 되고, 고치면 다시 캡처 필요(확인 전)로 돌아간다", () => {
+    let store = setCandidateEdits(emptyDraftStore(), "c2", { name: "N", url: "https://a.example", guide: "" }, true);
+    expect(candidateStatus(store, "c2")).toBe("confirmed");
+    expect(readCandidateRecord(store, "c2")).toMatchObject({ draft: null, captureCount: 0, confirmed: true });
+    // 초안이 없는 칸은 readCandidateDraft에는 잡히지 않는다.
+    expect(readCandidateDraft(store, "c2")).toBeNull();
+    store = setCandidateEdits(store, "c2", { name: "N2", url: "https://a.example", guide: "" }, false);
+    expect(candidateStatus(store, "c2")).toBe("needs_capture");
+  });
+
+  it("초안이 있는 후보: 확인하면 확인함, 고치면(confirmed false) 읽음(확인 전)으로 돌아가고 초안은 그대로다", () => {
+    const draft = draftOf("소니 WH-CH720N");
+    let store = setCandidateDraft(emptyDraftStore(), "c1", draft, 3);
+    store = setCandidateEdits(store, "c1", { guide: "가이드" }, true);
+    expect(candidateStatus(store, "c1")).toBe("confirmed");
+    store = setCandidateEdits(store, "c1", { guide: "가이드 2" }, false);
+    expect(candidateStatus(store, "c1")).toBe("read");
+    expect(readCandidateDraft(store, "c1")).toEqual({
+      draft,
+      captureCount: 3,
+      edits: { guide: "가이드 2" },
+      confirmed: false,
+    });
+  });
+
+  it("새 캡처를 저장하면 확인 표시와 항목 값은 지워지고 상품명·링크·가이드 고침은 남는다", () => {
+    let store = setCandidateEdits(
+      emptyDraftStore(),
+      "c1",
+      { name: "N", url: "https://a.example", guide: "G", values: { option: "블랙" } },
+      true,
+    );
+    store = setCandidateDraft(store, "c1", draftOf("x"), 1);
+    expect(candidateStatus(store, "c1")).toBe("read");
+    expect(readCandidateDraft(store, "c1")?.edits).toEqual({ name: "N", url: "https://a.example", guide: "G" });
+  });
+
+  it("다른 후보로 옮기면 상품명·링크 고침과 확인 표시는 따라가지 않는다", () => {
+    let store = setCandidateDraft(emptyDraftStore(), "c2", draftOf("x"), 2);
+    store = setCandidateEdits(store, "c2", { name: "c2 이름", url: "https://c2.example" }, true);
+    const moved = moveCandidateDraft(store, "c2", "c3");
+    expect(candidateStatus(moved, "c2")).toBe("needs_capture");
+    expect(candidateStatus(moved, "c3")).toBe("read");
+    expect(readCandidateDraft(moved, "c3")?.edits).toBeUndefined();
+  });
+
+  it("edits는 모양대로만 읽는다: 글자가 아닌 값과 모르는 속성은 버린다", () => {
+    expect(readEdits(null)).toBeNull();
+    expect(readEdits([])).toBeNull();
+    expect(readEdits({ name: 1, other: "x" })).toBeNull();
+    expect(readEdits({ name: "N", values: { option: "블랙", spec: 3 } })).toEqual({
+      name: "N",
+      values: { option: "블랙" },
+    });
+  });
+
+  it("직렬화해도 확인·고침이 그대로 읽힌다", () => {
+    const store = setCandidateEdits(emptyDraftStore(), "m1", { name: "A", url: "https://a.example", guide: "g" }, true);
+    const again = parseDraftStore(serializeDraftStore(store));
+    expect(candidateStatus(again, "m1")).toBe("confirmed");
+    expect(readCandidateRecord(again, "m1")?.edits).toEqual({ name: "A", url: "https://a.example", guide: "g" });
   });
 });

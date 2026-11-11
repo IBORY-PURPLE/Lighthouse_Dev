@@ -572,6 +572,13 @@
   cursor: pointer;
 }
 
+/* 큰 화면(노트북·프로젝터)에서는 가운데 열 바깥 오른쪽에 둔다. 열 안의 입력 칸과 버튼을 가리지 않게. */
+@media (min-width: 700px) {
+  .vol-ai {
+    right: calc(50% - 260px - 16px - 56px);
+  }
+}
+
 .vol-sheet-layer {
   position: fixed;
   inset: 0;
@@ -813,4 +820,184 @@
 .vol-textarea:focus-visible {
   outline: 3px solid #2f6fed;
   outline-offset: 2px;
+}
+
+/* ----- 화면 5: 요약 확인 ----- */
+
+.vol-actions > .vol-btn {
+  flex: 1;
+}
+
+.vol-vtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.vol-vtab {
+  min-height: 44px;
+  padding: 6px 14px;
+  border: 1.5px solid var(--vol-ink);
+  border-radius: 999px;
+  background: var(--vol-bg);
+  color: var(--vol-ink);
+  font: inherit;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.vol-vtab[aria-pressed="true"] {
+  background: var(--vol-ink);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.vol-vtab:focus-visible,
+.vol-evidence summary:focus-visible,
+.vol-sent a:focus-visible {
+  outline: 3px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+.vol-vform {
+  margin-top: 4px;
+}
+
+.vol-vform .vol-foot {
+  margin-bottom: 0;
+}
+
+.vol-vform h2 {
+  margin-top: 22px;
+  color: var(--vol-ink);
+  font-size: 1rem;
+}
+
+.vol-items {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1.5px solid var(--vol-line);
+  border-radius: 12px;
+}
+
+.vol-item {
+  padding: 12px 14px;
+}
+
+.vol-item + .vol-item {
+  border-top: 1px solid var(--vol-line);
+}
+
+.vol-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.vol-item-label {
+  color: var(--vol-sub);
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.vol-evidence {
+  margin-top: 6px;
+  font-size: 0.875rem;
+}
+
+.vol-evidence summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--vol-sub);
+  cursor: pointer;
+}
+
+.vol-evidence p {
+  margin: 0 0 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--vol-soft);
+  color: var(--vol-ink);
+  overflow-wrap: anywhere;
+}
+
+.vol-actions--wrap {
+  flex-wrap: wrap;
+}
+
+.vol-actions--wrap > .vol-btn {
+  flex: 1 1 140px;
+}
+
+/* ----- 화면 6: 완료된 요청 ----- */
+
+.vol-status-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.vol-status-line {
+  margin: 0;
+  color: var(--vol-sub);
+  font-size: 0.9375rem;
+}
+
+.vol-status-line--strong {
+  color: var(--vol-ink);
+  font-weight: 700;
+}
+
+.vol-sent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 15px;
+  border: 1.5px solid var(--vol-line);
+  border-radius: 12px;
+}
+
+.vol-sent .vol-summary-label {
+  margin-top: 6px;
+}
+
+.vol-sent .vol-quote {
+  margin: 0;
+}
+
+.vol-sent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vol-sent-item {
+  padding-top: 10px;
+  border-top: 1px solid var(--vol-line);
+}
+
+.vol-sent-name {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.vol-sent-url,
+.vol-sent-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.vol-sent-url a {
+  color: var(--vol-ink);
 }

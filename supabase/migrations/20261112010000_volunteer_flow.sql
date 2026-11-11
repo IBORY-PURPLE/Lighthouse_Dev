@@ -37,6 +37,11 @@ begin
     return 'busy';
   end;
   if v_id is not null then return 'claimed'; end if;
+  -- 같은 봉사자가 다른 탭에서 방금 맡았으면(갱신이 겹친 경우) 이미 내 것이다.
+  if exists (select 1 from public.requests as r
+    where r.id = p_request_id and r.status = 'in_progress' and r.volunteer_id = p_volunteer_id) then
+    return 'already_mine';
+  end if;
   if exists (select 1 from public.requests as r where r.id = p_request_id) then return 'taken'; end if;
   return 'not_found';
 end;
@@ -69,6 +74,10 @@ begin
     where r.id = p_request_id and r.status = 'in_progress' and r.volunteer_id = p_volunteer_id
     returning r.id into v_id;
   if v_id is null then
+    -- 같은 봉사자가 다른 탭에서 방금 보냈으면(갱신이 겹친 경우) 그 결과를 돌려준다.
+    select res.sent_at into v_sent from public.results as res
+      where res.request_id = p_request_id and res.volunteer_id = p_volunteer_id;
+    if v_sent is not null then return query select 'existing'::text, v_sent; return; end if;
     return query select case when exists (select 1 from public.requests as r where r.id = p_request_id)
       then 'not_yours'::text else 'not_found'::text end, null::timestamptz;
     return;
@@ -83,6 +92,8 @@ create or replace function public.reset_demo_requests(p_volunteer_id text)
 returns int language plpgsql security invoker set search_path = '' as $$
 declare v_today date := (now() at time zone 'Asia/Seoul')::date; v_next int; v_done uuid;
 begin
+  -- 두 기기가 동시에 다시 채우면 번호가 겹치거나 시연 요청이 두 벌 생긴다. 한 번에 하나만 돌게 잠근다.
+  perform pg_advisory_xact_lock(hashtext('lighthouse.reset_demo_requests'));
   delete from public.requests as r where r.is_demo;
   select coalesce(max(q.queue_number), 0) into v_next from public.requests as q where q.queue_date = v_today;
   insert into public.requests (client_request_id, queue_date, queue_number, product, budget, condition,
