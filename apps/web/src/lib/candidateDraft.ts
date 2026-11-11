@@ -205,6 +205,25 @@ export function captureTargetId(store: DraftStore, candidateIds: readonly string
   return candidateIds.find((id) => candidateStatus(store, id) === "needs_capture") ?? candidateIds[0];
 }
 
+/** 캡처 저장 대상을 그렇게 정한 까닭. 저장 알림의 안내 문장이 이것에 따라 달라진다. */
+export type CaptureTargetReason = "chosen" | "last_opened" | "first_needed";
+
+/**
+ * 캡처를 저장할 후보와 그렇게 정한 까닭. 버튼에 적히는 후보가 곧 저장 대상이다.
+ * 1) 봉사자가 직접 고른 후보(후보 칩이나 후보 탭으로 창을 연 경우) 2) 마지막으로 '쇼핑몰에서 보기'를 누른 후보
+ * 3) 첫 '캡처 필요' 후보(없으면 첫 후보). 후보가 없으면 null.
+ */
+export function captureTarget(
+  store: DraftStore,
+  candidateIds: readonly string[],
+  chosenId: string | null,
+): { id: string; reason: CaptureTargetReason } | null {
+  if (chosenId && candidateIds.includes(chosenId)) return { id: chosenId, reason: "chosen" };
+  const id = captureTargetId(store, candidateIds);
+  if (id === null) return null;
+  return { id, reason: id === store.lastOpened ? "last_opened" : "first_needed" };
+}
+
 const normalizeName = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 
 /**
@@ -272,6 +291,14 @@ export const CAPTURE_MESSAGES = {
       : `요약 초안을 후보 ${candidateNumber}에 저장했습니다`,
   savedHint:
     "마지막으로 ‘쇼핑몰에서 보기’를 누른 후보입니다. 읽은 상품명이 후보와 다르면 알려 드립니다.",
+  /** 저장 대상을 정한 까닭별 안내. last_opened는 와이어프레임 문구 그대로다. */
+  savedHints: {
+    chosen: "직접 고른 후보입니다. 읽은 상품명이 후보와 다르면 알려 드립니다.",
+    last_opened:
+      "마지막으로 ‘쇼핑몰에서 보기’를 누른 후보입니다. 읽은 상품명이 후보와 다르면 알려 드립니다.",
+    first_needed:
+      "‘쇼핑몰에서 보기’를 누른 후보가 없어 첫 ‘캡처 필요’ 후보에 저장했습니다. 읽은 상품명이 후보와 다르면 알려 드립니다.",
+  },
   mismatch: (readName: string, candidateName: string) =>
     `읽은 상품명 ‘${readName}’이 후보 ‘${candidateName}’와 다릅니다. 맞는 후보로 바꾸세요.`,
   missingName: "상품명을 읽지 못했습니다. 어느 후보의 캡처인지 골라 주세요.",

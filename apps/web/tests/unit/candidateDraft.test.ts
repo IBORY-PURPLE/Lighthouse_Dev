@@ -3,6 +3,7 @@ import {
   addManualCandidate,
   CANDIDATE_STATUS_LABELS,
   candidateStatus,
+  captureTarget,
   captureTargetId,
   CAPTURE_MESSAGES,
   checkProductName,
@@ -251,6 +252,25 @@ describe("후보별 요약 초안(블록 3)", () => {
     expect(candidateStatus(swapped, "c2")).toBe("read");
     // 다시 바꾸면 처음으로 돌아온다(잃은 초안이 없다).
     expect(moveCandidateDraft(swapped, "c1", "c2").drafts).toEqual(store.drafts);
+  });
+
+  it("저장 대상과 까닭: 직접 고른 후보가 먼저, 다음은 마지막으로 연 후보, 없으면 첫 캡처 필요", () => {
+    const ids = ["c1", "c2", "c3"];
+    const empty = emptyDraftStore();
+    expect(captureTarget(empty, [], "c1")).toBeNull();
+    expect(captureTarget(empty, ids, null)).toEqual({ id: "c1", reason: "first_needed" });
+    const opened = { ...empty, lastOpened: "c2" };
+    expect(captureTarget(opened, ids, null)).toEqual({ id: "c2", reason: "last_opened" });
+    // 후보 2의 쇼핑몰을 본 뒤라도 후보 1의 칩으로 열었으면 후보 1이다.
+    expect(captureTarget(opened, ids, "c1")).toEqual({ id: "c1", reason: "chosen" });
+    // 목록에 없는 후보를 골랐으면 고르지 않은 것으로 본다.
+    expect(captureTarget(opened, ids, "m9")).toEqual({ id: "c2", reason: "last_opened" });
+    expect(Object.keys(CAPTURE_MESSAGES.savedHints).sort()).toEqual([
+      "chosen",
+      "first_needed",
+      "last_opened",
+    ]);
+    expect(CAPTURE_MESSAGES.savedHints.last_opened).toBe(CAPTURE_MESSAGES.savedHint);
   });
 
   it("저장할 후보: 마지막으로 연 후보, 없으면 첫 캡처 필요, 그것도 없으면 첫 후보, 후보가 없으면 null", () => {

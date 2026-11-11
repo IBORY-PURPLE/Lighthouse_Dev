@@ -20,10 +20,11 @@ import {
 import { StatusRegion } from "@/components/StatusRegion";
 import {
   CAPTURE_MESSAGES,
-  captureTargetId,
+  captureTarget,
   checkProductName,
   nameWarning,
   readCandidateDraft,
+  type CaptureTargetReason,
   type DraftStore,
 } from "@/lib/candidateDraft";
 import { MAX_QUESTION_LENGTH, requestAnswer } from "@/lib/chat";
@@ -59,6 +60,8 @@ interface SavedNotice {
   candidateId: string;
   captureCount: number;
   extra: string;
+  /** 이 후보에 저장한 까닭(직접 고름 / 마지막으로 연 후보 / 첫 캡처 필요). 안내 문장을 고른다. */
+  reason: CaptureTargetReason;
 }
 
 interface Message {
@@ -253,7 +256,12 @@ export function AgentSheet({
 
   // 캡처를 저장할 후보: 칩을 눌러 연 후보, 아니면 마지막으로 '쇼핑몰에서 보기'를 누른 후보(없으면 첫 '캡처 필요').
   const candidateIds = candidates.map((candidate) => candidate.id);
-  const targetId = aimedIndex >= 0 ? candidates[aimedIndex].id : captureTargetId(drafts, candidateIds);
+  const targetChoice = captureTarget(
+    drafts,
+    candidateIds,
+    aimedIndex >= 0 ? candidates[aimedIndex].id : null,
+  );
+  const targetId = targetChoice?.id ?? null;
   const targetNumber = targetId ? candidateIds.indexOf(targetId) + 1 : null;
 
   const capture = useCaptureUpload({
@@ -267,6 +275,8 @@ export function AgentSheet({
         candidateId: result.candidateId,
         captureCount: result.captureCount,
         extra: result.notice,
+        // 올릴 때 버튼에 적혀 있던 후보와 같으면 그 까닭을 쓴다(직접 입력으로 이어 간 경우도 같다).
+        reason: targetChoice?.id === result.candidateId ? targetChoice.reason : "chosen",
       });
       setChoosing(false);
       const index = candidateIds.indexOf(result.candidateId);
@@ -299,7 +309,7 @@ export function AgentSheet({
     const fromIndex = candidateIds.indexOf(saved.candidateId);
     const displaced = readCandidateDraft(drafts, toId) !== null;
     onMoveDraft(saved.candidateId, toId);
-    setSaved({ ...saved, candidateId: toId });
+    setSaved({ ...saved, candidateId: toId, reason: "chosen" });
     setChoosing(false);
     setReturnFocus((value) => value + 1);
     const name = candidates[index].name;
@@ -377,7 +387,7 @@ export function AgentSheet({
                   <p id={`${titleId}-saved`} className="vol-saved-title">
                     {savedView.title}
                   </p>
-                  <p className="vol-saved-hint">{CAPTURE_MESSAGES.savedHint}</p>
+                  <p className="vol-saved-hint">{CAPTURE_MESSAGES.savedHints[saved.reason]}</p>
                   {saved.extra && <p className="vol-saved-hint">{saved.extra}</p>}
                   {savedView.warning && <p className="vol-saved-warn">{savedView.warning}</p>}
                   {otherCandidates.length > 0 && (
