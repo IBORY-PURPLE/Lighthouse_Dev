@@ -275,8 +275,8 @@ export function AgentSheet({
         candidateId: result.candidateId,
         captureCount: result.captureCount,
         extra: result.notice,
-        // 올릴 때 버튼에 적혀 있던 후보와 같으면 그 까닭을 쓴다(직접 입력으로 이어 간 경우도 같다).
-        reason: targetChoice?.id === result.candidateId ? targetChoice.reason : "chosen",
+        // 올리기 시작할 때 버튼에 적혀 있던 후보와 그 까닭이다(읽는 동안 다른 후보를 눌러도 그대로).
+        reason: result.reason,
       });
       setChoosing(false);
       const index = candidateIds.indexOf(result.candidateId);
@@ -465,6 +465,7 @@ export function AgentSheet({
               controller={capture}
               candidateId={targetId}
               candidateNumber={targetNumber}
+              reason={targetChoice?.reason ?? null}
             />
           </div>
         </div>

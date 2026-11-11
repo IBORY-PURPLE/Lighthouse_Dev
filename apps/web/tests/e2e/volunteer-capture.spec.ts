@@ -372,6 +372,47 @@ test.describe("봉사자 캡처 올리기 → 후보별 요약 초안(가짜 응
     await page.context().close();
   });
 
+  test("3-3. 읽는 동안 다른 후보의 쇼핑몰을 눌러도, 저장 대상과 알림의 까닭은 올리기 시작할 때 그대로다", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await openSonyDetail(browser, baseURL);
+    const image = await makeSyntheticDetailImage(page, { height: 900, noise: false });
+    // 글자 읽기 응답을 붙잡아 둔다.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/volunteer/extract-text", async (route) => {
+      await gate;
+      await route.fallback();
+    });
+
+    // AI 버튼으로 열면 쇼핑몰을 본 후보가 없어 첫 '캡처 필요' 후보(후보 1)가 대상이다.
+    await openAgent(page);
+    const dialog = agentDialog(page);
+    await expect(dialog.getByRole("button", { name: "캡처 올리기 · 후보 1에 저장" })).toBeVisible();
+    await captureInput(page).setInputFiles(png("a.png", image));
+
+    // 읽는 동안 창을 닫고 후보 2의 쇼핑몰을 본다(마지막으로 연 후보가 후보 2로 바뀐다).
+    await dialog.getByRole("button", { name: "닫기" }).click();
+    const popupPromise = page.waitForEvent("popup");
+    await page.locator(".vol-cand").nth(1).getByRole("link", { name: "쇼핑몰에서 보기" }).click();
+    await (await popupPromise).close();
+    release();
+
+    // 초안은 올리기 시작할 때의 후보 1에 저장된다.
+    await expect(chip(page, 0)).toHaveText("캡처 읽음 · 확인 전", { timeout: 30_000 });
+    await expect(chip(page, 1)).toHaveText("캡처 필요");
+    await openAgent(page);
+    await expect(savedNotice(page)).toContainText("캡처 1장을 후보 1에 저장했습니다");
+    await expect(savedNotice(page)).toContainText(FIRST_NEEDED_HINT);
+    await expect(savedNotice(page)).not.toContainText("직접 고른 후보입니다.");
+    // 지금 새로 올리면 마지막으로 연 후보 2가 대상이다.
+    await expect(dialog.getByRole("button", { name: "캡처 올리기 · 후보 2에 저장" })).toBeVisible();
+    await page.context().close();
+  });
+
   test("4. 같은 조각이 3회 실패하면 직접 입력 칸이 열리고, 그 글로 같은 모양의 초안을 만든다", async ({
     browser,
     baseURL,

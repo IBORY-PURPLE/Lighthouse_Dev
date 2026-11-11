@@ -8,7 +8,7 @@ import {
   summarizeText,
   type CaptureOutcome,
 } from "@/lib/captureRead";
-import { CAPTURE_MESSAGES } from "@/lib/candidateDraft";
+import { CAPTURE_MESSAGES, type CaptureTargetReason } from "@/lib/candidateDraft";
 import type { SummaryDraft } from "@/lib/summaryDraft";
 
 // 캡처 올리기. 파일 여러 장 → 조각 → 글자 읽기 → 요약 초안(lib/captureRead.ts).
@@ -18,6 +18,8 @@ import type { SummaryDraft } from "@/lib/summaryDraft";
 
 export interface CaptureSaved {
   candidateId: string;
+  /** 올리기 시작할 때 이 후보로 정한 까닭. 읽는 동안 화면에서 다른 후보를 눌러도 바뀌지 않는다. */
+  reason: CaptureTargetReason;
   draft: SummaryDraft;
   captureCount: number;
   notice: string;
@@ -37,6 +39,7 @@ interface CaptureOptions {
 
 interface Pending {
   candidateId: string;
+  reason: CaptureTargetReason;
   captureCount: number;
 }
 
@@ -47,7 +50,7 @@ export interface CaptureController {
   setManualText: (text: string) => void;
   /** 직접 입력 칸에 초점을 줄 때마다 올라간다. */
   focusManual: number;
-  start: (files: File[], candidateId: string) => void;
+  start: (files: File[], candidateId: string, reason: CaptureTargetReason) => void;
   submitManual: () => void;
 }
 
@@ -73,6 +76,7 @@ export function useCaptureUpload(options: CaptureOptions): CaptureController {
       setManualText("");
       onSaved({
         candidateId: target.candidateId,
+        reason: target.reason,
         draft: outcome.draft,
         captureCount: outcome.captureCount,
         notice: outcome.notice,
@@ -91,7 +95,7 @@ export function useCaptureUpload(options: CaptureOptions): CaptureController {
   }, []);
 
   const start = useCallback(
-    (files: File[], candidateId: string) => {
+    (files: File[], candidateId: string, reason: CaptureTargetReason) => {
       if (files.length === 0 || busyRef.current) return;
       busyRef.current = true;
       setBusy(true);
@@ -99,7 +103,7 @@ export function useCaptureUpload(options: CaptureOptions): CaptureController {
       abortRef.current = abort;
       const { requestId, product, onStatus } = latest.current;
       void readCapture({ requestId, product }, files, { onStatus, signal: abort.signal })
-        .then((outcome) => finish(outcome, { candidateId, captureCount: files.length }))
+        .then((outcome) => finish(outcome, { candidateId, reason, captureCount: files.length }))
         .finally(() => {
           busyRef.current = false;
           setBusy(false);
@@ -152,10 +156,17 @@ interface CaptureUploadProps {
   candidateNumber: number | null;
   /** 저장할 후보 id. */
   candidateId: string | null;
+  /** 그 후보로 정한 까닭(직접 고름 / 마지막으로 연 후보 / 첫 캡처 필요). 올리기 시작할 때 고정된다. */
+  reason: CaptureTargetReason | null;
 }
 
 /** "캡처 올리기 · 후보 N에 저장" 버튼과 숨은 파일 입력. 후보가 없으면 잠겨 있다. */
-export function CaptureUpload({ controller, candidateNumber, candidateId }: CaptureUploadProps) {
+export function CaptureUpload({
+  controller,
+  candidateNumber,
+  candidateId,
+  reason,
+}: CaptureUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const hintId = useId();
   const locked = candidateId === null || controller.busy;
@@ -191,7 +202,7 @@ export function CaptureUpload({ controller, candidateNumber, candidateId }: Capt
         onChange={(event) => {
           const files = Array.from(event.currentTarget.files ?? []);
           event.currentTarget.value = "";
-          if (candidateId !== null) controller.start(files, candidateId);
+          if (candidateId !== null) controller.start(files, candidateId, reason ?? "chosen");
         }}
       />
     </div>
