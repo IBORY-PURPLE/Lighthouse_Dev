@@ -322,4 +322,29 @@ test.describe("봉사자 요청 상세: 후보·직접 찾기·AI 질문", () =>
     await expectNoBlockingAxe(page);
     await page.context().close();
   });
+
+  test("6. 접근 쿠키(lh_access)가 끝난 기기도 상세를 다시 열면 AI 질문이 된다", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await openSonyDetail(browser, baseURL);
+    // 입장 7일 뒤처럼 lh_access만 지운다. lh_vol은 30일이라 남아 있다.
+    await page.context().clearCookies({ name: "lh_access" });
+    const before = (await page.context().cookies()).map((cookie) => cookie.name);
+    expect(before).not.toContain("lh_access");
+    expect(before).toContain("lh_vol");
+
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1, name: "요청 상세" })).toBeVisible();
+    await expect(page.locator(".vol-cand")).toHaveCount(3);
+    await page.getByRole("button", { name: AI_BUTTON }).click();
+    const dialog = agentDialog(page);
+    await dialog.getByLabel("찾는 방법을 글자로 물어보세요").fill("검색어는 뭐로 해?");
+    await dialog.getByRole("button", { name: "보내기" }).click();
+    await expect(dialog.getByText("검색어:").first()).toBeVisible();
+    await expect(dialog.getByRole("status")).toHaveText(CHAT_ARRIVED);
+    const after = (await page.context().cookies()).map((cookie) => cookie.name);
+    expect(after).toContain("lh_access");
+    await page.context().close();
+  });
 });

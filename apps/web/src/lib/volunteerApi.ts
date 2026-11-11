@@ -1,8 +1,9 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
+import { ACCESS_COOKIE, ACCESS_COOKIE_MAX_AGE_SECONDS, hashAccessCode } from "./access";
 import { createRateLimiter } from "./rateLimit";
 import { StoreUnavailableError } from "./requestStore";
-import { requireVolunteer } from "./volunteerSession";
+import { cookieSecure, requireVolunteer } from "./volunteerSession";
 
 // 봉사자 서버 함수 공통 도우미. 실패 본문은 {ok:false, error}, 늘 no-store.
 // 로그에는 "METHOD /api/volunteer/<틀> <상태> <ms>ms"만 남긴다(요청 id·상품명·봉사자 ID 없음).
@@ -36,6 +37,26 @@ export function logLine(method: string, template: string, status: number, starte
   console.info(`${method} /api/volunteer/${template} ${status} ${Date.now() - startedAt}ms`);
 }
 
+/**
+ * 입장한 기기(유효한 lh_vol)의 응답에 접근 쿠키(lh_access)를 다시 심는다.
+ * lh_vol은 30일, lh_access는 7일이라 그대로 두면 입장 7일 뒤부터 lh_access만 검사하는
+ * 기존 서버 함수(/api/chat 등)가 401이 된다. lh_vol의 서명 비밀은 입장 코드에서 나오므로
+ * 유효한 lh_vol은 지금 입장 코드를 알던 기기라는 뜻이다. 호출하는 쪽이 lh_vol을 먼저 확인한다.
+ */
+export function refreshAccessCookie(request: NextRequest, response: NextResponse): void {
+  const code = process.env.DEMO_ACCESS_CODE?.trim();
+  if (!code) return;
+  response.cookies.set({
+    name: ACCESS_COOKIE,
+    value: hashAccessCode(code),
+    httpOnly: true,
+    secure: cookieSecure(request),
+    sameSite: "lax",
+    path: "/",
+    maxAge: ACCESS_COOKIE_MAX_AGE_SECONDS,
+  });
+}
+
 export interface VolunteerContext {
   volunteerId: string;
 }
@@ -60,12 +81,18 @@ export async function runVolunteerRoute(
         return fail(429, "rate_limited", { "Retry-After": String(limit.retryAfterSeconds) });
       }
     }
+    let handled: NextResponse;
     try {
-      return await handler({ volunteerId });
+      handled = await handler({ volunteerId });
     } catch (error) {
-      if (error instanceof StoreUnavailableError) return fail(503, "store_unavailable");
-      return fail(500, "internal_error");
+      handled =
+        error instanceof StoreUnavailableError
+          ? fail(503, "store_unavailable")
+          : fail(500, "internal_error");
     }
+    // 봉사자 화면은 열릴 때마다 이 함수들을 부르므로, 여기서 접근 쿠키를 새로 고친다.
+    refreshAccessCookie(request, handled);
+    return handled;
   })();
   logLine(request.method, template, response.status, startedAt);
   return response;

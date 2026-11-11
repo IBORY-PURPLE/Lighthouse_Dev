@@ -251,6 +251,32 @@ describe("봉사자 서버 함수", () => {
     });
   });
 
+  describe("입장한 기기의 접근 쿠키(lh_access) 새로 고침", () => {
+    it("lh_vol만 있는 요청에 lh_access를 다시 심는다(입장 7일 뒤 /api/chat 401 방지)", async () => {
+      const cookie = await signIn(); // lh_vol만 보낸다
+      for (const [handler, path] of [
+        [queue, "/api/volunteer/queue"],
+        [me, "/api/volunteer/me"],
+      ] as const) {
+        const response = await get(handler, path, cookie);
+        expect(response.status).toBe(200);
+        const access = setCookies(response)[ACCESS_COOKIE];
+        expect(access.value).toBe(hashAccessCode(CODE));
+        expect(access.raw).toMatch(/HttpOnly/i);
+        expect(access.raw).toMatch(/Max-Age=604800/i);
+        expect(access.raw).toMatch(/SameSite=lax/i);
+      }
+    });
+
+    it("입장하지 않은 요청에는 심지 않는다", async () => {
+      expect(setCookies(await get(me, "/api/volunteer/me"))[ACCESS_COOKIE]).toBeUndefined();
+      const forged = `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}.${"B".repeat(43)}`;
+      const denied = await get(queue, "/api/volunteer/queue", forged);
+      expect(denied.status).toBe(401);
+      expect(setCookies(denied)[ACCESS_COOKIE]).toBeUndefined();
+    });
+  });
+
   describe("lh_vol이 없거나 틀리면 401 unauthorized", () => {
     it("모든 봉사자용 서버 함수", async () => {
       const forged = `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}.${"B".repeat(43)}`;
