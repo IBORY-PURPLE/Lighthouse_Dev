@@ -62,7 +62,8 @@ export function VolunteerEntry({ needsCode, onEntered }: VolunteerEntryProps) {
               <input
                 id="vol-code"
                 className="vol-input"
-                type="text"
+                // 시연 화면(프로젝터)에 입장 코드가 그대로 드러나지 않게 가린다.
+                type="password"
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
                 placeholder="운영자에게 받은 코드"
