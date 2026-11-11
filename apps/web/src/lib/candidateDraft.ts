@@ -272,14 +272,45 @@ export function setCandidateEdits(
   };
 }
 
-/** 초안을 다른 후보로 옮긴다. 받는 후보에 있던 초안은 바뀌고, 보내는 후보는 '캡처 필요'로 돌아간다. 고친 값과 확인 표시는 옮기지 않는다. */
+/** 한 후보에 남아야 하는 고침(상품명·링크·가이드). 항목 값은 초안에 딸린 것이라 뺀다. */
+function carriedEdits(entry: Record<string, unknown> | undefined): CandidateEdits | null {
+  const kept = readEdits(entry?.edits);
+  const carried: CandidateEdits = {};
+  if (kept?.name !== undefined) carried.name = kept.name;
+  if (kept?.url !== undefined) carried.url = kept.url;
+  if (kept?.guide !== undefined) carried.guide = kept.guide;
+  return Object.keys(carried).length > 0 ? carried : null;
+}
+
+/**
+ * 초안을 다른 후보로 옮긴다. 보내는 후보는 '캡처 필요'로 돌아간다.
+ * 받는 후보에 이미 초안이 있으면 지우지 않고 두 후보의 초안을 서로 바꾼다(초안을 잃지 않게).
+ * 상품명·링크·가이드 고침은 그 후보에 남고, 항목 값 고침과 확인 표시는 지운다(초안이 바뀌었으므로).
+ */
 export function moveCandidateDraft(store: DraftStore, fromId: string, toId: string): DraftStore {
-  if (fromId === toId || !store.drafts[fromId]) return store;
-  const { [fromId]: moved, ...rest } = store.drafts;
-  return {
-    ...store,
-    drafts: { ...rest, [toId]: { draft: moved.draft, captureCount: moved.captureCount, confirmed: false } },
+  const moving = readCandidateDraft(store, fromId);
+  if (fromId === toId || !moving) return store;
+  const displaced = readCandidateDraft(store, toId);
+  const place = (
+    candidateId: string,
+    entry: CandidateDraftEntry | null,
+  ): Record<string, unknown> | null => {
+    const edits = carriedEdits(store.drafts[candidateId]);
+    if (!entry) return edits ? { edits, confirmed: false } : null;
+    return {
+      draft: entry.draft,
+      captureCount: entry.captureCount,
+      ...(edits ? { edits } : {}),
+      confirmed: false,
+    };
   };
+  const drafts = { ...store.drafts };
+  const target = place(toId, moving);
+  const source = place(fromId, displaced);
+  if (target) drafts[toId] = target;
+  if (source) drafts[fromId] = source;
+  else delete drafts[fromId];
+  return { ...store, drafts };
 }
 
 /**
@@ -340,6 +371,10 @@ export const CAPTURE_MESSAGES = {
   mismatch: (readName: string, candidateName: string) =>
     `읽은 상품명 ‘${readName}’이 후보 ‘${candidateName}’와 다릅니다. 맞는 후보로 바꾸세요.`,
   missingName: "상품명을 읽지 못했습니다. 어느 후보의 캡처인지 골라 주세요.",
+  /** 받는 후보에 이미 초안이 있어 서로 바꿨을 때. */
+  swapped: (fromNumber: number, toNumber: number) =>
+    `후보 ${toNumber}에 있던 초안은 후보 ${fromNumber} 자리로 옮겼습니다.`,
+  hasDraft: "초안 있음, 서로 바꿉니다",
 } as const;
 
 /** 상품명 확인 결과에 맞는 경고 글자. 문제가 없으면 null. */

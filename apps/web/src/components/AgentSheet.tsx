@@ -295,6 +295,9 @@ export function AgentSheet({
     if (!saved || !savedEntry) return;
     const index = candidateIds.indexOf(toId);
     if (index < 0) return;
+    // 받는 후보에 이미 초안이 있으면 덮어쓰지 않고 서로 바꾼다(moveCandidateDraft).
+    const fromIndex = candidateIds.indexOf(saved.candidateId);
+    const displaced = readCandidateDraft(drafts, toId) !== null;
     onMoveDraft(saved.candidateId, toId);
     setSaved({ ...saved, candidateId: toId });
     setChoosing(false);
@@ -302,7 +305,13 @@ export function AgentSheet({
     const name = candidates[index].name;
     const warning = nameWarning(checkProductName(savedEntry.draft, name), name);
     announce(
-      [`${CAPTURE_MESSAGES.saved(saved.captureCount, index + 1)}.`, warning].filter(Boolean).join(" "),
+      [
+        `${CAPTURE_MESSAGES.saved(saved.captureCount, index + 1)}.`,
+        displaced ? CAPTURE_MESSAGES.swapped(fromIndex + 1, index + 1) : null,
+        warning,
+      ]
+        .filter(Boolean)
+        .join(" "),
       true,
     );
   };
@@ -392,6 +401,8 @@ export function AgentSheet({
                             onClick={() => handleSwitch(candidate.id)}
                           >
                             후보 {candidateIds.indexOf(candidate.id) + 1} · {candidate.name}
+                            {readCandidateDraft(drafts, candidate.id) !== null &&
+                              ` (${CAPTURE_MESSAGES.hasDraft})`}
                           </button>
                         </li>
                       ))}

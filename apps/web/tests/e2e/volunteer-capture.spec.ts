@@ -305,6 +305,30 @@ test.describe("봉사자 캡처 올리기 → 후보별 요약 초안(가짜 응
     await expect(dialogStatus(page)).toContainText("어느 후보의 캡처인지 골라 주세요");
     await expect(savedNotice(page).getByRole("button", { name: "다른 후보로 바꾸기" })).toBeVisible();
     await expect(chip(page, 1)).toHaveText("캡처 읽음 · 확인 전");
+
+    // 이미 초안이 있는 후보 1로 바꾸면 덮어쓰지 않고 두 초안을 서로 바꾼다(초안을 잃지 않는다).
+    await savedNotice(page).getByRole("button", { name: "다른 후보로 바꾸기" }).click();
+    const toFirst = savedNotice(page).getByRole("button", { name: /^후보 1 · / });
+    await expect(toFirst).toContainText("초안 있음, 서로 바꿉니다");
+    await expect(savedNotice(page).getByRole("button", { name: /^후보 3 · / })).not.toContainText(
+      "초안 있음",
+    );
+    await toFirst.click();
+    await expect(savedNotice(page)).toContainText("캡처 1장을 후보 1에 저장했습니다");
+    await expect(dialogStatus(page)).toContainText("후보 1에 있던 초안은 후보 2 자리로 옮겼습니다.");
+    await expect(chip(page, 0)).toHaveText("캡처 읽음 · 확인 전");
+    await expect(chip(page, 1)).toHaveText("캡처 읽음 · 확인 전");
+    await expect(chip(page, 2)).toHaveText("캡처 필요");
+    const names = await page.evaluate(() => {
+      const key = Object.keys(window.localStorage).find((entry) => entry.startsWith("lh.vol.draft.v1."));
+      const store = JSON.parse(window.localStorage.getItem(key ?? "") ?? "{}");
+      const nameOf = (id: string) =>
+        store.drafts?.[id]?.draft?.fields?.find((field: { key: string }) => field.key === "productName")
+          ?.value ?? null;
+      return [nameOf("c1"), nameOf("c2")];
+    });
+    // 후보 1에는 상품명을 못 읽은 초안이, 후보 2에는 처음 후보 1에 있던 초안이 있다.
+    expect(names).toEqual([null, "소니 WH-CH720N 블랙"]);
     await page.context().close();
   });
 

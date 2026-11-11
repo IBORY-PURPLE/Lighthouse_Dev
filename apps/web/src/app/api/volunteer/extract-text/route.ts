@@ -97,6 +97,7 @@ async function readPiece(
 async function handle(
   request: NextRequest,
   onPiece: (pieceIndex: number) => void,
+  onUpstreamFailed: (status: number | undefined) => void,
 ): Promise<Response> {
   // 입장한 기기(lh_vol)만 쓴다. 봉사자 ID는 쓰지 않고 로그에도 남기지 않는다.
   if (!requireVolunteer(request)) return failure(401, "unauthorized");
@@ -130,6 +131,9 @@ async function handle(
     );
   } catch (error) {
     const kind = error instanceof ExtractError ? error.kind : "failed";
+    if (kind === "failed" || kind === "rate_limited") {
+      onUpstreamFailed(error instanceof ExtractError ? error.upstreamStatus : undefined);
+    }
     switch (kind) {
       case "not_configured":
         return failure(503, "not_configured");
@@ -146,11 +150,19 @@ async function handle(
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let pieceIndex: number | null = null;
-  const response = await handle(request, (index) => {
-    pieceIndex = index;
-  });
+  // 글자 읽기 엔진 호출이 실패했을 때만 채운다(원인 확인용, 상위 서버의 상태 코드만).
+  let upstream = "";
+  const response = await handle(
+    request,
+    (index) => {
+      pieceIndex = index;
+    },
+    (status) => {
+      upstream = ` upstream=${status ?? "none"}`;
+    },
+  );
   console.info(
-    `POST /api/volunteer/extract-text ${response.status} piece=${pieceIndex ?? "-"} ${Date.now() - startedAt}ms`,
+    `POST /api/volunteer/extract-text ${response.status} piece=${pieceIndex ?? "-"} ${Date.now() - startedAt}ms${upstream}`,
   );
   return response;
 }
