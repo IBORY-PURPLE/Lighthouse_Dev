@@ -287,6 +287,8 @@
   font-size: 1.0625rem;
   font-weight: 600;
   line-height: 1.45;
+  /* 한국어는 낱말 중간에서 끊지 않는다. 아주 긴 낱말만 끊는다. */
+  word-break: keep-all;
   overflow-wrap: anywhere;
 }
 

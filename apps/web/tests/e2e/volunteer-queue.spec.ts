@@ -121,7 +121,11 @@ test.describe("봉사자 입장·목록·맡기", () => {
     await expect(first).toContainText("대기 1시간 12분째");
     await expect(first).toContainText(FIRST_DEMO_QUOTE);
     await expect(first.getByRole("button", { name: CLAIM_NAME })).toBeVisible();
-    for (const quote of DEMO_QUOTES) {
+    // 목록은 20건까지만 보인다. 같은 서버에 다른 시험 파일이 실제 접수를 많이 남겼으면 가장 최근인
+    // 다섯 번째 시연 카드(2분 전)가 잘릴 수 있어, 그때는 오래된 네 장만 확인한다(5건은 단위 시험이 확인한다).
+    const visibleCards = await page.locator(".vol-card").count();
+    const expected = visibleCards < 20 ? DEMO_QUOTES : DEMO_QUOTES.slice(0, 4);
+    for (const quote of expected) {
       await expect(card(page, quote)).toHaveCount(1);
     }
     // 첫 불러오기와 다시 채우기 직후에는 새 요청 표시를 붙이지 않는다.
@@ -252,6 +256,11 @@ test.describe("봉사자 입장·목록·맡기", () => {
     const mine = card(page, "내가 맡음");
     await expect(mine).toContainText("진행");
     await expect(mine).toContainText(FIRST_DEMO_QUOTE);
+    // 탭을 바꾼 뒤 목록 읽기가 끝나(새로고침 버튼이 다시 켜져) 화면이 가라앉은 다음 찍는다.
+    await expect(page.getByRole("button", { name: "새로고침" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     await page.screenshot({ path: "test-results/volunteer-mine.png" });
     await expectNoBlockingAxe(page);
     await mine.getByRole("link", { name: "이어서 하기" }).click();
