@@ -59,8 +59,8 @@ Vercel 서버 함수 (Next.js, Node 22, 기본 지역 iad1 — §11에서 icn1 �
   /api/volunteer/extract-text, /api/volunteer/summarize     ④⑤ (상태 없음)
       │                       │                         │
       ▼                       ▼                         ▼
-Supabase Postgres (서울)   Groq (gpt-oss-120b, qwen 비전)   OpenAI 또는 Upstage (글자 읽기)
-  requests, results          ③ 챗봇, ④ 요약·생김새            ④ 글자 읽기
+Supabase Postgres (서울)   OpenAI (gpt-6-luna)               OpenAI 또는 Upstage (글자 읽기)
+  requests, results          ③ 챗봇, ④ 요약                   ④ 글자 읽기
   SQL 함수(RPC)만 호출
 ```
 
@@ -93,10 +93,10 @@ Supabase Postgres (서울)   Groq (gpt-oss-120b, qwen 비전)   OpenAI 또는 Up
 | 런타임 | Node 22 | v1 그대로 |
 | 배포 | Vercel 무료판, Root Directory=`apps/web` | v1 그대로. 함수 시간 최대 300초, 본문 4.5MB |
 | DB | Supabase Postgres(프로젝트 `lighthouse`, 서울, 무료), `@supabase/supabase-js`(서버 전용, RPC), 마이그레이션은 저장소 루트 `supabase/migrations` | 11/9 이용자 결정. 동시 선택을 SQL 함수로 보장 |
-| ③ 챗봇 | `groq-sdk`, `openai/gpt-oss-120b` | v1 그대로 |
-| ④ 글자 읽기 | OpenAI(`openai` SDK, 조사 후보 `gpt-5.6-luna`, `detail: original`, 추론 끔) 또는 Upstage Document OCR(`fetch`) | 정답지 3~5개로 실측해 고른다. 이용자 OpenAI 크레딧 활용 안 |
-| ④ 요약 | Groq `gpt-oss-120b` 또는 글자 읽기와 같은 OpenAI 모델 | Groq 분당 토큰 한도를 ③과 나눠 쓰므로 실측 뒤 정한다 |
-| ④ 생김새 설명 | Groq `qwen/qwen3.8-27b` 비전(Preview) | 선택 기능, 뒤로 미룸. 원문과 대조할 수 없어 ⑤ 확인 필수 |
+| ③ 챗봇 | `openai` SDK, `gpt-6-luna`, `reasoning_effort: "none"` | 2026-11-12 Groq에서 바꿈(공개 주소의 Groq 키가 무효 401). 모델의 JSON 모드·응답 시간은 미확인, 배포 뒤 실측 |
+| ④ 글자 읽기 | OpenAI(`openai` SDK, `gpt-6-luna`, `detail: original`, 추론 끔) 또는 Upstage Document OCR(`fetch`) | 정답지 3~5개로 실측해 고른다. 이용자 OpenAI 크레딧 활용 안 |
+| ④ 요약 | `openai` SDK, `gpt-6-luna`, `reasoning_effort: "none"`, JSON 모드, `temperature: 0` | 2026-11-12 Groq에서 바꿈. luna가 JSON 모드와 `temperature`를 받아들이는지, 응답 시간은 미확인, 배포 뒤 실측 |
+| ④ 생김새 설명 | Groq `qwen/qwen3.8-27b` 비전(Preview). 제품 코드에는 아직 없다 | 선택 기능, 뒤로 미룸. 원문과 대조할 수 없어 ⑤ 확인 필수 |
 | 긴 이미지 자르기 | 브라우저 canvas | 서버 이미지 처리 라이브러리 없이 4.5MB 한도를 지킨다 |
 | 음성 입력 | Web Speech API, 대체는 입력창과 iOS 받아쓰기 | v1 그대로 |
 | 시험 | Vitest, `@playwright/test`, `@axe-core/playwright` | v1 그대로 |
@@ -141,8 +141,8 @@ apps/web/                                   Vercel Root Directory
 
 | 이름 | 위치 | 내용 |
 |---|---|---|
-| `GROQ_API_KEY` | `apps/web/.env`, Vercel(사람이 등록) | Groq 키. AI는 읽거나 출력하지 않는다 |
-| `OPENAI_API_KEY` | 같음(사람이 등록, 아직 없음) | ④ 글자 읽기를 OpenAI로 할 때 |
+| `OPENAI_API_KEY` | `apps/web/.env`, Vercel(사람이 등록) | OpenAI 키. ③ 챗봇, ④ 요약, ④ 글자 읽기가 함께 쓴다. AI는 읽거나 출력하지 않는다 |
+| `GROQ_API_KEY` | 같음(로컬만) | 로컬 실험 서버(`apps/web/experiments/vision/`) 전용. 제품 코드는 읽지 않는다 |
 | `UPSTAGE_API_KEY` | 같음(사람이 등록, 선택) | ④ 글자 읽기를 Upstage로 할 때 |
 | Supabase 연동 변수 | Vercel(Supabase 연동이 넣음) | 코드는 URL `SUPABASE_URL ?? NEXT_PUBLIC_SUPABASE_URL`, 키 `SUPABASE_SECRET_KEY ?? SUPABASE_SERVICE_ROLE_KEY`를 읽는다. 값은 보지 않는다 |
 | `DEMO_ACCESS_CODE` | Vercel, 로컬은 시험 설정 | v1 그대로 |
@@ -360,7 +360,7 @@ v1 계약에 선택 필드만 더한다. 봉사자 화면에서만 호출한다.
 읽은 글자(또는 봉사자가 직접 입력한 글)로 요약 초안을 만든다. 상태가 없다.
 
 - 요청 `{ "requestId": "uuid", "context": { "product": "...", "hasBudget": true, "conditionKind": "used" }, "source": "ocr" | "manual", "text": "..." }`
-- `text` 상한은 엔진별: Groq `gpt-oss-120b`면 4,000자, OpenAI면 12,000자(추정, 실측으로 조정). Groq 분당 토큰 한도를 ③ 챗봇과 나눠 쓰기 때문이다.
+- `text` 상한은 4,000자다(`SUMMARY_TEXT_LIMIT`). 요약 엔진이 OpenAI `gpt-6-luna`로 바뀌었어도, 입력이 길어졌을 때 응답 시간이 28초 예산 안에 드는지 재 보지 못해 올리지 않았다(미확인, 배포 뒤 실측).
 - 응답 200 `SummaryDraft`:
 
 ```ts
@@ -399,7 +399,7 @@ type SummaryDraft = {
 
 ## 9. 챗봇
 
-호출값, 클라이언트 설정, 스트림 처리, 횟수 제한은 v1 그대로다(`gpt-oss-120b`, `stream: true`, `max_completion_tokens: 800`, `maxRetries: 1`, `timeout: 20_000`, 분당 20회).
+호출값, 클라이언트 설정, 스트림 처리, 횟수 제한은 v1 그대로다(`stream: true`, `max_completion_tokens: 800`, `maxRetries: 1`, `timeout: 20_000`, 분당 20회). 모델은 2026-11-12에 `gpt-6-luna`(OpenAI `openai` SDK)로 바꿨고 `reasoning_effort: "none"`을 더했다(기본 추론이 켜져 있으면 추론 토큰이 `max_completion_tokens`를 먼저 써서 글자 없이 끝날 수 있다). 스트림 반복이 끝난 뒤 요청 신호가 이미 끊겨 있으면 완성된 답으로 치지 않고 실패(`llm_failed`)로 처리한다.
 
 지시문(`prompt.ts`)은 v1 본문을 그대로 두고, 마지막 줄("이용자 요청의 브랜드와 품목은 다음과 같다: …") **바로 앞에** 필요한 줄만 넣는다. 마지막 줄이 그대로라 기존 `endsWith` 시험이 유지된다.
 
@@ -416,8 +416,8 @@ type SummaryDraft = {
 |---|---|---|
 | `npm run check` | ESLint, `tsc --noEmit`, Vitest | 없음 |
 | `npm run test:e2e` | 로컬 서버 전체 흐름, 접근성 | 없음(`LLM_MODE=mock`, `STORE_MODE=memory`, `EXTRACT_MODE=mock`) |
-| `npm run test:chatbot` | 고정 질문 품질 | 실제 Groq, 7초 간격 |
-| `BASE_URL=... npm run test:public` | 공개 주소 1회 완주 | 실제 Groq·저장소·글자 읽기 각 1회 |
+| `npm run test:chatbot` | 고정 질문 품질 | 실제 OpenAI, 7초 간격 |
+| `BASE_URL=... npm run test:public` | 공개 주소 1회 완주 | 실제 OpenAI(챗봇)·저장소·글자 읽기 각 1회 |
 | (새) 실제 Postgres 시험 | `claim_request` 동시 호출에서 하나만 `claimed`, `complete_request` 재전송 같은 결과 | 로컬 `supabase start` 또는 개발용 프로젝트(사람 결정) |
 
 - v1의 가짜 음성 입력, 화면 시험 환경(iPhone 15·WebKit), 필수 사례, 챗봇 품질 규칙은 그대로다. 통과 보고에는 "가짜 음성 입력 기준"을 밝힌다.
@@ -430,7 +430,7 @@ type SummaryDraft = {
 ## 11. 배포
 
 - v1 규칙 그대로: 지정한 Vercel 프로젝트(`lighthouse-web`, Root Directory=`apps/web`)에만, 검사·시험을 통과한 최신 브랜치를, 배포한 브랜치와 커밋은 아침 보고에. 원격은 `github`만.
-- **함수 지역**: 기본은 미국 동부(iad1)이고 DB는 서울이다. `apps/web/vercel.json`에 `"regions": ["icn1"]`을 넣는 안은 사람 승인 항목이다. 옮기기 전후로 저장소 왕복과 Groq·OpenAI 호출 지연을 실측해 판단한다. 무료판은 지역 하나만 쓰므로 라우트마다 지역을 다르게 주지 않는다. 근거: https://vercel.com/docs/regions , https://vercel.com/docs/functions/configuring-functions/region
+- **함수 지역**: 기본은 미국 동부(iad1)이고 DB는 서울이다. `apps/web/vercel.json`에 `"regions": ["icn1"]`을 넣는 안은 사람 승인 항목이다. 옮기기 전후로 저장소 왕복과 OpenAI 호출 지연을 실측해 판단한다. 무료판은 지역 하나만 쓰므로 라우트마다 지역을 다르게 주지 않는다. 근거: https://vercel.com/docs/regions , https://vercel.com/docs/functions/configuring-functions/region
 - **마이그레이션**: 브랜치에서는 `supabase/migrations`에 파일을 추가만 한다. 원격 적용(`supabase db push --linked`)은 병합 때 사람이 하거나 사람이 허락한 블록에서 한다. 이미 적용한 마이그레이션은 고치지 않고 새 파일로 바꾼다.
 - **공유 DB 위험**: 운영·미리보기·로컬이 `lighthouse` DB 하나를 쓴다. 보류 PR의 마이그레이션이 운영 DB에 먼저 들어가지 않게 한다. 개발용 두 번째 무료 프로젝트는 사람 결정이다(무료 조직은 활성 프로젝트 2개 제한).
 - **무료 프로젝트 정지**: 1주 동안 DB 활동이 없으면 멈춘다. 시연 전날 켜져 있는지 보고 리허설한다.
@@ -466,11 +466,11 @@ type SummaryDraft = {
 | Supabase 무료판 `pg_cron` | 필요할 때 | 함수 호출 때 정리(현 설계) |
 | Supabase 변수의 Preview 적용 여부 | 다음 배포 | 미리보기는 memory, 공개 완주는 production |
 | 함수 지역(iad1↔icn1)과 지연 | 시연 전 실측 | 사람 승인 뒤 변경 |
-| Groq 계정 등급과 실제 분당 토큰 한도 | 3b 실험 | 요약을 OpenAI로, 호출 간격 |
-| `gpt-5.6-luna`·Upstage OCR의 한국어 상세 이미지 정확도, 통이미지 대 조각 | 3b 실험(정답지) | 다른 엔진, 조각 크기 조정 |
+| OpenAI `gpt-6-luna`의 챗봇·요약 응답 시간, JSON 모드·`temperature` 수용 | 배포 뒤 실측 | 요약 호출값 조정, 글 상한 유지 |
+| `gpt-6-luna`·Upstage OCR의 한국어 상세 이미지 정확도, 통이미지 대 조각 | 3b 실험(정답지) | 다른 엔진, 조각 크기 조정 |
 | 아이폰 canvas 면적·메모리 한도 | 3b 아침 실기기 | Storage 대체 경로 |
 | 조각 30개 처리 시간이 10분 지표 안에 드는지 | 3b 실험 | 조각 수 상한, 병렬 2개 |
-| OpenAI 크레딧 잔액·만료·등급, 키 등록 | 3b 전 | Upstage 또는 Groq qwen |
+| OpenAI 크레딧 잔액·만료·등급, 키 등록 | 3b 전 | Upstage(글자 읽기), 챗봇·요약은 다른 공급자 |
 | Vercel 외부 rewrite의 Cookie·스트리밍 전달 | 별도 서버 재검토 때만 | 재검토 보류 |
 | 결과 보관 기간, 구매 링크 도메인 제한, 결과에 가격 칸 | 5번 브랜치 전 | 이용자 결정 |
 | OpenAI가 요청 데이터를 남용 감시용으로 보관하는 기간(조사상 최대 30일)과 상세페이지 보관 위험의 관계 | 3b 전 | 멘토·이용자 판단, 필요하면 Upstage 우선 |
