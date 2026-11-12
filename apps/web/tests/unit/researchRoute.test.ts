@@ -11,13 +11,6 @@ import { maxDuration, POST, runtime } from "@/app/api/volunteer/research/route";
 import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import { LLM_MODEL } from "@/lib/llm";
 import { isResearchResponse, type ResearchRequestBody } from "@/lib/research";
-import {
-  MOCK_ALT_ITEMS,
-  MOCK_MODEL_ITEMS,
-  MOCK_PHOTO_DESCRIPTION,
-  MOCK_REF_DIGEST,
-  MOCK_SUMMARY_TEXT,
-} from "@/lib/researchMock";
 import { resetRequestStoresForTest } from "@/lib/requestStore";
 import { VOLUNTEER_COOKIE } from "@/lib/volunteerSession";
 
@@ -306,19 +299,30 @@ describe("POST /api/volunteer/research", () => {
         bodies(id).map(async (body) => (await research(body, cookie)).json()),
       );
       expect(model.items.map((item: { name: string }) => item.name)).toEqual(["가짜 헤드셋 LH-200", "가짜 헤드셋 LH-300", "가짜 헤드셋 LH-400"]);
-      expect(model.items).toEqual(MOCK_MODEL_ITEMS);
-      expect(alts.items).toEqual(MOCK_ALT_ITEMS);
+      const note = "시험용 가짜 후보예요. 확인이 필요해요.";
+      expect(model.items).toEqual(
+        ["lh-200", "lh-300", "lh-400"].map((slug, index) => ({
+          name: `가짜 헤드셋 LH-${(index + 2) * 100}`,
+          note,
+          url: `https://example.com/mock/${slug}`,
+          origin: "web",
+        })),
+      );
+      expect(alts.items).toEqual([
+        { name: "가짜 헤드셋 LH-500", note, url: "https://example.com/mock/lh-500", origin: "web" },
+        { name: "가짜 헤드셋 LH-600", note, url: "https://example.com/mock/lh-600", origin: "web" },
+      ]);
       expect(pros.question).toBe("가짜 헤드셋 LH-200의 장점을 알려 주세요. 어떤 점이 좋았나요?");
       expect(pros.hints).toEqual(["착용감은 어땠나요?", "소리나 배터리는 어땠나요?", "버튼이나 조작은 손으로 찾기 쉬웠나요?"]);
       expect(altReason.question).toBe("가짜 헤드셋 LH-500, 가짜 헤드셋 LH-600을(를) 왜 같이 고민했는지 알려 주세요.");
       expect(altReason.hints).toEqual(["어떤 점이 더 좋아 보였나요?", "어떤 점이 아쉬웠나요?"]);
       expect(benefits.links.map((link: { title: string }) => link.title)).toEqual(["가짜 혜택 안내 페이지", "가짜 카드 혜택 페이지"]);
       expect(benefits.shortcuts.map((entry: { label: string }) => entry.label)).toEqual(["쿠팡에서 찾기", "11번가에서 찾기", "G마켓에서 찾기"]);
-      expect(refs.digest).toEqual(MOCK_REF_DIGEST);
+      expect(refs.digest).toEqual(["가짜 블로그 글에서 읽은 내용이에요.", "착용감이 편하다는 이야기가 많아요."]);
       expect(refs.links.map((link: { title: string }) => link.title)).toEqual(["가짜 후기 블로그", "가짜 후기 영상"]);
       expect(refs.shortcuts.map((entry: { label: string }) => entry.label)).toEqual(["네이버 블로그에서 찾기", "유튜브에서 찾기"]);
-      expect(photo.description).toBe(MOCK_PHOTO_DESCRIPTION);
-      expect(summary.text).toBe(MOCK_SUMMARY_TEXT);
+      expect(photo.description).toBe("제품이 책상 위에 놓여 있어요. 시험용 가짜 설명이에요.");
+      expect(summary.text).toBe("시험용 가짜 핵심 정리예요.\n장점과 고민한 이유를 확인해 주세요.");
     });
 
     it("운영 환경에서는 가짜 모드를 무시한다(키가 없으면 fallback)", async () => {
@@ -384,7 +388,8 @@ describe("POST /api/volunteer/research", () => {
         ["소니 WH-CH520", "fixed"],
         ["소니 WH-1000XM4", "fixed"],
       ]);
-      expect(researchLogs()[0]).toMatch(/kind=model ai=fallback upstream=none$/);
+      // 호출은 성공했지만 검사 뒤 쓸 것이 없음: upstream=empty와 버려진 개수(숫자만)
+      expect(researchLogs()[0]).toMatch(/kind=model ai=fallback upstream=empty kept=0\/1$/);
     });
 
     it("search: 상위 서버 오류(429)면 200 + fallback이고 로그에 상태 코드가 남는다", async () => {
@@ -553,7 +558,94 @@ describe("POST /api/volunteer/research", () => {
       expect(json.ai).toBe("fallback");
       expect(json.items).toHaveLength(3);
       expect(responsesCreate).not.toHaveBeenCalled();
-      expect(researchLogs()[0]).toMatch(/kind=model ai=fallback upstream=none$/);
+      expect(researchLogs()[0]).toMatch(/kind=model ai=fallback upstream=nokey$/);
+    });
+
+    /** 응답하지 않다가 중단 신호가 오면 AbortError로 끝나는 가짜 호출. */
+    const hangUntilAbort = (_params: unknown, options: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        const abort = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        if (options.signal.aborted) abort();
+        else options.signal.addEventListener("abort", abort);
+      });
+
+    it("F8: 마감이 지나면 200 + fallback이고, 호출의 둘째 인자에 중단 신호(signal)가 넘어간다", async () => {
+      const { cookie, id } = await claimed();
+      let timeoutMs = 0;
+      // 마감 신호를 바로 울리게 바꾼다. 몇 ms로 걸었는지는 기록한다(요청 시작 시각 기준 남은 시간).
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+        timeoutMs = ms;
+        return AbortSignal.abort();
+      });
+      responsesCreate.mockImplementationOnce(hangUntilAbort);
+      const response = await research({ requestId: id, kind: "model" }, cookie);
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.ai).toBe("fallback");
+      expect(json.items.map((item: { origin: string }) => item.origin)).toEqual(["fixed", "fixed", "fixed"]);
+      const [, options] = responsesCreate.mock.calls[0];
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+      expect(options.signal.aborted).toBe(true);
+      expect(timeoutMs).toBeGreaterThan(50_000);
+      expect(timeoutMs).toBeLessThanOrEqual(55_000);
+      expect(researchLogs()[0]).toMatch(/kind=model ai=fallback upstream=timeout$/);
+    });
+
+    it("F9: 요청을 받는 데 시간이 걸려 남은 시간이 너무 짧으면 AI를 부르지 않고 fallback이다", async () => {
+      const { cookie, id } = await claimed();
+      // POST 첫 줄의 Date.now()가 54초 전이었던 것처럼 보이게 한다(느린 회선의 사진 업로드).
+      vi.spyOn(Date, "now").mockReturnValueOnce(Date.now() - 54_000);
+      const response = await research({ requestId: id, kind: "alts", model: "소니 WH-CH720N" }, cookie);
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.ai).toBe("fallback");
+      expect(responsesCreate).not.toHaveBeenCalled();
+      expect(chatCreate).not.toHaveBeenCalled();
+      expect(researchLogs()[0]).toMatch(/kind=alts ai=fallback upstream=timeout$/);
+    });
+
+    it("F5: 모델이 쓴 주소가 utm·www·슬래시만 달라도 출처로 인정하고, 화면에는 검색 결과의 주소를 보낸다", async () => {
+      const { cookie, id } = await claimed();
+      responsesCreate.mockResolvedValueOnce(
+        searchReply(
+          { items: [{ name: "소니 WH-CH720N", note: "", url: "https://shop.example/a" }] },
+          ["https://www.shop.example/a/?utm_source=openai"],
+        ),
+      );
+      const json = await (await research({ requestId: id, kind: "model" }, cookie)).json();
+      expect(json.ai).toBe("ok");
+      expect(json.items[0].url).toBe("https://www.shop.example/a/?utm_source=openai");
+    });
+
+    it("F2·F3: 우회한 금액·재고 문장과 자료에 없는 기종이 든 문장은 핵심 정리에서 빠지고, 다 빠지면 fallback이다", async () => {
+      const { cookie, id } = await claimed();
+      const body = {
+        requestId: id,
+        kind: "summary",
+        model: "소니 WH-CH720N",
+        pros: "가벼워요",
+        alts: [],
+        altReason: "",
+        benefits: "",
+        refs: "",
+      };
+      chatCreate.mockResolvedValueOnce(
+        chatReply({ text: "소니 WH-CH720N은 가벼워요. WH-1000XM5도 함께 고려해 보세요. 지금 19,900에 팔아요. 재고: 있음" }),
+      );
+      const kept = await (await research(body, cookie)).json();
+      expect(kept).toEqual({ kind: "summary", ai: "ok", text: "소니 WH-CH720N은 가벼워요." });
+      chatCreate.mockResolvedValueOnce(chatReply({ text: "WH-1000XM5도 함께 고려해 보세요." }));
+      const dropped = await (await research(body, cookie)).json();
+      expect(dropped.ai).toBe("fallback");
+      expect(dropped.text).toBe(["추천 기종: 소니 WH-CH720N", "장점: 가벼워요"].join("\n"));
+      expect(researchLogs()[1]).toMatch(/kind=summary ai=fallback upstream=empty kept=0\/1$/);
+    });
+
+    it("F12: 요청에 브랜드가 있으면 검색이 실패해도 그 브랜드의 고정 후보만 보인다", async () => {
+      const { cookie, id } = await claimed();
+      responsesCreate.mockRejectedValueOnce(new Error("down"));
+      const json = await (await research({ requestId: id, kind: "model" }, cookie)).json();
+      expect(json.items.map((item: { name: string }) => item.name).every((name: string) => name.includes("소니"))).toBe(true);
     });
 
     it("요청 문장은 저장소 값만 쓴다(화면이 보낸 다른 필드는 모델 자료에 없다)", async () => {

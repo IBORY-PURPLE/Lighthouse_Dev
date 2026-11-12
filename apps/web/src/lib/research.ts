@@ -55,15 +55,25 @@ export const RESEARCH_LIMITS = {
   digestMax: 120,
   /** 썸네일 데이터 주소의 길이 상한(localStorage 보호). */
   thumbMax: 60_000,
+  /** 서버가 받는 사진 한 장의 상한(디코드 후 바이트). 화면 축소와 서버 검사가 이 값 하나를 쓴다. */
+  imageMaxBytes: 1.5 * 1024 * 1024,
 } as const;
 
-/** 6절 화면 문구. 코드와 Figma가 같이 쓴다. */
+/** 6절 화면 문구. 코드와 Figma가 같이 쓴다. 화면 파일에는 글자를 직접 적지 않는다. */
 export const RESEARCH_COPY = {
   title: "리서치 챗",
+  backToQueue: "대기열로",
+  loading: "불러오는 중입니다.",
+  purchaseSuffix: { bought: " · 구매했어요", research: " · 리서치만" },
   back: "내 담당 목록으로",
   requestLabel: "이용자가 한 말",
+  questionKicker: "AI 질문",
   aiBoxTitle: "AI 제안",
   aiBoxMark: "확인 필요",
+  sourceLabel: "출처 보기",
+  fixedNote: "시연용 고정 후보",
+  retry: "다시 찾기",
+  historyTitle: "앞에서 답한 것",
   buttons: {
     prev: "이전",
     next: "다음",
@@ -71,16 +81,23 @@ export const RESEARCH_COPY = {
     toSummary: "요약 보기",
     send: "완료하고 보내기",
     release: "내려놓기",
+    releaseConfirm: "내려놓기 확인",
+    releaseCancel: "취소",
   },
+  releasePrompt: "내려놓으면 이 기기에 적은 답과 사진이 지워지고, 요청은 대기열로 돌아가요.",
+  toList: "목록으로",
+  reload: "다시 시도",
   model: {
     inputLabel: "기종 이름",
     inputExample: "예: WH-CH720N",
     purchaseQuestion: "이 제품을 직접 샀나요?",
     bought: "구매했어요",
     research: "구매하지 않았어요 (리서치만)",
+    purchaseNote: "착샷이나 사용 인증샷을 올리면 구매 인증되고 봉사시간이 가산돼요.",
     candidatesTitle: "AI가 찾은 기종 후보",
     searching: "기종 후보를 찾는 중이에요.",
     failed: "AI가 기종 후보를 찾지 못했어요. 쇼핑몰에서 직접 확인해 주세요.",
+    shortcutsTitle: "쇼핑몰에서 직접 찾기",
   },
   pros: {
     hintsTitle: "이런 점을 적어 주면 좋아요",
@@ -89,17 +106,47 @@ export const RESEARCH_COPY = {
   photo: {
     proof: "착샷·사용 인증샷",
     detail: "상세페이지 캡처",
+    proofTag: "착샷",
+    detailTag: "상세 캡처",
+    kindsTitle: "올릴 사진 종류",
     upload: "사진 올리기",
     privacy:
       "얼굴이나 주문번호가 보이지 않게 올려 주세요. 사진은 이 기기에만 남고, 이용자에게는 설명 글만 전달돼요.",
     descriptionTitle: "사진 설명 초안",
     describe: "AI로 사진 설명 만들기",
+    describing: "사진 설명을 만드는 중이에요.",
+    describeFailed: "사진 설명을 만들지 못했어요. 직접 적어 주세요.",
+    describeBusy: "다른 사진의 설명을 만드는 중이에요. 끝나면 다시 눌러 주세요.",
+    describeNote: "AI가 만든 글은 위 설명 칸에 들어가요. 꼭 읽고 고쳐 주세요.",
+    describeSmall: "작은 미리보기로 만들었어요. 정확한지 확인해 주세요.",
+    describeDone: "사진 설명 초안을 만들었어요.",
+    readFailed: "사진을 읽지 못했어요. 다른 사진으로 다시 올려 주세요.",
+    uploading: "사진을 올리는 중이에요. 끝나면 다시 눌러 주세요.",
+    detailOnly: "리서치만 하면 상세페이지 캡처만 올릴 수 있어요.",
+    tooBig: "사진이 너무 커서 설명을 만들지 못했어요. 직접 적어 주세요.",
+    badFormat: "이 사진 형식으로는 설명을 만들지 못했어요. 직접 적어 주세요.",
+    limit: (max: number) => `사진은 ${max}장까지 올릴 수 있어요.`,
+    uploaded: (count: number) => `사진 ${count}장을 올렸어요.`,
+    removed: (number: number) => `사진 ${number}을 지웠어요.`,
+    cutExtra: (max: number, dropped: number) => `사진은 ${max}장까지라 ${dropped}장은 올리지 않았어요.`,
+    // 사진 목록·설명 칸의 이름표(화면 파일에 글자를 직접 적지 않는다)
+    thumbAlt: (number: number) => `올린 사진 ${number}`,
+    removeLabel: (number: number) => `사진 ${number} 지우기`,
+    removeButton: "지우기",
+    descLabel: (number: number) => `사진 ${number} 설명`,
+    describeButton: (label: string, number: number) => `${label} (사진 ${number})`,
   },
   alts: {
     candidatesTitle: "AI가 찾은 비슷한 기종",
+    searching: "비슷한 기종을 찾는 중이에요.",
+    failed: "AI가 비슷한 기종을 찾지 못했어요. 쇼핑몰에서 직접 확인해 주세요.",
     inputLabel: "제품 이름",
     add: "추가",
     limitNote: "최대 2개까지 넣을 수 있어요.",
+    duplicate: "이미 넣었거나 기종과 같은 이름이에요.",
+    empty: "제품 이름을 먼저 적어 주세요.",
+    remove: "빼기",
+    removeLabel: (name: string) => `${name} 빼기`,
   },
   altReason: {
     inputExample: "예: 노이즈 캔슬링은 더 좋았지만 무거워서 가벼운 쪽을 골랐어요.",
@@ -107,25 +154,54 @@ export const RESEARCH_COPY = {
   benefits: {
     inputExample: "예: 카드 할인과 무료 배송을 받았어요.",
     linksTitle: "AI가 찾은 혜택 관련 페이지",
+    searching: "혜택 관련 페이지를 찾는 중이에요.",
     open: "열기",
     check: "확인했어요",
     notFound: "직접 확인 필요",
+    shortcutsTitle: "쇼핑몰에서 직접 찾기",
   },
   refs: {
     digestTitle: "제가 읽은 내용은 여기까지예요",
+    linksTitle: "AI가 찾은 참고 글",
+    searching: "참고 글을 찾는 중이에요.",
     inputHint: "새로 아는 내용이 있으면 적어 주세요.",
     notFound: "직접 확인 필요",
+    shortcutsTitle: "직접 찾아보기",
   },
   summary: {
     title: "보내기 전 확인",
     candidates: "후보 목록",
+    recommended: "추천 기종",
+    altsLabel: "같이 고민한 제품",
+    verifiedChip: "구매 인증됨 · 봉사시간 가산",
     guide: "핵심 정리",
     guideNote: "이용자는 이 글을 화면 낭독기로 듣습니다.",
+    stepLabel: "요약",
+    stepAlt: `질문 ${CARD_COUNT}개를 모두 지나 요약 단계예요.`,
     photoCount: (count: number) => `사진 ${count}장`,
+    photoDescriptionsTitle: "사진 설명",
+    photoDescription: (number: number, text: string) => `사진 ${number}: ${text}`,
     purchase: (verifiedNow: boolean) =>
       verifiedNow ? "구매 인증: 구매 인증됨 · 봉사시간 가산" : "구매 인증: 리서치만",
     missingTitle: "아직 답하지 않은 필수 질문",
     proofMissing: "착샷·사용 인증샷이 없어서 '리서치만'으로 보내요.",
+  },
+  /** 카드마다 다음으로 갈 수 없을 때 상태 알림으로 읽어 줄 안내(필수 카드). */
+  blocked: {
+    model: "기종 이름을 쓰고 구매 여부를 골라 주세요.",
+    pros: "장점을 적어 주세요.",
+    photo: "사진을 1장 이상 올려 주세요.",
+    alts: "같이 고민한 제품을 1개 이상 넣어 주세요.",
+    altReason: "고민한 이유를 적어 주세요.",
+  },
+  notice: {
+    sending: "보내는 중이에요.",
+    found: (count: number) => `${count}개를 찾았어요. 확인 필요.`,
+    aiArrived: (hints: number) => `AI 질문과 힌트 ${hints}개가 왔어요. 확인 필요.`,
+    rateLimited: "AI 요청이 너무 많아요. 잠시 뒤에 다시 찾기를 눌러 주세요.",
+    saveFailed: "이 기기에 진행 내용을 저장하지 못했어요. 새로 고치면 사라질 수 있어요.",
+    sendFailed: "보내지 못했어요. 완료하고 보내기를 다시 눌러 주세요.",
+    sendInvalid: "보낼 내용에 문제가 있어요. 핵심 정리를 줄이거나 체크한 링크를 빼 주세요.",
   },
   progressLabel: (number: number) => `질문 ${number} / ${CARD_COUNT}`,
   progressAlt: (number: number) => `질문 ${CARD_COUNT}개 중 ${number}번째`,
@@ -203,6 +279,8 @@ export interface LinkRef {
   url: string;
 }
 
+export type SummarySource = "none" | "ai" | "draft" | "volunteer";
+
 export type HelpKind = "model" | "pros" | "alts" | "altReason" | "benefits" | "refs" | "summary";
 
 export interface HelpEntry {
@@ -227,6 +305,10 @@ export interface ResearchState {
   checked: { benefits: LinkRef[]; refs: LinkRef[] };
   /** 요약 단계의 핵심 정리 글. 비어 있으면 보낼 때 draftSummaryText로 채운다. */
   summaryText: string;
+  /** 핵심 정리 글이 어디서 왔나. 봉사자가 직접 고친 글(volunteer)은 AI 초안으로 덮어쓰지 않는다. */
+  summarySource: SummarySource;
+  /** ai·draft 글을 채울 때의 입력(helpKey "summary"). 입력이 바뀌면 그 글은 낡은 것이다. */
+  summaryKey: string;
   help: Partial<Record<HelpKind, HelpEntry>>;
 }
 
@@ -250,6 +332,8 @@ export function emptyResearchState(): ResearchState {
     photos: [],
     checked: { benefits: [], refs: [] },
     summaryText: "",
+    summarySource: "none",
+    summaryKey: "",
     help: {},
   };
 }
@@ -335,10 +419,10 @@ export function nextLabel(state: ResearchState): string {
   return state.step === CARD_COUNT - 1 ? RESEARCH_COPY.buttons.toSummary : RESEARCH_COPY.buttons.next;
 }
 
-/** "건너뛰기"를 보일 카드(선택 카드). */
+/** "건너뛰기"를 보일 카드: 선택 카드이고 아직 답이 없을 때(답이 있으면 건너뛴다는 말이 사실이 아니다). */
 export function canSkip(state: ResearchState): boolean {
   const card = RESEARCH_CARDS[state.step];
-  return card !== undefined && !card.required;
+  return card !== undefined && !card.required && !isCardAnswered(state, card.id);
 }
 
 export function goTo(state: ResearchState, step: number): ResearchState {
@@ -367,13 +451,17 @@ function clipCodePoints(value: string, max: number): string {
   return chars.length <= max ? value : chars.slice(0, max).join("");
 }
 
-/** 구매 여부를 바꾼다. 구매하지 않았다면 착샷·사용 인증샷은 상세페이지 캡처로 바꾼다(인증에 쓰이지 않는다). */
+/**
+ * 구매 여부를 바꾼다. 저장된 사진 종류는 건드리지 않는다(되돌리면 착샷이 살아난다).
+ * 구매하지 않았다면 화면 표시와 결과에서만 상세페이지 캡처로 다룬다(effectivePhotoKind).
+ */
 export function withPurchase(state: ResearchState, purchase: Purchase): ResearchState {
-  const photos =
-    purchase === "bought"
-      ? state.photos
-      : state.photos.map((photo): ResearchPhoto => ({ ...photo, kind: "detail" }));
-  return { ...state, purchase, photos };
+  return { ...state, purchase };
+}
+
+/** 지금 구매 상태에서 이 사진을 어떤 종류로 다루나. 구매하지 않았다면 늘 상세페이지 캡처다. */
+export function effectivePhotoKind(state: ResearchState, photo: ResearchPhoto): PhotoKind {
+  return state.purchase === "bought" ? photo.kind : "detail";
 }
 
 /** 대안 제품을 더한다. 빈 값·중복·기종과 같은 이름은 무시하고 최대 2개. */
@@ -395,9 +483,11 @@ export function removeAlt(state: ResearchState, name: string): ResearchState {
   return { ...state, alts: state.alts.filter((alt) => alt !== name) };
 }
 
-/** 사진을 더한다(최대 3장). 구매하지 않았다면 종류는 상세페이지 캡처로 맞춘다. */
+/** 사진을 더한다(최대 3장, 썸네일 6만 글자 이하). 구매하지 않았다면 새 사진의 종류는 상세페이지 캡처로 맞춘다. */
 export function addPhoto(state: ResearchState, photo: ResearchPhoto): ResearchState {
   if (state.photos.length >= RESEARCH_LIMITS.maxPhotos) return state;
+  // 기기에 저장하지 못할 썸네일은 받지 않는다(새로 고치면 조용히 사라지기 때문이다).
+  if (!photo.thumb.startsWith("data:image/") || photo.thumb.length > RESEARCH_LIMITS.thumbMax) return state;
   const kind = allowedPhotoKinds(state.purchase).includes(photo.kind) ? photo.kind : "detail";
   const description = clipCodePoints(photo.description, RESEARCH_LIMITS.descriptionMax);
   return { ...state, photos: [...state.photos, { ...photo, kind, description }] };
@@ -450,8 +540,70 @@ export function cachedHelp(state: ResearchState, kind: HelpKind): ResearchRespon
   return entry && entry.key === helpKey(state, kind) ? entry.response : null;
 }
 
-export function withHelp(state: ResearchState, kind: HelpKind, response: ResearchResponse): ResearchState {
-  return { ...state, help: { ...state.help, [kind]: { key: helpKey(state, kind), response } } };
+/**
+ * 응답을 캐시에 넣는다. key는 요청을 보낼 때의 helpKey다. 응답이 늦게 와서 그 사이 입력이 바뀌었다면
+ * 지금 입력의 키와 달라 cachedHelp가 쓰지 않는다(옛 기종의 후보가 새 기종의 캐시가 되지 않는다).
+ */
+export function withHelp(
+  state: ResearchState,
+  kind: HelpKind,
+  response: ResearchResponse,
+  key: string = helpKey(state, kind),
+): ResearchState {
+  return { ...state, help: { ...state.help, [kind]: { key, response } } };
+}
+
+// ---- 핵심 정리 글의 출처 ------------------------------------------------------------
+
+/** 봉사자가 직접 쓴(고친) 글인가. 저장 모양에 출처가 없던 때의 글은 봉사자 글로 본다. */
+function isVolunteerSummary(state: ResearchState): boolean {
+  return state.summaryText.trim() !== "" && (state.summarySource === "volunteer" || state.summarySource === "none");
+}
+
+/** AI·기본 초안이 지금 답과 어긋났나(초안을 채운 뒤 기종이나 답이 바뀌었다). */
+export function isSummaryStale(state: ResearchState): boolean {
+  return (
+    state.summaryText.trim() !== "" &&
+    (state.summarySource === "ai" || state.summarySource === "draft") &&
+    state.summaryKey !== helpKey(state, "summary")
+  );
+}
+
+/** 요약 단계에 들어올 때: 낡은 초안은 비운다(봉사자가 쓴 글은 그대로). */
+export function dropStaleSummary(state: ResearchState): ResearchState {
+  return isSummaryStale(state) ? { ...state, summaryText: "", summarySource: "none", summaryKey: "" } : state;
+}
+
+/**
+ * 초안을 채운다. 봉사자가 쓴 글이 있으면 그대로 두고, 낡은 초안이거나 비었거나 기본 초안이면 바꾼다.
+ * key는 요청 때의 helpKey("summary")이고, 지금 입력과 다르면(응답이 늦게 왔다) 채우지 않는다.
+ */
+export function fillSummary(
+  state: ResearchState,
+  text: string,
+  source: "ai" | "draft",
+  key: string = helpKey(state, "summary"),
+): ResearchState {
+  if (key !== helpKey(state, "summary")) return state;
+  if (isVolunteerSummary(state)) return state;
+  if (source === "draft" && state.summarySource === "ai" && state.summaryText.trim() !== "" && !isSummaryStale(state)) {
+    return state;
+  }
+  return { ...state, summaryText: text, summarySource: source, summaryKey: key };
+}
+
+/** 봉사자가 글 칸을 고쳤다. 비우면 다시 초안을 받을 수 있다. */
+export function setSummaryText(state: ResearchState, text: string): ResearchState {
+  const value = clipCodePoints(text, RESEARCH_LIMITS.summaryEditMax);
+  return value.trim() === ""
+    ? { ...state, summaryText: value, summarySource: "none", summaryKey: "" }
+    : { ...state, summaryText: value, summarySource: "volunteer", summaryKey: "" };
+}
+
+/** 보낼 핵심 정리 글: 봉사자 글이나 지금 답에 맞는 초안, 아니면 지금 답으로 새로 만든 기본 글. */
+export function guideSource(state: ResearchState): string {
+  const usable = state.summaryText.trim() !== "" && !isSummaryStale(state);
+  return usable ? state.summaryText.trim() : draftSummaryText(state);
 }
 
 // ---- 서버 요청·응답 타입 ----------------------------------------------------------
@@ -621,8 +773,18 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 
+/** href에 넣어도 되는 주소: https로 시작하고 주소로 읽힌다. http, javascript:, data: 는 받지 않는다. */
+export function isHttpsUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !/^https:\/\//i.test(value)) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function isLinkRef(value: unknown): value is LinkRef {
-  return isObject(value) && isString(value.title) && isString(value.url);
+  return isObject(value) && isString(value.title) && isHttpsUrl(value.url);
 }
 
 function isItem(value: unknown): value is ResearchItem {
@@ -630,17 +792,17 @@ function isItem(value: unknown): value is ResearchItem {
     isObject(value) &&
     isString(value.name) &&
     isString(value.note) &&
-    (value.url === null || isString(value.url)) &&
+    (value.url === null || isHttpsUrl(value.url)) &&
     (value.origin === "web" || value.origin === "fixed")
   );
 }
 
 function isLink(value: unknown): value is ResearchLink {
-  return isObject(value) && isString(value.title) && isString(value.url) && value.origin === "web";
+  return isObject(value) && isString(value.title) && isHttpsUrl(value.url) && value.origin === "web";
 }
 
 function isShortcut(value: unknown): value is ResearchShortcut {
-  return isObject(value) && isString(value.label) && isString(value.url);
+  return isObject(value) && isString(value.label) && isHttpsUrl(value.url);
 }
 
 const everyOf = <T>(value: unknown, guard: (item: unknown) => item is T): value is T[] =>
@@ -715,6 +877,14 @@ export function parseStoredState(raw: string | null): ResearchState | null {
       }
     }
   }
+  const summaryText = text(data.summaryText, RESEARCH_LIMITS.summaryEditMax);
+  // 출처가 없는 저장값(옛 모양)이면 글이 있을 때 봉사자 글로 본다.
+  const summarySource: SummarySource =
+    summaryText.trim() === ""
+      ? "none"
+      : data.summarySource === "ai" || data.summarySource === "draft" || data.summarySource === "volunteer"
+        ? data.summarySource
+        : "volunteer";
   return {
     v: 1,
     step: clampStep(typeof data.step === "number" ? data.step : 0),
@@ -730,12 +900,14 @@ export function parseStoredState(raw: string | null): ResearchState | null {
     altReason: text(data.altReason, RESEARCH_LIMITS.answerMax),
     benefits: text(data.benefits, RESEARCH_LIMITS.answerMax),
     refs: text(data.refs, RESEARCH_LIMITS.answerMax),
-    photos: purchase === "bought" ? photos : photos.map((photo) => ({ ...photo, kind: "detail" as const })),
+    photos,
     checked: {
       benefits: everyOf(checked.benefits, isLinkRef) ? checked.benefits.slice(0, RESEARCH_LIMITS.maxLinks) : [],
       refs: everyOf(checked.refs, isLinkRef) ? checked.refs.slice(0, RESEARCH_LIMITS.maxLinks) : [],
     },
-    summaryText: text(data.summaryText, RESEARCH_LIMITS.summaryEditMax),
+    summaryText,
+    summarySource,
+    summaryKey: summarySource === "ai" || summarySource === "draft" ? text(data.summaryKey, 4000) : "",
     help,
   };
 }

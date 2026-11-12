@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
@@ -7,6 +8,8 @@ import { MATCH_TIMEOUT_MS } from "../../src/lib/matchHandoff";
 import { REQUEST_TIMEOUT_MS } from "../../src/lib/requestRecord";
 import { installFakeSpeech, say } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
+import { BOUGHT, button, next, SEND } from "./helpers/researchFlow";
+import { claimDemo, FIRST_DEMO_QUOTE, makeSyntheticDetailImage, refill } from "./helpers/volunteerFlow";
 
 // 접근 코드는 저장소 루트 .demo-access.local의 첫 줄에서만 읽는다.
 function readAccessCode(): string {
@@ -169,4 +172,118 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
         violation.impact === "critical" || violation.impact === "serious",
     ),
   ).toEqual([]);
+});
+
+// ④ 리서치 챗을 공개 주소에서 실제 엔진(gpt-6-luna)으로 1회 완주한다. 실행마다 검색 호출이 4번(기종·대안·혜택·참고 글),
+// 그 밖의 호출이 몇 번 든다. 돌리기 전에 누계를 본다.
+// 입장 → 시연용 요청 다시 채우기 → 헤드셋 맡기 → 카드 1~7 → 보내기 전 확인 → 보내기 → 완료 화면 → 목록으로.
+// 실제 AI가 fallback으로 답해도 흐름은 끝까지 가야 한다(기본 질문·직접 입력·바로가기). 기록하는 것은 종류별 상태와 ai 값(ok·fallback)뿐이고,
+// 후보 이름·링크·글은 남기지 않는다. 금액·재고 표현이 응답에 없는지만 확인한다.
+test("④ 입장·맡기·리서치 챗 카드 1~7·보내기 완주", async ({ page }) => {
+  test.setTimeout(420_000);
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": `test-${randomUUID()}` });
+
+  // 입장(코드와 별명). 이 기기가 봉사자가 된다.
+  await page.goto("/volunteer");
+  await page.getByLabel("입장 코드").fill(readAccessCode());
+  await page.getByLabel("별명").fill("시험");
+  await page.getByRole("button", { name: "시작하기" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+  await refill(page);
+
+  const records: Array<{ kind: string; status: number; ai: string; ms: number }> = [];
+  // 값은 남기지 않고, 응답 글에 금액·재고 표현이 있었는지만 센다.
+  let moneyLike = 0;
+  // 서버 검사(researchCheck.hasForbidden)의 부분집합이다. 맨 '재고'나 쉼표 숫자(5,000mAh)처럼 서버가 통과시키는 글은 세지 않는다.
+  const MONEY_LIKE = /\d\s*(?:원(?!칙|색|소)|%|달러)|품절|매진|최저가|할인가|재고\s*(?:[:：]|가|는|도|를|을|이)/;
+  page.on("response", async (response) => {
+    if (!response.url().includes("/api/volunteer/research") || response.request().method() !== "POST") return;
+    const text = await response.text().catch(() => "");
+    let json: { kind?: string; ai?: string } | null = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+    // 바로가기 주소의 검색어(예: 소니 WH 후기)는 지나가므로 URL 글자를 뺀 글만 본다.
+    const plain = text.replace(/https?:[^"\s]+/g, "");
+    if (MONEY_LIKE.test(plain)) moneyLike += 1;
+    records.push({
+      kind: json?.kind ?? "-",
+      status: response.status(),
+      ai: json?.ai ?? "-",
+      ms: Math.round(response.request().timing().responseEnd),
+    });
+  });
+
+  await claimDemo(page, FIRST_DEMO_QUOTE);
+  const settled = async () => {
+    // 카드의 AI 제안이 끝날 때까지(찾는 중이 사라질 때까지) 기다린다. 실패해도 사라진다.
+    await expect(page.getByTestId("ai-searching")).toHaveCount(0, { timeout: 90_000 });
+  };
+
+  // 카드 1: 후보 칩이 있으면 누르고, fallback이면 직접 쓴다.
+  await settled();
+  const chips = page.getByTestId("candidate-chip");
+  if ((await chips.count()) > 0) await chips.first().click();
+  else await page.getByLabel("기종 이름").fill("소니 WH-CH720N");
+  await button(page, BOUGHT).click();
+  await next(page);
+
+  // 카드 2: 장점. AI 질문이 와도 입력 칸은 같다.
+  await expect(page.getByLabel("장점", { exact: true })).toBeVisible();
+  await page.getByLabel("장점", { exact: true }).fill("오래 써도 귀가 덜 아파요.");
+  await next(page);
+
+  // 카드 3: 합성 사진 1장(착샷). 사진 설명 만들기는 부르지 않는다.
+  const buffer = await makeSyntheticDetailImage(page, { width: 860, height: 900, noise: false });
+  await page.getByTestId("photo-input").setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer });
+  await expect(page.getByTestId("photo-item")).toHaveCount(1);
+  await next(page);
+
+  // 카드 4: 대안 후보 또는 직접 입력.
+  await settled();
+  if ((await chips.count()) > 0) await chips.first().click();
+  else {
+    await page.getByLabel("제품 이름").fill("소니 WH-CH520");
+    await button(page, "추가").click();
+  }
+  await next(page);
+
+  // 카드 5: 이유.
+  await page.getByLabel("고민한 이유", { exact: true }).fill("더 가벼운 쪽을 골랐어요.");
+  await next(page);
+
+  // 카드 6·7: 건너뛴다(AI 제안이 끝난 뒤).
+  await settled();
+  await button(page, "건너뛰기").click();
+  await settled();
+  await button(page, "건너뛰기").click();
+
+  // 보내기 전 확인: 핵심 정리 초안(실제 AI 또는 기본 글)이 채워지면 보낸다.
+  await expect(page.getByRole("heading", { level: 2, name: "보내기 전 확인" })).toBeVisible();
+  const guide = page.getByRole("textbox", { name: "핵심 정리" });
+  await expect(guide).toHaveAttribute("aria-busy", "false", { timeout: 90_000 });
+  await expect(guide).not.toHaveValue("");
+  await expect(button(page, SEND)).not.toHaveAttribute("aria-disabled", "true");
+  await button(page, SEND).click();
+  await expect(page.getByRole("heading", { level: 1, name: "완료된 요청" })).toBeVisible();
+  await expect(page.getByText("전달 완료", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "목록으로", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "이 기기에서 보낸 요청" })).toBeVisible();
+  await expect(page.locator(".vol-card").filter({ hasText: "소니 무선 헤드셋" })).toContainText("전달 완료");
+
+  const summary = records.map((record) => `${record.kind}:${record.status}:${record.ai}:${record.ms}ms`);
+  console.log(`리서치 호출 ${records.length}회: ${summary.join(" ")}`);
+  console.log(`ai=ok ${records.filter((r) => r.ai === "ok").length}회, fallback ${records.filter((r) => r.ai === "fallback").length}회`);
+  console.log(`금액·재고 표현이 든 응답: ${moneyLike}건`);
+  // 오류 응답(4xx·5xx)은 429(한도)만 허용한다. 429여도 카드는 진행됐다.
+  expect(records.filter((record) => record.status !== 200 && record.status !== 429)).toEqual([]);
+  expect(records.length).toBeGreaterThanOrEqual(6);
+  expect(moneyLike).toBe(0);
+
+  // 정리: 시연용 요청을 다시 채운다(이 기기에서 보낸 요청도 시연 기본값으로 돌아간다).
+  await page.getByRole("button", { name: /^대기열/ }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+  await refill(page);
 });

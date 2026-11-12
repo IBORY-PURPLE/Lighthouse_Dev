@@ -1,6 +1,6 @@
 import { RESULT_LIMITS } from "./resultInput";
 import {
-  draftSummaryText,
+  guideSource,
   isVerified,
   missingRequiredCards,
   type LinkRef,
@@ -16,8 +16,9 @@ export type ResultBody = { candidates: SentCandidate[] };
 
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
 
-/** 코드포인트 기준으로 max자 이하로 자른다. 잘리면 끝을 "…"로 바꾼다. */
+/** 코드포인트 기준으로 max자 이하로 자른다. 잘리면 끝을 "…"로 바꾼다. max가 1 미만이면 빈 글자. */
 export function clip(value: string, max: number): string {
+  if (max <= 0) return "";
   const chars = [...value];
   if (chars.length <= max) return value;
   return `${chars.slice(0, max - 1).join("").trimEnd()}…`;
@@ -33,13 +34,14 @@ function item(label: string, value: string): Item | null {
 
 /**
  * 링크 줄. "제목 주소" 모양이고 값 한도(200자) 안에서 제목을 줄여 맞춘다.
- * 주소 자체가 한도에 들어가지 않으면 이 링크는 뺀다(주소를 자르면 못 쓰는 주소가 된다).
+ * 제목 자리가 1자도 없으면 주소만 넣고, 주소 자체가 한도를 넘으면 이 링크는 뺀다(주소를 자르면 못 쓰는 주소가 된다).
  */
 function linkItem(label: string, link: LinkRef): Item | null {
   const url = link.url.trim();
-  const room = RESULT_LIMITS.valueMax - [...url].length - 1;
-  if (!url.startsWith("https://") || room < 0) return null;
-  const title = clip(oneLine(link.title), room);
+  const urlLength = [...url].length;
+  if (!url.startsWith("https://") || urlLength > RESULT_LIMITS.valueMax) return null;
+  const room = RESULT_LIMITS.valueMax - urlLength - 1;
+  const title = room >= 1 ? clip(oneLine(link.title), room) : "";
   return { label, value: title === "" ? url : `${title} ${url}` };
 }
 
@@ -78,13 +80,12 @@ export function buildResultBody(state: ResearchState): ResultBody | null {
   ].filter((entry): entry is Item => entry !== null);
 
   const name = clip(oneLine(state.model), RESULT_LIMITS.nameMax);
-  const guideSource = state.summaryText.trim() || draftSummaryText(state);
 
   const candidates: SentCandidate[] = [
     {
       name,
       url: candidateSearchUrl(name),
-      guide: clip(guideSource, RESULT_LIMITS.guideMax),
+      guide: clip(guideSource(state), RESULT_LIMITS.guideMax),
       summary: summary.slice(0, RESULT_LIMITS.summaryMax),
     },
   ];

@@ -205,6 +205,8 @@
   margin: 14px 0 0;
   color: var(--vol-sub);
   font-size: 0.875rem;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 /* ----- 카드 ----- */
@@ -463,12 +465,14 @@
 .vol-sent-name {
   margin: 0;
   font-weight: 700;
+  word-break: keep-all;
   overflow-wrap: anywhere;
 }
 
 .vol-sent-url,
 .vol-sent-text {
   margin: 0;
+  word-break: keep-all;
   overflow-wrap: anywhere;
 }
 
@@ -476,7 +480,11 @@
   color: var(--vol-ink);
 }
 
-/* ----- 리서치 챗: 위(요청·진행·질문)와 아래(버튼)는 붙어 있고 가운데만 스크롤 ----- */
+/*
+ * ----- 리서치 챗: 위(제목·배지·진행 점·현재 질문)와 아래(버튼)만 붙어 있고, 요청 상자·답 칸은 가운데에서 함께 스크롤 -----
+ * 답을 쓰는 동안에도 현재 질문이 화면 위에 보여야 한다(이용자 기획 설계원칙 4). 두 띠 합이 화면 높이의 절반을 넘거나 둘을 뺀 남은 높이가 220px 미만이면(작은 화면, 글자 확대)
+ * ResearchChat이 .rc-root--free를 붙여 위 띠를 일반 흐름으로 돌린다. 아래 띠 하나만으로 화면의 절반을 넘으면 .rc-root--free-bottom도 붙는다.
+ */
 
 .rc-page {
   display: flex;
@@ -484,15 +492,39 @@
   min-height: 100vh;
   min-height: 100dvh;
   padding: 0;
+  /* 한국어는 낱말 중간에서 끊지 않는다. 아주 긴 낱말(주소)만 끊는다. 리서치 챗의 모든 글자가 상속한다. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .rc-top {
   position: sticky;
   top: 0;
   z-index: 10;
-  padding: 6px 16px 12px;
+  padding: 4px 16px 8px;
   border-bottom: 1px solid var(--vol-line);
   background: var(--vol-bg);
+}
+
+/*
+ * 초점을 받은 칸이 위·아래 띠 밑으로 들어가지 않게, 띠 높이만큼 스크롤 영역에 여백을 둔다.
+ * --rc-top-h, --rc-bottom-h는 ResearchChat이 html에 건 잰 값(고정이 풀리면 0)이고, 재기 전에는 넉넉한 기본값이다.
+ * 크롬은 focus()가 일으키는 스크롤에서 요소의 scroll-margin을 따르지 않아(시험으로 확인) 띠 높이는 html의 scroll-padding으로 주고,
+ * 요소의 scroll-margin은 띠와 붙지 않게 하는 작은 여백만 둔다.
+ */
+html:has(.rc-page) {
+  scroll-padding-top: calc(var(--rc-top-h, 9rem) + 12px);
+  scroll-padding-bottom: calc(var(--rc-bottom-h, 6rem) + 12px);
+}
+
+.rc-body :is(input, textarea, select, button, a, summary, [tabindex]) {
+  scroll-margin-block: 8px;
+}
+
+/* 고정을 푸는 기준은 화면 높이 미디어 쿼리가 아니라 ResearchChat의 잰 값 하나다(실제 아이폰 사파리는 보이는 높이가 548~664px라 쿼리로 풀면 질문이 안 붙는다). */
+.rc-root--free .rc-top,
+.rc-root--free-bottom .rc-bottom {
+  position: static;
 }
 
 .rc-body {
@@ -518,6 +550,20 @@
   font-size: 0.9375rem;
 }
 
+/* 화면에 이미 같은 정보가 있는 안내(찾았어요, 올렸어요)는 낭독기에만 읽힌다. */
+.vol-page .rc-bottom .status-region.status-region--quiet:not(:empty) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .rc-buttons {
   display: flex;
   gap: 10px;
@@ -529,6 +575,15 @@
 
 .rc-buttons .rc-primary {
   flex: 2;
+}
+
+/* 보내기 전 확인: 완료 버튼을 위에 크게, 이전은 그 아래 */
+.rc-buttons--stack {
+  flex-direction: column;
+}
+
+.rc-buttons--stack .vol-btn {
+  flex: none;
 }
 
 .rc-badge-box {
@@ -555,16 +610,10 @@
   color: var(--vol-ink);
 }
 
-.rc-badge-note {
-  color: var(--vol-sub);
-  font-size: 0.8125rem;
-}
-
 .rc-request {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-top: 6px;
   padding: 10px 14px;
   border-radius: 12px;
   background: var(--vol-soft);
@@ -574,7 +623,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 10px 0 8px;
+  margin: 4px 0 0;
 }
 
 .rc-dots {
@@ -598,21 +647,27 @@
   font-size: 0.9375rem;
 }
 
+/* 현재 질문: 위 띠 안에 작게 붙어 있다. 질문 글이 중심이고, 보조 문구는 스크롤 본문(.rc-question-helper)에 둔다. */
 .rc-question {
-  padding: 10px 14px 12px;
+  margin-top: 6px;
+  padding: 6px 12px 8px;
   border: 1.5px solid var(--vol-ink);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
-.rc-question-chip {
-  min-height: 22px;
+.rc-question-kicker {
+  display: block;
+  color: var(--vol-sub);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .vol-page .rc-question-text {
-  margin: 6px 0 2px;
+  margin: 2px 0 0;
   color: var(--vol-ink);
-  font-size: 1.125rem;
-  line-height: 1.4;
+  font-size: 1rem;
+  line-height: 1.35;
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
@@ -621,7 +676,8 @@
   outline: none;
 }
 
-.rc-question-helper {
+.rc-question-helper,
+.rc-badge-note {
   margin: 0;
   color: var(--vol-sub);
   font-size: 0.9375rem;
@@ -640,13 +696,18 @@
 
 .rc-ai-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
 }
 
 .vol-page .rc-ai-title {
+  flex: 1 1 10em;
+  min-width: 0;
   margin: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   color: var(--vol-ink);
   font-size: 1rem;
   line-height: 1.35;
@@ -654,9 +715,23 @@
 
 .rc-ai-kicker {
   display: block;
-  color: var(--vol-sub);
-  font-size: 0.8125rem;
+  color: var(--vol-ink);
+  font-size: 0.875rem;
   font-weight: 700;
+}
+
+.rc-ai-marks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.rc-hint-note {
+  margin: 0;
+  color: var(--vol-sub);
+  font-size: 0.875rem;
 }
 
 .rc-ai-text {
@@ -699,14 +774,22 @@
   list-style: none;
 }
 
+/* 후보 한 줄: 이름 칩과 그 후보의 출처 링크가 나란히 */
+.rc-chip-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .rc-chip {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 8px;
-  width: 100%;
+  gap: 0 8px;
+  min-width: 0;
   min-height: 44px;
-  padding: 8px 16px;
+  padding: 6px 14px;
   border: 1.5px solid var(--vol-ink);
   border-radius: 22px;
   background: var(--vol-bg);
@@ -733,9 +816,10 @@
 
 .rc-source {
   display: inline-flex;
+  flex: none;
   align-items: center;
   min-height: 44px;
-  padding: 0 4px;
+  padding: 0 6px;
   color: var(--vol-ink);
   font-size: 0.875rem;
 }
@@ -803,10 +887,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--vol-line);
 }
 
 .rc-retry {
-  align-self: flex-start;
+  min-height: 44px;
 }
 
 .rc-answer {
@@ -840,6 +926,17 @@
   width: 100%;
 }
 
+.rc-kinds-box {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rc-kinds-box .rc-label {
+  padding: 0;
+}
+
 .rc-kinds {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -862,7 +959,7 @@
 .rc-thumb-cell {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -871,6 +968,7 @@
   display: block;
   aspect-ratio: 1;
   overflow: hidden;
+  border: 1.5px solid var(--vol-line);
   border-radius: 10px;
   background: var(--vol-lock);
 }
@@ -936,13 +1034,18 @@
   line-height: 1;
 }
 
+.rc-describe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .rc-describe {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
-.rc-describe .vol-btn {
+.rc-describe-btn {
   align-self: flex-start;
 }
 
@@ -991,6 +1094,40 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--vol-line);
+}
+
+.rc-history-title {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--vol-sub);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+/* display:flex라 기본 펼침 표시가 사라지므로 직접 그린다(접힘 ▸, 펼침 ▾). 낭독기는 summary의 상태(펼쳐짐/접힘)로 읽는다. */
+.rc-history-title::-webkit-details-marker {
+  display: none;
+}
+
+.rc-history-title::before {
+  flex: none;
+  width: 1.25em;
+  content: "▸";
+  content: "▸" / "";
+}
+
+.rc-history[open] > .rc-history-title::before {
+  content: "▾";
+  content: "▾" / "";
+}
+
+.rc-history[open] > .rc-bubble {
+  margin-top: 8px;
 }
 
 .rc-bubble {
@@ -1015,12 +1152,63 @@
 .rc-release {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 10px;
-  margin-top: 8px;
+  margin-top: 28px;
 }
 
-.rc-release .vol-btn {
+/* 요청을 포기하는 동작이라 선택지 버튼처럼 보이지 않게 낮춘다(터치 크기는 유지). */
+.rc-release-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--vol-sub);
+  font: inherit;
+  font-size: 0.9375rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* 내려놓기 확인: 안내와 [취소] [내려놓기 확인]. 확인 쪽은 지우는 동작이라 글자색을 진하게만 하고 모양은 다른 버튼과 같다. */
+.rc-release-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   width: 100%;
+  padding: 14px;
+  border: 1.5px solid var(--vol-ink);
+  border-radius: 12px;
+}
+
+.rc-release-prompt {
+  margin: 0;
+  color: var(--vol-ink);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.rc-release-prompt:focus {
+  outline: 3px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+.rc-release-btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.rc-release-btn:focus-visible,
+.rc-history-title:focus-visible,
+.rc-chip:focus-visible,
+.rc-source:focus-visible,
+.rc-thumb-remove:focus-visible,
+.rc-picked-remove:focus-visible,
+.rc-add-photo:focus-visible {
+  outline: 3px solid #2f6fed;
+  outline-offset: 2px;
 }
 
 /* 보내기 전 확인 */
@@ -1078,13 +1266,20 @@
   overflow-wrap: anywhere;
 }
 
+.rc-box-alts {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .rc-missing-list {
   flex-direction: row;
   flex-wrap: wrap;
 }
 
+/* 보내기 전 확인의 핵심 정리 칸: 봉사자가 끝까지 읽고 보내야 하므로 안 스크롤이 없게 한다. 최소 8줄, 글이 길면 칸이 늘어난다(ResearchSummary). */
 .rc-guide {
-  min-height: 168px;
+  min-height: 13.5rem;
+  line-height: 1.5;
 }
 
 .rc-foot {
@@ -1108,11 +1303,30 @@
 }
 
 .vol-sent-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
+  list-style: none;
   overflow-wrap: anywhere;
 }
 
+/* 라벨은 작게 위에, 값은 그 아래에 둬서 둘이 이어져 읽히지 않게 한다 */
 .vol-sent-key {
+  display: block;
+  color: var(--vol-sub);
+  font-size: 0.875rem;
   font-weight: 700;
+}
+
+.vol-sent-value {
+  display: block;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.vol-sent-host {
+  color: var(--vol-sub);
+  font-size: 0.875rem;
 }

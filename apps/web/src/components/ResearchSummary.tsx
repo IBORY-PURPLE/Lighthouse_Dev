@@ -1,7 +1,8 @@
 "use client";
 
-import { forwardRef } from "react";
+import { forwardRef, useLayoutEffect, useRef } from "react";
 import {
+  effectivePhotoKind,
   isVerified,
   missingRequiredCards,
   proofMissingNotice,
@@ -26,8 +27,24 @@ export const ResearchSummary = forwardRef<
 >(function ResearchSummary({ state, summaryBusy, onChangeText, onGoToCard }, headingRef) {
   const missing = missingRequiredCards(state);
   const verified = isVerified(state);
-  const proofCount = state.photos.filter((photo) => photo.kind === "proof").length;
+  const guideRef = useRef<HTMLTextAreaElement>(null);
+  // 핵심 정리 칸은 글에 맞게 늘어나서 칸 안에서 스크롤하지 않고도 끝까지 읽힌다(최소 높이는 css의 8줄).
+  useLayoutEffect(() => {
+    const area = guideRef.current;
+    if (!area) return;
+    const fit = () => {
+      area.style.height = "auto";
+      area.style.height = `${area.scrollHeight + area.offsetHeight - area.clientHeight}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [state.summaryText]);
+  const proofCount = state.photos.filter((photo) => effectivePhotoKind(state, photo) === "proof").length;
   const detailCount = state.photos.length - proofCount;
+  const described = state.photos
+    .map((photo, index) => ({ number: index + 1, text: photo.description.trim() }))
+    .filter((photo) => photo.text !== "");
   const notice = proofMissingNotice(state);
   return (
     <>
@@ -60,19 +77,15 @@ export const ResearchSummary = forwardRef<
         <h3 id="rc-cands-title" className="rc-box-title">
           {RESEARCH_COPY.summary.candidates}
         </h3>
-        <p className="vol-summary-label">추천 기종</p>
+        <p className="vol-summary-label">{RESEARCH_COPY.summary.recommended}</p>
         <p className="rc-box-name">
           {state.model.trim() || "—"}
-          {verified && <span className="vol-chip rc-inline-chip">구매 인증됨 · 봉사시간 가산</span>}
+          {verified && <span className="vol-chip rc-inline-chip">{RESEARCH_COPY.summary.verifiedChip}</span>}
         </p>
         {state.alts.length > 0 && (
           <>
-            <p className="vol-summary-label rc-sep">같이 고민한 제품</p>
-            <ul className="rc-box-list">
-              {state.alts.map((alt) => (
-                <li key={alt}>{alt}</li>
-              ))}
-            </ul>
+            <p className="vol-summary-label rc-sep">{RESEARCH_COPY.summary.altsLabel}</p>
+            <p className="rc-box-alts">{state.alts.join(", ")}</p>
           </>
         )}
       </section>
@@ -86,6 +99,7 @@ export const ResearchSummary = forwardRef<
         </label>
         <textarea
           id="rc-guide"
+          ref={guideRef}
           className="vol-input vol-textarea rc-guide"
           value={state.summaryText}
           maxLength={RESEARCH_LIMITS.summaryEditMax}
@@ -105,6 +119,18 @@ export const ResearchSummary = forwardRef<
       <p className="rc-fact rc-fact--strong" data-testid="summary-purchase">
         {RESEARCH_COPY.summary.purchase(verified)}
       </p>
+      {described.length > 0 && (
+        <section className="rc-box" aria-labelledby="rc-photo-desc-title" data-testid="summary-photo-descriptions">
+          <h3 id="rc-photo-desc-title" className="rc-box-title">
+            {RESEARCH_COPY.summary.photoDescriptionsTitle}
+          </h3>
+          <ul className="rc-box-list">
+            {described.map((photo) => (
+              <li key={photo.number}>{RESEARCH_COPY.summary.photoDescription(photo.number, photo.text)}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       {notice && (
         <p className="vol-notice" data-testid="proof-missing">
           {notice}

@@ -289,6 +289,7 @@ test.describe("봉사자 입장·목록·맡기", () => {
     const detailUrl = page.url();
 
     await page.getByRole("button", { name: "내려놓기" }).click();
+    await page.getByRole("button", { name: "내려놓기 확인" }).click();
     await expect(page).toHaveURL(/\/volunteer$/);
     await expect(page.getByRole("status")).toHaveText(
       "요청을 대기열로 돌려놓았어요",

@@ -3,12 +3,12 @@
 
 import { RESEARCH_LIMITS } from "./research";
 
-/** 서버가 받는 사진 한 장의 상한(디코드 후 바이트). 서버 검사와 같다. */
-export const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
+/** 서버가 받는 사진 한 장의 상한(디코드 후 바이트). 서버 검사와 같은 값(RESEARCH_LIMITS.imageMaxBytes)이다. */
+const MAX_IMAGE_BYTES = RESEARCH_LIMITS.imageMaxBytes;
 /** AI에게 보내는 사진의 긴 변 상한(px). */
-export const IMAGE_LONG_EDGE = 1600;
+const IMAGE_LONG_EDGE = 1600;
 /** 썸네일의 긴 변 시작값(px). 데이터 주소가 한도를 넘으면 줄인다. */
-export const THUMB_LONG_EDGE = 200;
+const THUMB_LONG_EDGE = 200;
 
 /** 긴 변이 limit을 넘지 않게 비율을 지켜 줄인 크기(키우지 않는다). */
 export function fitWithin(width: number, height: number, limit: number): { width: number; height: number } {
@@ -26,7 +26,7 @@ export function dataUrlBytes(dataUrl: string): number {
   return Math.floor((body.length * 3) / 4) - padding;
 }
 
-export interface ShrunkPhoto {
+interface ShrunkPhoto {
   /** 서버로 보낼 JPEG data URL(1.5MB 이하). */
   image: string;
   /** 기기에 남길 작은 미리보기(RESEARCH_LIMITS.thumbMax 글자 이하). */

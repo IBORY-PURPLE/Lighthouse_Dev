@@ -5,6 +5,7 @@ import {
   addAlt,
   allowedPhotoKinds,
   benefitShortcuts,
+  effectivePhotoKind,
   refShortcuts,
   removeAlt,
   RESEARCH_CARDS,
@@ -30,7 +31,7 @@ import {
 export type HelpStatus = "loading" | "failed" | undefined;
 
 /** 사진 카드가 컨테이너에서 받는 동작. */
-export interface PhotoActions {
+interface PhotoActions {
   uploading: boolean;
   describingIndex: number | null;
   onFiles: (files: File[], kind: PhotoKind) => void;
@@ -38,7 +39,7 @@ export interface PhotoActions {
   onDescribe: (index: number) => void;
 }
 
-export interface CardBodyProps {
+interface CardBodyProps {
   id: CardId;
   state: ResearchState;
   update: (change: (current: ResearchState) => ResearchState) => void;
@@ -52,32 +53,24 @@ export interface CardBodyProps {
   onStatus: (message: string) => void;
 }
 
-// 공용 문구에 없는 카드별 안내(찾는 중·못 찾음). 말투는 해요체.
+// 카드별 "찾는 중"·"못 찾음" 안내(글자는 RESEARCH_COPY에 있다). 말투는 해요체.
 export const SEARCH_COPY = {
   model: { searching: RESEARCH_COPY.model.searching, failed: RESEARCH_COPY.model.failed },
-  alts: {
-    searching: "비슷한 기종을 찾는 중이에요.",
-    failed: "AI가 비슷한 기종을 찾지 못했어요. 쇼핑몰에서 직접 확인해 주세요.",
-  },
-  benefits: { searching: "혜택 관련 페이지를 찾는 중이에요.", failed: RESEARCH_COPY.benefits.notFound },
-  refs: { searching: "참고 글을 찾는 중이에요.", failed: RESEARCH_COPY.refs.notFound },
+  alts: { searching: RESEARCH_COPY.alts.searching, failed: RESEARCH_COPY.alts.failed },
+  benefits: { searching: RESEARCH_COPY.benefits.searching, failed: RESEARCH_COPY.benefits.notFound },
+  refs: { searching: RESEARCH_COPY.refs.searching, failed: RESEARCH_COPY.refs.notFound },
 } as const;
-
-export const RETRY_LABEL = "다시 찾기";
-const FIXED_NOTE = "시연용 고정 후보";
-const SOURCE_LABEL = "출처 보기";
-const PHOTO_DESCRIBING = "사진 설명을 만드는 중이에요.";
-const AI_QUESTION_TITLE = "AI 질문";
-
-export { AI_QUESTION_TITLE, PHOTO_DESCRIBING };
 
 function AiBox({
   title,
   testId,
+  action,
   children,
 }: {
   title: string;
   testId: string;
+  /** 머리 오른쪽에 둘 버튼(다시 찾기). */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   const titleId = `${testId}-title`;
@@ -88,7 +81,10 @@ function AiBox({
           <span className="rc-ai-kicker">{RESEARCH_COPY.aiBoxTitle}</span>
           {title}
         </h3>
-        <span className="vol-chip vol-chip--outline">{RESEARCH_COPY.aiBoxMark}</span>
+        <span className="rc-ai-marks">
+          <span className="vol-chip vol-chip--outline">{RESEARCH_COPY.aiBoxMark}</span>
+          {action}
+        </span>
       </div>
       {children}
     </section>
@@ -105,10 +101,10 @@ function Searching({ text }: { text: string }) {
   );
 }
 
-function Shortcuts({ items, heading }: { items: ResearchShortcut[]; heading?: string }) {
+function Shortcuts({ items, heading }: { items: ResearchShortcut[]; heading: string }) {
   return (
     <div className="rc-shortcuts" data-testid="shortcuts">
-      {heading && <p className="rc-ai-sub">{heading}</p>}
+      <p className="rc-ai-sub">{heading}</p>
       <div className="rc-shortcut-row">
         {items.map((shortcut) => (
           <a
@@ -126,17 +122,10 @@ function Shortcuts({ items, heading }: { items: ResearchShortcut[]; heading?: st
   );
 }
 
-function RetryButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+function RetryButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      type="button"
-      className="vol-btn vol-btn--secondary vol-btn--small rc-retry"
-      aria-disabled={disabled ? true : undefined}
-      onClick={() => {
-        if (!disabled) onClick();
-      }}
-    >
-      {RETRY_LABEL}
+    <button type="button" className="vol-btn vol-btn--secondary vol-btn--small rc-retry" onClick={onClick}>
+      {RESEARCH_COPY.retry}
     </button>
   );
 }
@@ -166,7 +155,7 @@ function CandidateBox({
   const items: ResearchItem[] = help && (help.kind === "model" || help.kind === "alts") ? help.items : [];
   const hasFixed = items.some((item) => item.origin === "fixed");
   return (
-    <AiBox title={title} testId={`ai-${kind}`}>
+    <AiBox title={title} testId={`ai-${kind}`} action={loading ? null : <RetryButton onClick={retry} />}>
       {loading ? (
         <Searching text={copy.searching} />
       ) : items.length === 0 ? (
@@ -174,11 +163,11 @@ function CandidateBox({
           <p className="rc-ai-text" data-testid="ai-failed">
             {copy.failed}
           </p>
-          <Shortcuts items={benefitShortcuts(subject)} />
+          <Shortcuts items={benefitShortcuts(subject)} heading={RESEARCH_COPY.model.shortcutsTitle} />
         </>
       ) : (
         <>
-          {hasFixed && <p className="rc-ai-sub">{FIXED_NOTE}</p>}
+          {hasFixed && <p className="rc-ai-sub">{RESEARCH_COPY.fixedNote}</p>}
           <ul className="rc-chips">
             {items.map((item) => {
               const picked = isPicked(item);
@@ -200,9 +189,9 @@ function CandidateBox({
                       href={item.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      aria-label={`${item.name} ${SOURCE_LABEL}`}
+                      aria-label={`${item.name} ${RESEARCH_COPY.sourceLabel}`}
                     >
-                      {SOURCE_LABEL}
+                      {RESEARCH_COPY.sourceLabel}
                     </a>
                   )}
                 </li>
@@ -211,7 +200,6 @@ function CandidateBox({
           </ul>
         </>
       )}
-      {!loading && <RetryButton onClick={retry} disabled={false} />}
     </AiBox>
   );
 }
@@ -361,6 +349,7 @@ function ModelCard({ state, update, help, helpStatus, subject, retry }: CardBody
             {option.label}
           </button>
         ))}
+        <p className="rc-hint-note">{RESEARCH_COPY.model.purchaseNote}</p>
       </fieldset>
     </>
   );
@@ -392,48 +381,52 @@ function PhotoCard({ state, update, photo, onStatus }: CardBodyProps) {
     { value: "proof", label: RESEARCH_COPY.photo.proof },
     { value: "detail", label: RESEARCH_COPY.photo.detail },
   ];
-  const kindLabel = (value: PhotoKind) => (value === "proof" ? RESEARCH_COPY.photo.proof : RESEARCH_COPY.photo.detail);
+  const tagOf = (value: PhotoKind) => (value === "proof" ? RESEARCH_COPY.photo.proofTag : RESEARCH_COPY.photo.detailTag);
+  const describeBusy = photo.describingIndex !== null;
   return (
     <>
-      <div className="rc-kinds" role="group" aria-label={cardName("photo")}>
-        {kinds.map((entry) => {
-          const disabled = !allowed.includes(entry.value);
-          return (
-            <button
-              key={entry.value}
-              type="button"
-              className={`vol-btn rc-kind${kind === entry.value ? "" : " vol-btn--secondary"}`}
-              aria-pressed={kind === entry.value}
-              aria-disabled={disabled ? true : undefined}
-              onClick={() => {
-                if (disabled) {
-                  onStatus(`리서치만 하면 ${RESEARCH_COPY.photo.detail}만 올릴 수 있어요.`);
-                  return;
-                }
-                setKindChoice(entry.value);
-              }}
-            >
-              {entry.label}
-            </button>
-          );
-        })}
-      </div>
+      <fieldset className="rc-kinds-box">
+        <legend className="vol-label rc-label">{RESEARCH_COPY.photo.kindsTitle}</legend>
+        <div className="rc-kinds">
+          {kinds.map((entry) => {
+            const disabled = !allowed.includes(entry.value);
+            return (
+              <button
+                key={entry.value}
+                type="button"
+                className={`vol-btn rc-kind${kind === entry.value ? "" : " vol-btn--secondary"}`}
+                aria-pressed={kind === entry.value}
+                aria-disabled={disabled ? true : undefined}
+                onClick={() => {
+                  if (disabled) {
+                    onStatus(RESEARCH_COPY.photo.detailOnly);
+                    return;
+                  }
+                  setKindChoice(entry.value);
+                }}
+              >
+                {entry.label}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
 
       <ul className="rc-thumbs" data-testid="photo-list">
         {state.photos.map((item, index) => (
           <li key={`${index}-${item.thumb.length}`} className="rc-thumb-cell" data-testid="photo-item">
             <span className="rc-thumb">
               {/* eslint-disable-next-line @next/next/no-img-element -- 기기에서 만든 data URL 미리보기라 최적화 대상이 아니다. */}
-              <img src={item.thumb} alt={`올린 사진 ${index + 1}`} className="rc-thumb-img" />
-              <span className="rc-thumb-tag">{kindLabel(item.kind)}</span>
+              <img src={item.thumb} alt={RESEARCH_COPY.photo.thumbAlt(index + 1)} className="rc-thumb-img" />
+              <span className="rc-thumb-tag">{tagOf(effectivePhotoKind(state, item))}</span>
             </span>
             <button
               type="button"
               className="rc-thumb-remove"
-              aria-label={`사진 ${index + 1} 지우기`}
+              aria-label={RESEARCH_COPY.photo.removeLabel(index + 1)}
               onClick={() => photo.onRemove(index)}
             >
-              지우기
+              {RESEARCH_COPY.photo.removeButton}
             </button>
           </li>
         ))}
@@ -444,7 +437,11 @@ function PhotoCard({ state, update, photo, onStatus }: CardBodyProps) {
               className="rc-add-photo rc-thumb rc-thumb--add"
               aria-disabled={photo.uploading ? true : undefined}
               onClick={() => {
-                if (!photo.uploading) inputRef.current?.click();
+                if (photo.uploading) {
+                  onStatus(RESEARCH_COPY.photo.uploading);
+                  return;
+                }
+                inputRef.current?.click();
               }}
             >
               <span aria-hidden="true" className="rc-add-plus">
@@ -471,13 +468,13 @@ function PhotoCard({ state, update, photo, onStatus }: CardBodyProps) {
       />
 
       {state.photos.length > 0 && (
-        <AiBox title={RESEARCH_COPY.photo.descriptionTitle} testId="ai-photo">
-          {state.photos.map((item, index) => {
-            const describing = photo.describingIndex === index;
-            return (
+        <>
+          {/* 설명 칸은 봉사자가 쓰고 고치는 글이다. AI 제안 상자 밖에 둬서 AI 초안과 구분한다. */}
+          <div className="rc-describe-list">
+            {state.photos.map((item, index) => (
               <div key={`${index}-${item.thumb.length}`} className="rc-describe">
                 <label htmlFor={`rc-photo-desc-${index}`} className="vol-label rc-label">
-                  {`사진 ${index + 1} 설명`}
+                  {RESEARCH_COPY.photo.descLabel(index + 1)}
                 </label>
                 <textarea
                   id={`rc-photo-desc-${index}`}
@@ -486,21 +483,34 @@ function PhotoCard({ state, update, photo, onStatus }: CardBodyProps) {
                   maxLength={RESEARCH_LIMITS.descriptionMax}
                   onChange={(event) => update((current) => setPhotoDescription(current, index, event.target.value))}
                 />
+              </div>
+            ))}
+          </div>
+          <AiBox title={RESEARCH_COPY.photo.descriptionTitle} testId="ai-photo">
+            <p className="rc-ai-sub">{RESEARCH_COPY.photo.describeNote}</p>
+            {state.photos.map((item, index) => {
+              const describing = photo.describingIndex === index;
+              const visible = describing ? RESEARCH_COPY.photo.describing : RESEARCH_COPY.photo.describe;
+              return (
                 <button
+                  key={`${index}-${item.thumb.length}`}
                   type="button"
-                  className="vol-btn vol-btn--secondary vol-btn--small"
-                  aria-disabled={describing ? true : undefined}
-                  aria-label={`${RESEARCH_COPY.photo.describe} (사진 ${index + 1})`}
+                  className="vol-btn vol-btn--secondary vol-btn--small rc-describe-btn"
+                  aria-disabled={describeBusy ? true : undefined}
                   onClick={() => {
-                    if (!describing) photo.onDescribe(index);
+                    if (describeBusy) {
+                      if (!describing) onStatus(RESEARCH_COPY.photo.describeBusy);
+                      return;
+                    }
+                    photo.onDescribe(index);
                   }}
                 >
-                  {describing ? PHOTO_DESCRIBING : RESEARCH_COPY.photo.describe}
+                  {RESEARCH_COPY.photo.describeButton(visible, index + 1)}
                 </button>
-              </div>
-            );
-          })}
-        </AiBox>
+              );
+            })}
+          </AiBox>
+        </>
       )}
       <p className="vol-foot">{RESEARCH_COPY.photo.privacy}</p>
     </>
@@ -511,10 +521,13 @@ function AltsCard({ state, update, help, helpStatus, subject, retry, onStatus }:
   const [draft, setDraft] = useState("");
   const full = state.alts.length >= RESEARCH_LIMITS.maxAlts;
   const submit = () => {
-    if (draft.trim() === "") return;
+    if (draft.trim() === "") {
+      onStatus(RESEARCH_COPY.alts.empty);
+      return;
+    }
     const next = addAlt(state, draft);
     if (next === state) {
-      onStatus(full ? RESEARCH_COPY.alts.limitNote : "이미 넣었거나 기종과 같은 이름이에요.");
+      onStatus(full ? RESEARCH_COPY.alts.limitNote : RESEARCH_COPY.alts.duplicate);
       return;
     }
     update((current) => addAlt(current, draft));
@@ -531,7 +544,10 @@ function AltsCard({ state, update, help, helpStatus, subject, retry, onStatus }:
         retry={retry}
         isPicked={(item) => state.alts.includes(item.name)}
         onPick={(item) => {
-          if (state.alts.includes(item.name)) return;
+          if (state.alts.includes(item.name)) {
+            onStatus(RESEARCH_COPY.alts.duplicate);
+            return;
+          }
           if (full) {
             onStatus(RESEARCH_COPY.alts.limitNote);
             return;
@@ -546,10 +562,10 @@ function AltsCard({ state, update, help, helpStatus, subject, retry, onStatus }:
             <button
               type="button"
               className="rc-picked-remove"
-              aria-label={`${alt} 빼기`}
+              aria-label={RESEARCH_COPY.alts.removeLabel(alt)}
               onClick={() => update((current) => removeAlt(current, alt))}
             >
-              빼기
+              {RESEARCH_COPY.alts.remove}
             </button>
           </li>
         ))}
@@ -622,7 +638,7 @@ function LinkBox({
         : refShortcuts(subject);
   const notFound = !loading && links.length === 0 && digest.length === 0;
   return (
-    <AiBox title={title} testId={`ai-${kind}`}>
+    <AiBox title={title} testId={`ai-${kind}`} action={loading ? null : <RetryButton onClick={retry} />}>
       {loading ? (
         <Searching text={copy.searching} />
       ) : (
@@ -641,17 +657,12 @@ function LinkBox({
               onToggle={(link) => update((current) => toggleChecked(current, kind, link))}
             />
           )}
-          {notFound ? (
-            <>
-              <p className="rc-ai-text" data-testid="ai-failed">
-                {kind === "benefits" ? RESEARCH_COPY.benefits.notFound : RESEARCH_COPY.refs.notFound}
-              </p>
-              <Shortcuts items={shortcuts} />
-            </>
-          ) : (
-            <Shortcuts items={shortcuts} />
+          {notFound && (
+            <p className="rc-ai-text" data-testid="ai-failed">
+              {copy.failed}
+            </p>
           )}
-          <RetryButton onClick={retry} disabled={false} />
+          <Shortcuts items={shortcuts} heading={RESEARCH_COPY[kind].shortcutsTitle} />
         </>
       )}
     </AiBox>
@@ -675,11 +686,18 @@ function BenefitsCard(props: CardBodyProps) {
   );
 }
 
+/** 읽은 요약이 있을 때만 "제가 읽은 내용은 여기까지예요"를 머리로 쓴다. 링크만 있으면 "AI가 찾은 참고 글". */
+function refsTitle(help: ResearchResponse | null): string {
+  return help && help.kind === "refs" && help.digest.length > 0
+    ? RESEARCH_COPY.refs.digestTitle
+    : RESEARCH_COPY.refs.linksTitle;
+}
+
 function RefsCard(props: CardBodyProps) {
   const { state, update } = props;
   return (
     <>
-      <LinkBox {...props} kind="refs" title={RESEARCH_COPY.refs.digestTitle} />
+      <LinkBox {...props} kind="refs" title={refsTitle(props.help)} />
       <TextAnswer
         id="rc-refs"
         label={RESEARCH_COPY.refs.inputHint}

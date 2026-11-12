@@ -11,6 +11,7 @@ import {
   canGoPrev,
   canSend,
   canSkip,
+  effectivePhotoKind,
   cardHelper,
   clampStep,
   defaultQuestion,
@@ -154,6 +155,9 @@ describe("카드 판단", () => {
     const optional = goToCard(complete(), "benefits");
     expect(optional.step).toBe(5);
     expect(canSkip(optional)).toBe(true);
+    // 답이 있으면 건너뛴다는 말이 사실이 아니므로 건너뛰기를 보이지 않는다
+    expect(canSkip({ ...optional, benefits: "카드 할인" })).toBe(false);
+    expect(canSkip(goToCard({ ...complete(), refs: "참고" }, "refs"))).toBe(false);
     expect(canGoNext(optional)).toBe(true);
     expect(canSkip(goToCard(complete(), "pros"))).toBe(false);
 
@@ -210,11 +214,14 @@ describe("구매 인증", () => {
     expect(added.photos[0].kind).toBe("detail");
   });
 
-  it("구매 여부를 리서치만으로 바꾸면 착샷은 상세 캡처로 바뀐다", () => {
+  it("F10: 구매 여부를 리서치만으로 바꿔도 저장된 사진 종류는 그대로고, 다시 구매했어요로 돌리면 착샷이 살아난다", () => {
     const changed = withPurchase(complete(), "research");
-    expect(changed.photos.map((entry) => entry.kind)).toEqual(["detail"]);
+    expect(changed.photos.map((entry) => entry.kind)).toEqual(["proof"]);
+    expect(changed.photos.map((entry) => effectivePhotoKind(changed, entry))).toEqual(["detail"]);
     expect(isVerified(changed)).toBe(false);
-    expect(withPurchase(changed, "bought").photos.map((entry) => entry.kind)).toEqual(["detail"]);
+    const back = withPurchase(changed, "bought");
+    expect(back.photos.map((entry) => effectivePhotoKind(back, entry))).toEqual(["proof"]);
+    expect(isVerified(back)).toBe(true);
   });
 });
 
@@ -366,6 +373,7 @@ describe("서버 응답 검사와 저장 상태 읽기", () => {
       complete({
         step: 4,
         summaryText: "정리",
+        summarySource: "volunteer",
         checked: { benefits: [{ title: "혜택", url: "https://a.example/b" }], refs: [] },
       }),
       "pros",
@@ -396,8 +404,8 @@ describe("서버 응답 검사와 저장 상태 읽기", () => {
     expect(messy?.purchase).toBe("unset");
     expect(messy?.model).toBe("");
     expect(messy?.alts).toEqual([]);
-    // 구매 여부가 정해지지 않았으므로 착샷은 상세 캡처로 읽힌다. 모양이 틀린 사진·도움은 버린다.
-    expect(messy?.photos).toEqual([{ kind: "detail", thumb: THUMB, description: "ok" }]);
+    // 저장된 사진 종류는 고치지 않는다(구매 여부는 effectivePhotoKind로 따진다). 모양이 틀린 사진·도움은 버린다.
+    expect(messy?.photos).toEqual([{ kind: "proof", thumb: THUMB, description: "ok" }]);
     expect(messy?.help).toEqual({});
   });
 

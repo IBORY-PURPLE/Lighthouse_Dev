@@ -154,7 +154,7 @@ export async function releaseRequest(requestId: string): Promise<ReleaseResult> 
 
 export type SendResult =
   | { kind: "sent"; sentAt: string }
-  | { kind: "invalid_url" }
+  | { kind: "invalid" }
   | { kind: "not_yours" }
   | { kind: "unauthorized" }
   | { kind: "failed"; message: string };
@@ -172,7 +172,8 @@ export async function sendResult(
   if (result.kind === "ok") return { kind: "sent", sentAt: result.data.sentAt };
   if (result.kind === "unauthorized") return result;
   if (result.status === 403 || result.status === 404) return { kind: "not_yours" };
-  if (result.status === 400 && result.error === "invalid_url") return { kind: "invalid_url" };
+  // 400(주소·길이·모양)은 몇 번을 다시 눌러도 같다. 5xx·네트워크 실패와 다르게 알린다.
+  if (result.status === 400) return { kind: "invalid" };
   return { kind: "failed", message: result.message };
 }
 
@@ -225,11 +226,13 @@ function readLocal(key: string): string | null {
   }
 }
 
-function writeLocal(key: string, value: string) {
+function writeLocal(key: string, value: string): boolean {
   try {
     window.localStorage.setItem(key, value);
+    return true;
   } catch {
     // 저장하지 못해도 다음에 다시 물을 뿐이다.
+    return false;
   }
 }
 
@@ -255,8 +258,9 @@ export function readResearchState(requestId: string): ResearchState {
   return parseStoredState(readLocal(researchStorageKey(requestId))) ?? emptyResearchState();
 }
 
-export function writeResearchState(requestId: string, state: ResearchState) {
-  writeLocal(researchStorageKey(requestId), JSON.stringify(state));
+/** 저장에 성공했나. 가득 찼거나 막힌 저장소면 false(화면이 한 번 알린다). */
+export function writeResearchState(requestId: string, state: ResearchState): boolean {
+  return writeLocal(researchStorageKey(requestId), JSON.stringify(state));
 }
 
 /** 보내기·내려놓기에 성공하면 지운다. */
@@ -265,6 +269,20 @@ export function clearResearchState(requestId: string) {
     window.localStorage.removeItem(researchStorageKey(requestId));
   } catch {
     // 지우지 못해도 다음에 열 때 이 요청은 이미 끝난 상태다.
+  }
+}
+
+/** 옛 요약 화면이 남긴 초안(lh.vol.draft.v1.<id>)은 읽는 코드가 없어졌다. 저장 공간만 차지하므로 지운다. */
+export function clearLegacyDrafts() {
+  try {
+    const stale: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith("lh.vol.draft.v1.")) stale.push(key);
+    }
+    for (const key of stale) window.localStorage.removeItem(key);
+  } catch {
+    // 지우지 못해도 화면은 돌아간다.
   }
 }
 

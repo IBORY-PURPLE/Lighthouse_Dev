@@ -8,13 +8,23 @@ import {
   draftSummaryText,
   emptyResearchState,
   refShortcuts,
+  RESEARCH_COPY,
   RESEARCH_LIMITS,
   subjectOf,
   type ResearchItem,
   type ResearchRequestBody,
   type ResearchResponse,
 } from "./research";
-import { cleanItems, cleanLines, cleanLinks, cleanQuestion, cleanText, urlKey } from "./researchCheck";
+import {
+  cleanItems,
+  cleanLines,
+  cleanLinks,
+  cleanQuestion,
+  cleanText,
+  countObjects,
+  urlKey,
+  type AllowedUrls,
+} from "./researchCheck";
 import { mockResponse } from "./researchMock";
 import {
   askInstructions,
@@ -26,12 +36,19 @@ import {
 } from "./researchPrompt";
 
 // 리서치 AI 호출 3종(search·ask·vision), 가짜 모드, fallback. 운영 모델은 llm.ts의 LLM_MODEL 하나다.
-// search는 gpt-6-luna가 web_search를 받는지 실호출로 확인하지 못했다. 실패하면 조용히 fallback으로 내려간다.
+// search는 gpt-6-luna가 web_search를 받는다(2026-11-13 실호출 확인). 실패하면 조용히 fallback으로 내려간다.
 
-/** 모델 호출이 끝난 뒤의 결과. upstream은 fallback일 때만 있다(상위 서버의 HTTP 상태 코드, 없으면 "none"). */
+/**
+ * fallback일 때의 원인(로그용). 숫자는 상위 서버의 HTTP 상태 코드, timeout은 마감·중단,
+ * empty는 호출은 성공했지만 검사 뒤 쓸 것이 없음, nokey는 키 없음, none은 그 밖의 실패.
+ */
+export type Upstream = number | "timeout" | "empty" | "nokey" | "none";
+
+/** 모델 호출이 끝난 뒤의 결과. upstream은 fallback일 때만 있다. detail은 empty일 때 버려진 개수(kept=<n>/<m>, 숫자만). */
 export interface ResearchOutcome {
   body: ResearchResponse;
-  upstream: number | "none" | null;
+  upstream: Upstream | null;
+  detail?: string;
 }
 
 /** 저장소에서 읽은 요청 값. 요청 문장·브랜드·품목은 저장소 값만 쓴다(화면이 준 값은 쓰지 않는다). */
@@ -56,6 +73,13 @@ function statusOf(error: unknown): number | undefined {
   return typeof status === "number" ? status : undefined;
 }
 
+/** 시간 초과·중단으로 끝났나(SDK의 시간 초과 오류, 중단 신호). */
+function isTimeout(error: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted) return true;
+  const name = (error as { name?: unknown } | null)?.name;
+  return typeof name === "string" && /Timeout|Abort/i.test(name);
+}
+
 /** 모델이 낸 글에서 JSON 객체를 꺼낸다(코드 블록 표시나 앞뒤 설명이 붙어도). 못 꺼내면 null. */
 export function parseJsonObject(text: string): Record<string, unknown> | null {
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
@@ -78,12 +102,12 @@ export function parseJsonObject(text: string): Record<string, unknown> | null {
 
 // ---- 호출 3종 --------------------------------------------------------------------
 
-/** search: Responses API + web_search. 글과, 검색 결과(소스 목록·인용)에 나온 주소 키 집합을 돌려준다. */
+/** search: Responses API + web_search. 글과, 검색 결과(소스 목록·인용)에 나온 주소(비교 키 → 검색 결과의 주소)를 돌려준다. */
 async function callSearch(
   card: SearchCard,
   material: Record<string, unknown>,
   signal: AbortSignal | undefined,
-): Promise<{ text: string; urls: Set<string> }> {
+): Promise<{ text: string; urls: AllowedUrls }> {
   const response = await newClient(SEARCH_TIMEOUT_MS).responses.create(
     {
       model: LLM_MODEL,
@@ -105,10 +129,10 @@ async function callSearch(
     { signal },
   );
 
-  const urls = new Set<string>();
+  const urls = new Map<string, string>();
   const addUrl = (value: unknown) => {
     const key = typeof value === "string" ? urlKey(value) : null;
-    if (key) urls.add(key);
+    if (key && typeof value === "string" && !urls.has(key)) urls.set(key, value.trim());
   };
   const texts: string[] = [];
   for (const output of response.output ?? []) {
@@ -181,29 +205,47 @@ async function callVision(
 
 // ---- 응답 만들기 ---------------------------------------------------------------------
 
+/** 검사 전후 개수(로그에 숫자만 남긴다). */
+interface Tally {
+  kept: number;
+  total: number;
+}
+
+const tallied = <T extends { length: number }>(tally: Tally, raw: unknown, kept: T): T => {
+  tally.total = countObjects(raw);
+  tally.kept = kept.length;
+  return kept;
+};
+
 /** 모델 출력이 검사를 통과하지 못해 쓸 것이 없으면 null(호출한 쪽이 fallback으로 간다). */
 async function liveResponse(
   request: ResearchRequestBody,
   context: ResearchContext,
   signal: AbortSignal | undefined,
+  tally: Tally,
 ): Promise<ResearchResponse | null> {
   const subject = subjectOf(context);
   const base = { 요청: context.product, 브랜드: context.brand, 품목: context.item };
+  // 이 글들에 있는 기종 이름만 AI 글에 나올 수 있다(없는 기종 이름이 든 문장은 버린다).
+  const known = [context.product, context.brand ?? "", context.item ?? ""];
 
   switch (request.kind) {
     case "model": {
       const { text, urls } = await callSearch("model", base, signal);
-      const items = cleanItems(parseJsonObject(text)?.items, urls);
+      const raw = parseJsonObject(text)?.items;
+      const items = tallied(tally, raw, cleanItems(raw, urls));
       return items.length ? { kind: "model", ai: "ok", items } : null;
     }
     case "alts": {
       const { text, urls } = await callSearch("alts", { ...base, 기종: request.model }, signal);
-      const items = cleanItems(parseJsonObject(text)?.items, urls, request.model);
+      const raw = parseJsonObject(text)?.items;
+      const items = tallied(tally, raw, cleanItems(raw, urls, request.model));
       return items.length ? { kind: "alts", ai: "ok", items } : null;
     }
     case "benefits": {
       const { text, urls } = await callSearch("benefits", { ...base, 기종: request.model }, signal);
-      const links = cleanLinks(parseJsonObject(text)?.links, urls);
+      const raw = parseJsonObject(text)?.links;
+      const links = tallied(tally, raw, cleanLinks(raw, urls));
       return links.length
         ? { kind: "benefits", ai: "ok", links, shortcuts: benefitShortcuts(request.model) }
         : null;
@@ -211,32 +253,56 @@ async function liveResponse(
     case "refs": {
       const { text, urls } = await callSearch("refs", { ...base, 기종: request.model }, signal);
       const json = parseJsonObject(text);
-      const links = cleanLinks(json?.links, urls);
+      const links = tallied(tally, json?.links, cleanLinks(json?.links, urls));
       if (!links.length) return null;
       const digest = cleanLines(json?.digest, RESEARCH_LIMITS.maxDigest, RESEARCH_LIMITS.digestMax);
       return { kind: "refs", ai: "ok", digest, links, shortcuts: refShortcuts(request.model) };
     }
     case "pros": {
+      const material = [...known, request.model];
       const json = parseJsonObject(await callAsk("pros", { 요청: context.product, 기종: request.model }, signal));
-      const hints = cleanLines(json?.hints, RESEARCH_LIMITS.maxHints, RESEARCH_LIMITS.hintMax);
+      const hints = tallied(
+        tally,
+        json?.hints,
+        cleanLines(json?.hints, RESEARCH_LIMITS.maxHints, RESEARCH_LIMITS.hintMax, material),
+      );
       if (!hints.length) return null;
       const fallback = defaultQuestion("pros", { subject, model: request.model, alts: [] });
-      return { kind: "pros", ai: "ok", question: cleanQuestion(json?.question, fallback, [request.model]), hints };
+      return {
+        kind: "pros",
+        ai: "ok",
+        question: cleanQuestion(json?.question, fallback, [request.model], material),
+        hints,
+      };
     }
     case "altReason": {
-      const material = { 요청: context.product, 기종: request.model, 대안: request.alts };
-      const json = parseJsonObject(await callAsk("altReason", material, signal));
-      const hints = cleanLines(json?.hints, RESEARCH_LIMITS.maxHints, RESEARCH_LIMITS.hintMax);
+      const material = [...known, request.model, ...request.alts];
+      const json = parseJsonObject(
+        await callAsk("altReason", { 요청: context.product, 기종: request.model, 대안: request.alts }, signal),
+      );
+      const hints = tallied(
+        tally,
+        json?.hints,
+        cleanLines(json?.hints, RESEARCH_LIMITS.maxHints, RESEARCH_LIMITS.hintMax, material),
+      );
       if (!hints.length) return null;
       const fallback = defaultQuestion("altReason", { subject, model: request.model, alts: request.alts });
-      return { kind: "altReason", ai: "ok", question: cleanQuestion(json?.question, fallback, request.alts), hints };
+      return {
+        kind: "altReason",
+        ai: "ok",
+        question: cleanQuestion(json?.question, fallback, request.alts, material),
+        hints,
+      };
     }
     case "photo": {
       const kindText = request.photoKind === "proof" ? "봉사자가 직접 찍은 착샷·사용 인증샷" : "상품 상세페이지 캡처";
       const description = cleanText(
         await callVision(request.image, { 기종: request.model, 사진종류: kindText }, signal),
         RESEARCH_LIMITS.descriptionMax,
+        [...known, request.model],
       );
+      tally.total = 1;
+      tally.kept = description ? 1 : 0;
       return description ? { kind: "photo", ai: "ok", description } : null;
     }
     case "summary": {
@@ -249,19 +315,118 @@ async function liveResponse(
         참고: request.refs,
       };
       const json = parseJsonObject(await callAsk("summary", material, signal));
-      const text = cleanText(json?.text, RESEARCH_LIMITS.summaryAiMax);
+      const text = cleanText(json?.text, RESEARCH_LIMITS.summaryAiMax, [
+        ...known,
+        request.model,
+        request.pros,
+        ...request.alts,
+        request.altReason,
+        request.benefits,
+        request.refs,
+      ]);
+      tally.total = 1;
+      tally.kept = text ? 1 : 0;
       return text ? { kind: "summary", ai: "ok", text } : null;
     }
   }
 }
 
-/** 시연 품목이면 고정 후보 표(demoCandidates.ts)를 후보로 쓴다. 기종 후보와 달리 대안 후보는 이미 고른 기종을 뺀다. */
+/** 이름으로 같은 브랜드를 알아보는 작은 별칭표(시연 품목 고정 후보의 브랜드 거름용). */
+const BRAND_ALIASES: Record<string, readonly string[]> = {
+  sony: ["소니"],
+  소니: ["sony"],
+  logitech: ["로지텍"],
+  로지텍: ["logitech"],
+  tefal: ["테팔"],
+  테팔: ["tefal"],
+  persil: ["퍼실"],
+  퍼실: ["persil"],
+};
+
+function sameBrand(name: string, brand: string): boolean {
+  const key = brand.trim().toLowerCase();
+  const lower = name.toLowerCase();
+  return [key, ...(BRAND_ALIASES[key] ?? [])].some((word) => word !== "" && lower.includes(word));
+}
+
+/**
+ * 요청 문장에서 브랜드를 알아보는 작은 목록. 요청의 brand 칸은 소니 아니면 비어 있어서(parseRequest의 BRANDS는 이용자 흐름과
+ * 같이 쓰므로 건드리지 않는다) 'LG 헤드셋'은 brand=null로 저장된다. 고정 후보와 다른 브랜드가 문장에 있으면 후보를 보이지 않기 위한 것이다.
+ */
+const KNOWN_BRANDS: readonly (readonly string[])[] = [
+  ["sony", "소니"],
+  ["logitech", "로지텍"],
+  ["tefal", "테팔"],
+  ["persil", "퍼실"],
+  ["lg", "엘지"],
+  ["samsung", "삼성"],
+  ["apple", "애플"],
+  ["bose", "보스"],
+  ["jbl"],
+  ["sennheiser", "젠하이저"],
+  ["philips", "필립스"],
+  ["marshall", "마샬"],
+  ["xiaomi", "샤오미"],
+  ["anker", "앤커"],
+  ["dyson", "다이슨"],
+  ["cuckoo", "쿠쿠"],
+  ["leopold", "레오폴드"],
+  ["razer", "레이저"],
+  ["panasonic", "파나소닉"],
+  // 시연용 고정 후보 표(demoCandidates.ts)의 브랜드. 표에 브랜드를 더하면 여기도 더한다(시험이 빠진 것을 잡는다).
+  ["보국", "보국전자"],
+  ["일월"],
+  ["한일", "한일의료기"],
+  ["테크"],
+  ["액츠"],
+  ["키친아트"],
+];
+
+/** 일반 낱말과 겹치는 한글 별칭: 뒤에 이 말이 오면 브랜드가 아니다(레이저 각인 키보드, 레이저 포인터). */
+const NOT_BRAND_AFTER: Readonly<Record<string, RegExp>> = {
+  레이저: /^\s*(?:로|으로|를|을|의)?\s*(?:각인|포인터|프린터|센서|마우스|커팅|제모|레벨|거리)/,
+};
+
+/** 낱말 찾기. 영문은 앞뒤가 영문이 아닌 자리에서, 한글은 앞이 한글이 아닌 자리에서만 찾는다(하이테크 안의 테크, 한일월 안의 일월). */
+export function hasBrandWord(text: string, word: string): boolean {
+  const lower = text.normalize("NFKC").toLowerCase();
+  if (/^[a-z]+$/.test(word)) return new RegExp(`(?<![a-z])${word}(?![a-z])`).test(lower);
+  const at = (from: number): boolean => {
+    const index = lower.indexOf(word, from);
+    if (index < 0) return false;
+    const notBrand = NOT_BRAND_AFTER[word]?.test(lower.slice(index + word.length)) ?? false;
+    return (!notBrand && (index === 0 || !/[가-힣]/.test(lower[index - 1]!))) || at(index + 1);
+  };
+  return at(0);
+}
+
+/** 이 브랜드 묶음(별칭들)이 문장에 있나. 시험과 후보 걸러내기가 같이 쓴다. */
+export function brandGroupIn(text: string, group: readonly string[]): boolean {
+  return group.some((word) => hasBrandWord(text, word));
+}
+
+/** 알려 둔 브랜드 묶음 가운데 문장에 든 첫 번째. */
+export function knownBrandIn(text: string): readonly string[] | null {
+  return KNOWN_BRANDS.find((group) => brandGroupIn(text, group)) ?? null;
+}
+
+/**
+ * 시연 품목이면 고정 후보 표(demoCandidates.ts)를 후보로 쓴다. 기종 후보와 달리 대안 후보는 이미 고른 기종을 뺀다.
+ * 요청에 브랜드가 있으면(저장된 brand 또는 요청 문장에서 알아본 브랜드) 그 브랜드의 후보만 쓴다. 다른 브랜드 기종을 보이지 않는다. 없으면 품목의 후보 전부.
+ */
 function fixedItems(context: ResearchContext, exclude?: string): ResearchItem[] {
   const skip = exclude?.trim().toLowerCase();
+  const brand = context.brand?.trim();
+  const found = brand ? null : knownBrandIn(context.product);
   return demoCandidatesFor(context.item)
     .filter((candidate) => candidate.name.toLowerCase() !== skip)
+    .filter((candidate) => {
+      if (brand) return sameBrand(candidate.name, brand);
+      if (found) return brandGroupIn(candidate.name, found);
+      return true;
+    })
     .slice(0, RESEARCH_LIMITS.maxItems)
-    .map((candidate) => ({ name: candidate.name, note: "시연용 고정 후보", url: candidate.url, origin: "fixed" }));
+    .map((candidate) => ({ name: candidate.name, note: RESEARCH_COPY.fixedNote, url: candidate.url, origin: "fixed" }));
 }
 
 /** AI가 없거나 실패했을 때의 응답: 기본 문구, 고정 후보, 바로가기. 카드는 이것만으로도 진행된다. */
@@ -306,7 +471,7 @@ export function fallbackResponse(request: ResearchRequestBody, context: Research
 
 /**
  * 카드 하나의 AI 도움. 가짜 모드면 고정 응답, 키가 없거나 호출·검사가 실패하면 fallback이다.
- * 던지지 않는다(AI가 실패해도 카드는 진행된다).
+ * 던지지 않는다(AI가 실패해도 카드는 진행된다). fallback이면 원인(upstream)을 같이 돌려준다.
  */
 export async function answerResearch(
   request: ResearchRequestBody,
@@ -314,12 +479,19 @@ export async function answerResearch(
   signal?: AbortSignal,
 ): Promise<ResearchOutcome> {
   if (getLlmMode() === "mock") return { body: mockResponse(request), upstream: null };
-  if (!hasKey()) return { body: fallbackResponse(request, context), upstream: "none" };
+  if (!hasKey()) return { body: fallbackResponse(request, context), upstream: "nokey" };
+  const tally: Tally = { kept: 0, total: 0 };
   try {
-    const body = await liveResponse(request, context, signal);
+    const body = await liveResponse(request, context, signal, tally);
     if (body) return { body, upstream: null };
-    return { body: fallbackResponse(request, context), upstream: "none" };
+    return {
+      body: fallbackResponse(request, context),
+      upstream: "empty",
+      detail: `kept=${tally.kept}/${tally.total}`,
+    };
   } catch (error) {
-    return { body: fallbackResponse(request, context), upstream: statusOf(error) ?? "none" };
+    const status = statusOf(error);
+    const upstream: Upstream = status ?? (isTimeout(error, signal) ? "timeout" : "none");
+    return { body: fallbackResponse(request, context), upstream };
   }
 }

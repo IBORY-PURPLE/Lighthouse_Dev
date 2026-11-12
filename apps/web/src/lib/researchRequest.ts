@@ -4,7 +4,7 @@ import { isUuid } from "./volunteerApi";
 
 // 리서치 요청 본문 검사. 라우트가 쓴다. 사진 본문 한도는 옛 글자 읽기 라우트와 같은 1.5MB다.
 
-export const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = RESEARCH_LIMITS.imageMaxBytes;
 /** base64는 4/3배로 커진다. 나머지 칸 몫을 조금 더한다. */
 export const MAX_BODY_BYTES = Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 4096;
 const IMAGE_DATA_URL = /^data:image\/(jpeg|png);base64,/;

@@ -9,12 +9,12 @@ import {
   type VolunteerRequestView,
 } from "@/lib/volunteerView";
 
-/** 링크를 사람이 읽기 좋게 보인다(%EC… 대신 한글). 주소 자체(href)는 바꾸지 않는다. */
-function readableUrl(url: string): string {
+/** 구매 링크 줄에 함께 보일 사이트 이름(주소의 도메인). 주소 자체(href)는 바꾸지 않는다. */
+function hostOf(url: string): string {
   try {
-    return decodeURI(url);
+    return new URL(url).hostname.replace(/^www\./i, "");
   } catch {
-    return url;
+    return "";
   }
 }
 
@@ -74,8 +74,9 @@ export function SentView({
                 <p className="vol-summary-label">구매 링크</p>
                 <p className="vol-sent-url">
                   <a href={candidate.url} target="_blank" rel="noopener noreferrer">
-                    {readableUrl(candidate.url)}
-                  </a>
+                    구매 링크 열기
+                  </a>{" "}
+                  <span className="vol-sent-host">{hostOf(candidate.url)}</span>
                 </p>
                 {candidate.guide && (
                   <>
@@ -89,7 +90,8 @@ export function SentView({
                     <ul className="vol-sent-summary">
                       {candidate.summary.map((entry) => (
                         <li key={`${entry.label}-${entry.value}`}>
-                          <span className="vol-sent-key">{entry.label}</span> <span>{entry.value}</span>
+                          <span className="vol-sent-key">{entry.label}</span>{" "}
+                          <span className="vol-sent-value">{entry.value}</span>
                         </li>
                       ))}
                     </ul>
