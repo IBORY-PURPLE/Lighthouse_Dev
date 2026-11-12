@@ -400,8 +400,32 @@ describe("POST /api/chat", () => {
       expect.stringMatching(/^POST \/api\/chat 200 \d+ms$/),
       expect.stringMatching(/^POST \/api\/chat 400 \d+ms$/),
       expect.stringMatching(/^POST \/api\/chat 200 \d+ms$/),
-      expect.stringMatching(/^POST \/api\/chat stream_failed \d+ms$/),
+      expect.stringMatching(/^POST \/api\/chat stream_failed \d+ms upstream=none$/),
     ]);
+  });
+
+  it("첫 글자 뒤에 상위 AI 서버가 실패해도 그 서버의 상태 코드만 로그에 남긴다", async () => {
+    const logged: string[] = [];
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args) => {
+        logged.push(args.join(" "));
+      });
+    }
+    const { RateLimitError } = await import("openai");
+
+    create.mockImplementation(async () =>
+      fakeStream(
+        [{ content: "비밀 답변" }],
+        new RateLimitError(429, {}, "비밀 오류", new Headers()),
+      ),
+    );
+    await (await POST(chatRequest(VALID))).text().catch(() => {});
+
+    expect(logged).toEqual([
+      expect.stringMatching(/^POST \/api\/chat 200 \d+ms$/),
+      expect.stringMatching(/^POST \/api\/chat stream_failed \d+ms upstream=429$/),
+    ]);
+    expect(logged.join("\n")).not.toContain("비밀");
   });
 
   it("상위 AI 서버 호출이 실패하면 그 서버의 상태 코드만 로그에 덧붙인다", async () => {
