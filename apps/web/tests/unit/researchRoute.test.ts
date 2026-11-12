@@ -244,6 +244,15 @@ describe("POST /api/volunteer/research", () => {
       const huge = await research(photo(`data:image/png;base64,${"A".repeat(2_300_000)}`), cookie);
       expect(huge.status).toBe(413);
 
+      // 선언한 형식과 실제 바이트 서명이 다르면 415(Codex 1차 지적): 서명이 아닌 바이트를 JPEG로 선언, PNG 바이트를 JPEG로 선언
+      const fakeJpeg = await research(photo("data:image/jpeg;base64,AAAA"), cookie);
+      expect(fakeJpeg.status).toBe(415);
+      expect(await fakeJpeg.json()).toEqual({ ok: false, error: "bad_image_format" });
+      const pngAsJpeg = await research(photo(PNG.replace("image/png", "image/jpeg")), cookie);
+      expect(pngAsJpeg.status).toBe(415);
+      const jpeg = await research(photo("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ=="), cookie);
+      expect(jpeg.status).toBe(200);
+
       const ok = await research(photo(PNG), cookie);
       expect(ok.status).toBe(200);
       expect(chatCreate).not.toHaveBeenCalled();
