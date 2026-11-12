@@ -1,5 +1,4 @@
 import "server-only";
-import Groq, { APIError as GroqApiError } from "groq-sdk";
 import OpenAI from "openai";
 import { LLM_MODEL } from "@/lib/llm";
 import { buildSummaryUserMessage, SUMMARY_INSTRUCTIONS } from "@/lib/summaryPrompt";
@@ -47,7 +46,7 @@ export function getExtractEngine(): ExtractEngine | null {
 export class ExtractError extends Error {
   constructor(
     readonly kind: "rate_limited" | "failed" | "not_configured" | "no_text",
-    /** 상위 서버(OpenAI·Upstage·Groq)가 돌려준 HTTP 상태 코드. 원인 확인용 로그에만 쓴다. */
+    /** 상위 서버(OpenAI·Upstage)가 돌려준 HTTP 상태 코드. 원인 확인용 로그에만 쓴다. */
     readonly upstreamStatus?: number,
   ) {
     super(`extract_${kind}`);
@@ -222,9 +221,9 @@ export const MOCK_SUMMARY_JSON = JSON.stringify({
   ],
 });
 
-/** 요약을 실제로 부를 수 있는지. 가짜 모드거나 Groq 키가 있으면 true. */
+/** 요약을 실제로 부를 수 있는지. 가짜 모드거나 OpenAI 키가 있으면 true. */
 export function isSummaryConfigured(): boolean {
-  return isMockMode() || hasKey("GROQ_API_KEY");
+  return isMockMode() || hasKey("OPENAI_API_KEY");
 }
 
 /** 요약 LLM의 JSON 문자열을 돌려준다. 검사는 라우트가 parseSummaryJson·checkEvidence로 한다. */
@@ -238,17 +237,19 @@ export async function requestSummaryJson({
   signal?: AbortSignal;
 }): Promise<string> {
   if (isMockMode()) return MOCK_SUMMARY_JSON;
-  if (!hasKey("GROQ_API_KEY")) throw new ExtractError("not_configured");
+  if (!hasKey("OPENAI_API_KEY")) throw new ExtractError("not_configured");
   try {
-    const groq = new Groq({
-      apiKey: process.env.GROQ_API_KEY,
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
       maxRetries: 0,
       timeout: SUMMARY_TIMEOUT_MS,
     });
-    const completion = await groq.chat.completions.create(
+    // 추론을 끈다. temperature는 추론이 none일 때만 둘 수 있다.
+    const completion = await client.chat.completions.create(
       {
         model: LLM_MODEL,
         max_completion_tokens: 1500,
+        reasoning_effort: "none",
         temperature: 0,
         response_format: { type: "json_object" },
         messages: [
@@ -260,7 +261,6 @@ export async function requestSummaryJson({
     );
     return completion.choices[0]?.message?.content ?? "";
   } catch (error) {
-    const status = error instanceof GroqApiError ? error.status : undefined;
-    throw new ExtractError(status === 429 ? "rate_limited" : "failed", status);
+    throw toExtractError(error);
   }
 }

@@ -20,7 +20,7 @@ export function GET(request: NextRequest) {
   return NextResponse.json(
     {
       ok: true,
-      groqKeyConfigured: Boolean(process.env.GROQ_API_KEY?.trim()),
+      llmKeyConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
       llmMode: getLlmMode(),
       store: getRequestStore().storeKind(),
       // 엔진 이름만 돌려준다. 키 값은 돌려주지 않는다(TSD §8.1).

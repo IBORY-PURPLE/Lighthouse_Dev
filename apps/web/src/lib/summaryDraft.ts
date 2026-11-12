@@ -50,8 +50,8 @@ export interface RawSummaryField {
 export const MAX_EVIDENCE_LENGTH = 200;
 
 /**
- * 요약에 보내는 글 상한. Groq gpt-oss-120b 기준 4,000자(TSD §8.8).
- * 요약 엔진을 OpenAI로 바꾸면 12,000자로 올린다.
+ * 요약에 보내는 글 상한. 4,000자(TSD §8.8). 요약 엔진이 OpenAI gpt-6-luna로 바뀌었어도
+ * 입력이 길어졌을 때 응답 시간이 제한 안에 드는지 재 보지 못해 올리지 않았다(미확인, 배포 뒤 실측).
  */
 export const SUMMARY_TEXT_LIMIT = 4000;
 

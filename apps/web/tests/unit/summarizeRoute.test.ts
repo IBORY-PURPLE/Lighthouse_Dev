@@ -7,14 +7,14 @@ import { mockPieceText } from "@/lib/extract";
 import { LLM_MODEL } from "@/lib/llm";
 import { isSummaryDraft, SUMMARY_TEXT_LIMIT } from "@/lib/summaryDraft";
 
-// 일반 시험은 실제 Groq를 부르지 않는다(.claude/rules/chatbot-quality.md).
-const { groqCreate } = vi.hoisted(() => ({ groqCreate: vi.fn() }));
-vi.mock("groq-sdk", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("groq-sdk")>();
-  class FakeGroq {
-    chat = { completions: { create: groqCreate } };
+// 일반 시험은 실제 OpenAI를 부르지 않는다(.claude/rules/chatbot-quality.md).
+const { openaiCreate } = vi.hoisted(() => ({ openaiCreate: vi.fn() }));
+vi.mock("openai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openai")>();
+  class FakeOpenAI {
+    chat = { completions: { create: openaiCreate } };
   }
-  return { ...actual, default: FakeGroq };
+  return { ...actual, default: FakeOpenAI, OpenAI: FakeOpenAI };
 });
 
 const ORIGIN = "http://localhost:3000";
@@ -56,10 +56,11 @@ describe("POST /api/volunteer/summarize", () => {
 
   beforeEach(() => {
     vi.stubEnv("DEMO_ACCESS_CODE", "right-code");
+    vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("GROQ_API_KEY", "");
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("EXTRACT_MODE", "mock");
-    groqCreate.mockReset();
+    openaiCreate.mockReset();
     logs = [];
     for (const method of ["info", "log", "warn", "error"] as const) {
       vi.spyOn(console, method).mockImplementation((...args) => {
@@ -148,17 +149,44 @@ describe("POST /api/volunteer/summarize", () => {
     expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
-  it("Groq 키가 없으면 503 not_configured다", async () => {
+  it("OpenAI 키가 없으면 503 not_configured다", async () => {
     vi.stubEnv("EXTRACT_MODE", "");
     const response = await POST(summarizeRequest(VALID));
     expect(response.status).toBe(503);
     expect(await errorOf(response)).toBe("not_configured");
   });
 
-  it("실제 모드는 Groq gpt-oss JSON 모드로 부르고, 틀린 JSON·오류는 502, 429는 429다", async () => {
+  it("옛 GROQ_API_KEY만 있고 OPENAI_API_KEY가 없으면 503이고 부르지 않는다", async () => {
     vi.stubEnv("EXTRACT_MODE", "");
-    vi.stubEnv("GROQ_API_KEY", "fake-groq-key-must-not-appear");
-    groqCreate.mockResolvedValueOnce({
+    vi.stubEnv("GROQ_API_KEY", "old-groq-key");
+    const response = await POST(summarizeRequest(VALID));
+    expect(response.status).toBe(503);
+    expect(await errorOf(response)).toBe("not_configured");
+    expect(openaiCreate).not.toHaveBeenCalled();
+  });
+
+  it("OpenAI가 401을 돌려주면 502이고 로그에 upstream=401만 덧붙는다", async () => {
+    vi.stubEnv("EXTRACT_MODE", "");
+    vi.stubEnv("OPENAI_API_KEY", "fake-openai-key-must-not-appear");
+    const { AuthenticationError } = await import("openai");
+    openaiCreate.mockRejectedValueOnce(
+      new AuthenticationError(401, {}, "비밀 오류", new Headers()),
+    );
+    const response = await POST(summarizeRequest(VALID));
+    expect(response.status).toBe(502);
+    expect(await errorOf(response)).toBe("llm_failed");
+    expect(logs).toEqual([
+      expect.stringMatching(/^POST \/api\/volunteer\/summarize 502 \d+ms upstream=401$/),
+    ]);
+    const all = logs.join("\n");
+    expect(all).not.toContain("비밀");
+    expect(all).not.toContain("fake-openai-key-must-not-appear");
+  });
+
+  it("실제 모드는 OpenAI gpt-6-luna JSON 모드로 부르고, 틀린 JSON·오류는 502, 429는 429다", async () => {
+    vi.stubEnv("EXTRACT_MODE", "");
+    vi.stubEnv("OPENAI_API_KEY", "fake-openai-key-must-not-appear");
+    openaiCreate.mockResolvedValueOnce({
       choices: [
         {
           message: {
@@ -174,22 +202,25 @@ describe("POST /api/volunteer/summarize", () => {
     let response = await POST(summarizeRequest(VALID));
     expect(response.status).toBe(200);
     expect((await response.json()).fields[0].check).toBe("matched");
-    const [request] = groqCreate.mock.calls[0];
+    const [request] = openaiCreate.mock.calls[0];
     expect(request.model).toBe(LLM_MODEL);
+    expect(request.model).toBe("gpt-6-luna");
+    expect(request.reasoning_effort).toBe("none");
+    expect(request.temperature).toBe(0);
     expect(request.response_format).toEqual({ type: "json_object" });
     expect(request.stream).toBeUndefined();
 
-    groqCreate.mockResolvedValueOnce({ choices: [{ message: { content: "not json" } }] });
+    openaiCreate.mockResolvedValueOnce({ choices: [{ message: { content: "not json" } }] });
     response = await POST(summarizeRequest(VALID));
     expect(response.status).toBe(502);
     expect(await errorOf(response)).toBe("llm_failed");
 
-    groqCreate.mockRejectedValueOnce(new Error("boom"));
+    openaiCreate.mockRejectedValueOnce(new Error("boom"));
     response = await POST(summarizeRequest(VALID));
     expect(response.status).toBe(502);
 
-    const { RateLimitError } = await import("groq-sdk");
-    groqCreate.mockRejectedValueOnce(
+    const { RateLimitError } = await import("openai");
+    openaiCreate.mockRejectedValueOnce(
       new RateLimitError(429, {}, "limit", new Headers()),
     );
     response = await POST(summarizeRequest(VALID));
@@ -198,7 +229,7 @@ describe("POST /api/volunteer/summarize", () => {
 
     const all = logs.join("\n");
     expect(all).not.toContain("가짜 헤드셋");
-    expect(all).not.toContain("fake-groq-key-must-not-appear");
+    expect(all).not.toContain("fake-openai-key-must-not-appear");
     // 상위 AI 서버 호출이 실패한 줄에는 그 서버의 상태 코드만 덧붙는다(원인 확인용).
     expect(
       logs.every((line) =>

@@ -5,13 +5,13 @@ import { checkAnswer, type AnswerViolation } from "@/lib/answerRules";
 import { getLlmMode, LLM_MODEL, streamAnswer } from "@/lib/llm";
 import questions from "./questions.json";
 
-// 실제 Groq를 부르는 유일한 시험이다(.claude/rules/chatbot-quality.md).
+// 실제 OpenAI를 부르는 유일한 시험이다(.claude/rules/chatbot-quality.md).
 // 키가 보이지 않으면 호출 시험을 건너뛴다. 건너뛴 것은 통과가 아니다(ai.md 블록 4).
 
 const INTERVAL_MS = 7_000;
 /** Playwright가 apps/web/test-results를 비우므로 저장소 루트에 남긴다. */
 const RESULTS_DIR = path.resolve(import.meta.dirname, "../../../../test-results");
-const hasKey = Boolean(process.env.GROQ_API_KEY?.trim());
+const hasKey = Boolean(process.env.OPENAI_API_KEY?.trim());
 
 describe("챗봇 시험 질문", () => {
   it("20개이고 id가 겹치지 않으며 본문과 품목이 있다", () => {
@@ -46,7 +46,7 @@ interface AnswerRecord {
   ms: number;
 }
 
-describe.skipIf(!hasKey)("실제 Groq 답변", () => {
+describe.skipIf(!hasKey)("실제 OpenAI 답변", () => {
   const records: AnswerRecord[] = [];
 
   beforeAll(() => {
