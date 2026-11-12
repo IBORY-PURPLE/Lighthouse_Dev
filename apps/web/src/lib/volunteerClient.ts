@@ -1,8 +1,16 @@
+import {
+  emptyResearchState,
+  isResearchResponse,
+  parseStoredState,
+  researchStorageKey,
+  type ResearchRequestBody,
+  type ResearchResponse,
+  type ResearchState,
+} from "./research";
 import { STATUS } from "./speech";
 import {
   VOLUNTEER_MESSAGES,
   type QueueData,
-  type CandidateView,
   type SentCandidate,
   type SentResult,
   type VolunteerRequestView,
@@ -83,13 +91,26 @@ export function fetchRequest(requestId: string): Promise<ApiOutcome<DetailRespon
   return call<DetailResponse>(`/api/volunteer/requests/${requestId}`);
 }
 
-export interface CandidatesResponse {
-  source: "demo";
-  candidates: CandidateView[];
-}
+export type ResearchOutcome =
+  | { kind: "ok"; response: ResearchResponse }
+  | { kind: "unauthorized" }
+  | { kind: "failed"; status: number };
 
-export function fetchCandidates(requestId: string): Promise<ApiOutcome<CandidatesResponse>> {
-  return call<CandidatesResponse>(`/api/volunteer/requests/${requestId}/candidates`);
+/**
+ * 리서치 챗의 AI 도움 한 번. 4xx·5xx·네트워크 오류·모양이 틀린 응답은 모두 failed다.
+ * 화면은 failed여도 카드를 진행한다(기본 질문·바로가기).
+ */
+export async function requestResearch(body: ResearchRequestBody): Promise<ResearchOutcome> {
+  const result = await call<unknown>("/api/volunteer/research", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (result.kind === "unauthorized") return result;
+  if (result.kind === "failed") return { kind: "failed", status: result.status };
+  return isResearchResponse(result.data)
+    ? { kind: "ok", response: result.data }
+    : { kind: "failed", status: 200 };
 }
 
 export type ClaimResult =
@@ -226,6 +247,24 @@ function writeSession(key: string, value: string | null) {
     else window.sessionStorage.setItem(key, value);
   } catch {
     // 새 요청 표시와 한 번 보이는 안내만 잃는다.
+  }
+}
+
+/** 이 기기에 남긴 리서치 챗 진행 상태. 없거나 깨졌으면 처음 상태. */
+export function readResearchState(requestId: string): ResearchState {
+  return parseStoredState(readLocal(researchStorageKey(requestId))) ?? emptyResearchState();
+}
+
+export function writeResearchState(requestId: string, state: ResearchState) {
+  writeLocal(researchStorageKey(requestId), JSON.stringify(state));
+}
+
+/** 보내기·내려놓기에 성공하면 지운다. */
+export function clearResearchState(requestId: string) {
+  try {
+    window.localStorage.removeItem(researchStorageKey(requestId));
+  } catch {
+    // 지우지 못해도 다음에 열 때 이 요청은 이미 끝난 상태다.
   }
 }
 

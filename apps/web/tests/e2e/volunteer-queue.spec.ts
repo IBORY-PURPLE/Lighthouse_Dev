@@ -227,17 +227,19 @@ test.describe("봉사자 입장·목록·맡기", () => {
       .click();
     await expect(page).toHaveURL(/\/volunteer\/requests\//);
 
-    // 상세: 이용자가 한 말, 구조화 줄, 진행 중.
+    // 리서치 챗: 이용자가 한 말, 구조화 줄, 첫 질문.
     await expect(
-      page.getByRole("heading", { level: 1, name: "요청 상세" }),
+      page.getByRole("heading", { level: 1, name: "리서치 챗" }),
     ).toBeFocused();
-    await expect(page.getByText("진행 중", { exact: true })).toBeVisible();
+    await expect(page.getByText("질문 1 / 7", { exact: true })).toBeVisible();
     await expect(page.getByText("이용자가 한 말")).toBeVisible();
     await expect(page.getByText(FIRST_DEMO_QUOTE)).toBeVisible();
     await expect(
       page.getByText("품목 헤드셋 · 예산 30만 원 안쪽 · 새 제품"),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "내려놓기" })).toBeVisible();
+    // 화면 이동 직후에는 문서 제목이 잠깐 비어 있을 수 있어 제목이 채워진 뒤 접근성을 본다.
+    await expect(page).toHaveTitle(/.+/);
     await expectNoBlockingAxe(page);
 
     await page.goto("/volunteer");
@@ -267,7 +269,7 @@ test.describe("봉사자 입장·목록·맡기", () => {
     await expectNoBlockingAxe(page);
     await mine.getByRole("link", { name: "이어서 하기" }).click();
     await expect(
-      page.getByRole("heading", { level: 1, name: "요청 상세" }),
+      page.getByRole("heading", { level: 1, name: "리서치 챗" }),
     ).toBeVisible();
     await expect(page.getByText(FIRST_DEMO_QUOTE)).toBeVisible();
     await page.context().close();

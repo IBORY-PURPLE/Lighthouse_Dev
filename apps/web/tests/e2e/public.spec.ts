@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
@@ -8,12 +7,6 @@ import { MATCH_TIMEOUT_MS } from "../../src/lib/matchHandoff";
 import { REQUEST_TIMEOUT_MS } from "../../src/lib/requestRecord";
 import { installFakeSpeech, say } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
-import {
-  claimDemo,
-  FIRST_DEMO_QUOTE,
-  makeSyntheticDetailImage,
-  refill,
-} from "./helpers/volunteerFlow";
 
 // 접근 코드는 저장소 루트 .demo-access.local의 첫 줄에서만 읽는다.
 function readAccessCode(): string {
@@ -176,123 +169,4 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
         violation.impact === "critical" || violation.impact === "serious",
     ),
   ).toEqual([]);
-});
-
-// ④ 실제 엔진으로 1회 완주한다(실행마다 엔진 호출이 조각 수만큼 든다. 돌리기 전에 누계를 본다).
-// 입장 → 시연용 요청 다시 채우기 → 헤드셋 맡기 → 에이전트 창에서 캡처 1장 올리기 → 후보 1에 초안 저장
-// → 요약 확인(후보 1 확인) → 보내기 → 완료 화면 → 목록으로. 끝에서 다시 채워 정리한다. 초안 값과 근거 원문은 기록하지 않는다(항목 이름과 check만).
-test("④ 입장·맡기·캡처 올리기·초안·보내기 완주", async ({ page }) => {
-  test.setTimeout(300_000);
-  const samplePath = path.resolve(
-    process.cwd(),
-    "../..",
-    "test-results/vision-samples/public/sample.jpg",
-  );
-  const hasSample = existsSync(samplePath);
-  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": `test-${randomUUID()}` });
-
-  // 입장(코드와 별명). 이 기기가 봉사자가 된다.
-  await page.goto("/volunteer");
-  await page.getByLabel("입장 코드").fill(readAccessCode());
-  await page.getByLabel("별명").fill("시험");
-  await page.getByRole("button", { name: "시작하기" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
-  await refill(page);
-  await claimDemo(page, FIRST_DEMO_QUOTE);
-
-  const pieces: Array<{ pieceIndex: number; status: number; engineMs: number | null; roundTripMs: number }> = [];
-  let engine: string | null = null;
-  let llmMs: number | null = null;
-  let summarizeStatus: number | null = null;
-  let summarizeCalls = 0;
-  let draftBody: { fields: Array<{ key: string; label: string; check: string }> } | null = null;
-  page.on("response", async (response) => {
-    const url = response.url();
-    const timing = response.headers()["server-timing"] ?? "";
-    if (url.includes("/api/volunteer/extract-text")) {
-      const request = response.request();
-      const body = (await response.json().catch(() => null)) as { pieceIndex?: number; engine?: string } | null;
-      if (body?.engine) engine = body.engine;
-      const engineMatch = /engine;dur=(\d+)/.exec(timing);
-      pieces.push({
-        pieceIndex: body?.pieceIndex ?? request.postDataJSON()?.pieceIndex,
-        status: response.status(),
-        engineMs: engineMatch ? Number(engineMatch[1]) : null,
-        // 요청 시작부터 응답 끝까지(Playwright 요청 시간 기록).
-        roundTripMs: Math.round(request.timing().responseEnd),
-      });
-    }
-    if (url.includes("/api/volunteer/summarize")) {
-      summarizeCalls += 1;
-      summarizeStatus = response.status();
-      const llmMatch = /llm;dur=(\d+)/.exec(timing);
-      llmMs = llmMatch ? Number(llmMatch[1]) : null;
-      draftBody = await response.json().catch(() => null);
-    }
-  });
-
-  await page.getByRole("button", { name: "쇼핑 에이전트 열기" }).click();
-  const dialog = page.getByRole("dialog", { name: "쇼핑 에이전트" });
-  await expect(dialog.getByRole("button", { name: "캡처 올리기 · 후보 1에 저장" })).toBeVisible();
-
-  const startedAt = Date.now();
-  if (hasSample) {
-    await page.getByTestId("capture-input").setInputFiles(samplePath);
-  } else {
-    const buffer = await makeSyntheticDetailImage(page);
-    await page.getByTestId("capture-input").setInputFiles({
-      name: "synthetic-detail.png",
-      mimeType: "image/png",
-      buffer,
-    });
-  }
-  console.log(`이미지: ${hasSample ? "실제 캡처" : "합성 이미지 기준(실제 캡처 없음)"}`);
-
-  await expect(dialog.getByRole("status")).toHaveText(
-    /^캡처 1장을 후보 1에 저장했습니다\. 요약 초안이 도착했습니다\./,
-    { timeout: 240_000 },
-  );
-  const totalMs = Date.now() - startedAt;
-  await expect(page.locator(".vol-cand").first().locator(".vol-chip-btn")).toHaveText(
-    "캡처 읽음 · 확인 전",
-  );
-
-  const engineMs = pieces.map((p) => p.engineMs).filter((v): v is number => v !== null).sort((a, b) => a - b);
-  const median = engineMs.length ? engineMs[Math.floor(engineMs.length / 2)] : null;
-  console.log(`엔진: ${engine}`);
-  console.log(`조각 수: ${pieces.length}, 상태: ${pieces.map((p) => `${p.pieceIndex}:${p.status}`).join(" ")}`);
-  console.log(`조각별 engine ms: ${pieces.map((p) => p.engineMs).join("/")}, 중앙값 ${median}`);
-  console.log(`조각별 왕복 ms: ${pieces.map((p) => p.roundTripMs).join("/")}`);
-  console.log(`summarize: 호출 ${summarizeCalls}회, 상태 ${summarizeStatus}, llm ms: ${llmMs}`);
-  console.log(`전체 ms(올리기부터 초안까지): ${totalMs}`);
-
-  expect(summarizeStatus).toBe(200);
-  expect(summarizeCalls).toBe(1);
-  const fields = (draftBody as { fields: Array<{ key: string; label: string; check: string }> } | null)?.fields ?? [];
-  console.log(`항목 수: ${fields.length}, 확인 안 됨: ${fields.filter((f) => f.check === "unverified").length}`);
-  console.log(`항목(key/label/check): ${fields.map((f) => `${f.key}/${f.label}/${f.check}`).join(", ")}`);
-  const priceLike = fields.filter((f) => /price|가격|재고|할인|stock|discount/i.test(`${f.key} ${f.label}`));
-  console.log(`가격·재고·할인 key·label: ${priceLike.length}건`);
-  expect(priceLike).toEqual([]);
-  expect(fields.length).toBeGreaterThan(0);
-  expect(pieces.length).toBeGreaterThan(0);
-
-  // 보내기까지: 요약 확인 → 후보 1 확인 → 보내기 → 완료 화면 → 목록으로(보낸 요청이 보인다).
-  await dialog.getByRole("button", { name: "닫기" }).click();
-  await page.getByRole("link", { name: "요약 확인하기" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "요약 확인" })).toBeVisible();
-  await page.getByLabel("구매 가이드", { exact: true }).fill("쇼핑몰에서 ‘구매하기’를 누릅니다.");
-  await page.getByRole("button", { name: "후보 1 확인", exact: true }).click();
-  await page.getByRole("button", { name: "확인한 1개 보내기", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "완료된 요청" })).toBeVisible();
-  await expect(page.getByText("전달 완료", { exact: true })).toBeVisible();
-  await expect(page.getByText("이용자가 들음 아직", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "목록으로", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "이 기기에서 보낸 요청" })).toBeVisible();
-  await expect(page.locator(".vol-card").filter({ hasText: "소니 무선 헤드셋" })).toContainText("전달 완료");
-
-  // 정리: 시연용 요청을 다시 채운다(이 기기에서 보낸 요청도 시연 기본값으로 돌아간다).
-  await page.getByRole("button", { name: /^대기열/ }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
-  await refill(page);
 });

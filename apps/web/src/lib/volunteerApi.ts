@@ -33,8 +33,15 @@ export function succeed(body: unknown, status = 200): NextResponse {
   return NextResponse.json(body, { status, headers: NO_STORE });
 }
 
-export function logLine(method: string, template: string, status: number, startedAt: number) {
-  console.info(`${method} /api/volunteer/${template} ${status} ${Date.now() - startedAt}ms`);
+export function logLine(
+  method: string,
+  template: string,
+  status: number,
+  startedAt: number,
+  /** 로그 끝에 덧붙일 글(예: " kind=model ai=ok"). 글·사진·ID는 넣지 않는다. */
+  suffix = "",
+) {
+  console.info(`${method} /api/volunteer/${template} ${status} ${Date.now() - startedAt}ms${suffix}`);
 }
 
 /**
@@ -63,13 +70,14 @@ export interface VolunteerContext {
 
 /**
  * lh_vol 검사(401) → 봉사자별 횟수 제한(429) → 처리. 저장소 오류는 503 store_unavailable.
- * extraLimit은 더 좁은 제한이 필요한 라우트(시연 다시 채우기)가 넘긴다.
+ * extraLimit은 더 좁은 제한이 필요한 라우트(시연 다시 채우기)가 넘긴다. logSuffix는 로그 한 줄 끝에 붙일 글을 돌려준다.
  */
 export async function runVolunteerRoute(
   request: NextRequest,
   template: string,
   handler: (context: VolunteerContext) => Promise<NextResponse>,
   extraLimit?: (volunteerId: string) => { allowed: true } | { allowed: false; retryAfterSeconds: number },
+  logSuffix?: () => string,
 ): Promise<NextResponse> {
   const startedAt = Date.now();
   const response = await (async () => {
@@ -94,6 +102,6 @@ export async function runVolunteerRoute(
     refreshAccessCookie(request, handled);
     return handled;
   })();
-  logLine(request.method, template, response.status, startedAt);
+  logLine(request.method, template, response.status, startedAt, logSuffix?.());
   return response;
 }

@@ -77,18 +77,22 @@ export function SentView({
                     {readableUrl(candidate.url)}
                   </a>
                 </p>
+                {candidate.guide && (
+                  <>
+                    <p className="vol-summary-label">핵심 정리</p>
+                    <p className="vol-sent-text vol-sent-text--lines">{candidate.guide}</p>
+                  </>
+                )}
                 {candidate.summary.length > 0 && (
                   <>
                     <p className="vol-summary-label">상세 요약</p>
-                    <p className="vol-sent-text">
-                      {candidate.summary.map((entry) => `${entry.label} ${entry.value}`).join(" · ")}
-                    </p>
-                  </>
-                )}
-                {candidate.guide && (
-                  <>
-                    <p className="vol-summary-label">구매 가이드</p>
-                    <p className="vol-sent-text">{candidate.guide}</p>
+                    <ul className="vol-sent-summary">
+                      {candidate.summary.map((entry) => (
+                        <li key={`${entry.label}-${entry.value}`}>
+                          <span className="vol-sent-key">{entry.label}</span> <span>{entry.value}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </>
                 )}
               </li>
