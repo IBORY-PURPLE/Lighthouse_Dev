@@ -15,7 +15,8 @@
     "test:unit": "vitest run",
     "check": "npm run lint && npm run typecheck && npm run test:unit",
     "test:e2e": "playwright test --project=e2e",
-    "test:chatbot": "vitest run --config vitest.chatbot.config.mts",
+    "test:chatbot": "vitest run --config vitest.chatbot.config.mts tests/chatbot/questions.test.ts",
+    "test:research-ai": "vitest run --config vitest.chatbot.config.mts tests/chatbot/research-ai.test.ts",
     "test:public": "playwright test --project=public"
   },
   "dependencies": {
