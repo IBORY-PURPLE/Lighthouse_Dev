@@ -67,7 +67,7 @@ function answerResponse(
   first: string,
   answer: AsyncGenerator<string, void>,
   abort: AbortController,
-  onStreamFailed: () => void,
+  onStreamFailed: (status: number | undefined) => void,
 ) {
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
@@ -79,8 +79,9 @@ function answerResponse(
         const next = await answer.next();
         if (next.done) controller.close();
         else controller.enqueue(encoder.encode(next.value));
-      } catch {
-        onStreamFailed();
+      } catch (error) {
+        // 첫 글자 뒤의 실패도 상위 AI 서버의 상태 코드만 로그에 남긴다(본문·키는 남기지 않는다).
+        onStreamFailed(error instanceof LlmError ? error.upstreamStatus : undefined);
         controller.error(new Error("llm_stream_failed"));
       }
     },
@@ -95,7 +96,7 @@ function answerResponse(
 
 async function handleChat(
   request: NextRequest,
-  onStreamFailed: () => void,
+  onStreamFailed: (status: number | undefined) => void,
   onUpstreamFailed: (status: number | undefined) => void,
 ): Promise<Response> {
   if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
@@ -141,12 +142,14 @@ async function handleChat(
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   const elapsed = () => `${Date.now() - startedAt}ms`;
-  // 첫 글자 전에 상위 AI 서버 호출이 실패했을 때만 채운다(원인 확인용, 상태 코드만).
+  // 첫 글자 전에 상위 AI 서버 호출이 실패했을 때만 채운다(원인 확인용, 상태 코드만). 첫 글자 뒤의 실패는 stream_failed 줄에 남는다.
   let upstream = "";
   const response = await handleChat(
     request,
-    () => {
-      console.info(`POST /api/chat stream_failed ${elapsed()}`);
+    (status) => {
+      console.info(
+        `POST /api/chat stream_failed ${elapsed()} upstream=${status ?? "none"}`,
+      );
     },
     (status) => {
       upstream = ` upstream=${status ?? "none"}`;

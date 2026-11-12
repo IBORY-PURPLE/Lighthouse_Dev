@@ -1,27 +1,32 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { APIConnectionTimeoutError, RateLimitError } from "groq-sdk";
+import { APIConnectionTimeoutError, RateLimitError } from "openai";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maxDuration, POST, runtime } from "@/app/api/chat/route";
 import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
-import { LLM_MODEL, TRUNCATED_NOTICE } from "@/lib/llm";
+import {
+  LLM_MODEL,
+  LlmError,
+  streamAnswer,
+  TRUNCATED_NOTICE,
+} from "@/lib/llm";
 
-// 일반 시험은 실제 Groq를 부르지 않는다(.claude/rules/chatbot-quality.md).
+// 일반 시험은 실제 OpenAI를 부르지 않는다(.claude/rules/chatbot-quality.md).
 const { create, constructed } = vi.hoisted(() => ({
   create: vi.fn(),
   constructed: [] as unknown[],
 }));
 
-vi.mock("groq-sdk", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("groq-sdk")>();
-  class FakeGroq {
+vi.mock("openai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openai")>();
+  class FakeOpenAI {
     chat = { completions: { create } };
     constructor(options: unknown) {
       constructed.push(options);
     }
   }
-  return { ...actual, default: FakeGroq };
+  return { ...actual, default: FakeOpenAI, OpenAI: FakeOpenAI };
 });
 
 interface FakeChunk {
@@ -78,7 +83,8 @@ const errorOf = async (response: Response) =>
 describe("POST /api/chat", () => {
   beforeEach(() => {
     vi.stubEnv("DEMO_ACCESS_CODE", "right-code");
-    vi.stubEnv("GROQ_API_KEY", "test-key");
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    vi.stubEnv("GROQ_API_KEY", "");
     vi.stubEnv("LLM_MODE", "");
     vi.stubEnv("VERCEL_ENV", "");
     create.mockReset();
@@ -123,7 +129,7 @@ describe("POST /api/chat", () => {
     expect((await reader.read()).done).toBe(true);
   });
 
-  it("Groq 호출값이 TSD §9와 같고 대화 기록을 보내지 않는다", async () => {
+  it("OpenAI 호출값이 TSD §9와 같고 대화 기록을 보내지 않는다", async () => {
     await (await POST(chatRequest(VALID))).text();
 
     expect(constructed).toEqual([
@@ -131,7 +137,8 @@ describe("POST /api/chat", () => {
     ]);
     const [params] = create.mock.calls[0];
     expect(params.model).toBe(LLM_MODEL);
-    expect(params.model).toBe("openai/gpt-oss-120b");
+    expect(params.model).toBe("gpt-6-luna");
+    expect(params.reasoning_effort).toBe("none");
     expect(params.stream).toBe(true);
     expect(params.max_completion_tokens).toBe(800);
     expect(params.messages).toHaveLength(2);
@@ -159,7 +166,7 @@ describe("POST /api/chat", () => {
     expect(await response.text()).toBe(`검색어:\n${TRUNCATED_NOTICE}`);
   });
 
-  it("쿠키가 없으면 내용을 보기 전에 401이고 Groq를 부르지 않는다", async () => {
+  it("쿠키가 없으면 내용을 보기 전에 401이고 OpenAI를 부르지 않는다", async () => {
     const response = await POST(chatRequest("not json", { cookie: false }));
     expect(response.status).toBe(401);
     expect(await errorOf(response)).toBe("unauthorized");
@@ -266,15 +273,25 @@ describe("POST /api/chat", () => {
     await other.text();
   });
 
-  it("키가 없으면 503이고 Groq를 부르지 않는다", async () => {
-    vi.stubEnv("GROQ_API_KEY", "  ");
+  it("키가 없으면 503이고 OpenAI를 부르지 않는다", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "  ");
     const response = await POST(chatRequest(VALID));
     expect(response.status).toBe(503);
     expect(await errorOf(response)).toBe("not_configured");
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("Groq 한도는 429다", async () => {
+  it("옛 GROQ_API_KEY만 있고 OPENAI_API_KEY가 없으면 503이고 부르지 않는다", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("GROQ_API_KEY", "old-groq-key");
+    const response = await POST(chatRequest(VALID));
+    expect(response.status).toBe(503);
+    expect(await errorOf(response)).toBe("not_configured");
+    expect(create).not.toHaveBeenCalled();
+    expect(constructed).toEqual([]);
+  });
+
+  it("OpenAI 한도는 429다", async () => {
     create.mockRejectedValue(
       new RateLimitError(429, {}, "limit", new Headers()),
     );
@@ -283,7 +300,7 @@ describe("POST /api/chat", () => {
     expect(response.headers.get("retry-after")).toBe("60");
   });
 
-  it("Groq 시간 초과와 오류는 502다", async () => {
+  it("OpenAI 시간 초과와 오류는 502다", async () => {
     create.mockRejectedValue(new APIConnectionTimeoutError());
     const timedOut = await POST(chatRequest(VALID));
     expect(timedOut.status).toBe(502);
@@ -315,7 +332,32 @@ describe("POST /api/chat", () => {
     await expect(response.text()).rejects.toThrow();
   });
 
-  it("브라우저가 끊으면 Groq 요청도 취소한다", async () => {
+  it("글자가 없는 조각(content null, 역할만, choices 빈 조각)이 섞여도 글자만 모아 돌려준다", async () => {
+    create.mockImplementation(async () =>
+      (async function* () {
+        yield { choices: [{ delta: { role: "assistant" }, finish_reason: null }] };
+        yield { choices: [{ delta: { content: null }, finish_reason: null }] };
+        yield { choices: [{ delta: { content: "검색어:\n" }, finish_reason: null }] };
+        yield { choices: [{ delta: {}, finish_reason: null }] };
+        yield { choices: [{ delta: { content: "1. 소니" }, finish_reason: "stop" }] };
+        yield { choices: [], usage: { total_tokens: 12 } };
+      })(),
+    );
+    const response = await POST(chatRequest(VALID));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("검색어:\n1. 소니");
+  });
+
+  it("글자 조각이 없고 choices가 빈 조각뿐인 답은 502다", async () => {
+    create.mockImplementation(async () =>
+      (async function* () {
+        yield { choices: [], usage: { total_tokens: 3 } };
+      })(),
+    );
+    expect((await POST(chatRequest(VALID))).status).toBe(502);
+  });
+
+  it("브라우저가 끊으면 OpenAI 요청도 취소한다", async () => {
     const response = await POST(chatRequest(VALID));
     const signal: AbortSignal = create.mock.calls[0][1].signal;
     expect(signal.aborted).toBe(false);
@@ -323,9 +365,9 @@ describe("POST /api/chat", () => {
     expect(signal.aborted).toBe(true);
   });
 
-  it("LLM_MODE=mock이면 키 없이 가짜 답변을 주고 Groq를 부르지 않는다", async () => {
+  it("LLM_MODE=mock이면 키 없이 가짜 답변을 주고 OpenAI를 부르지 않는다", async () => {
     vi.stubEnv("LLM_MODE", "mock");
-    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("OPENAI_API_KEY", "");
     const response = await POST(chatRequest(VALID));
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("찾는 순서:");
@@ -335,7 +377,7 @@ describe("POST /api/chat", () => {
   it("production에서는 LLM_MODE=mock을 무시한다", async () => {
     vi.stubEnv("LLM_MODE", "mock");
     vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("OPENAI_API_KEY", "");
     expect((await POST(chatRequest(VALID))).status).toBe(503);
   });
 
@@ -358,8 +400,32 @@ describe("POST /api/chat", () => {
       expect.stringMatching(/^POST \/api\/chat 200 \d+ms$/),
       expect.stringMatching(/^POST \/api\/chat 400 \d+ms$/),
       expect.stringMatching(/^POST \/api\/chat 200 \d+ms$/),
-      expect.stringMatching(/^POST \/api\/chat stream_failed \d+ms$/),
+      expect.stringMatching(/^POST \/api\/chat stream_failed \d+ms upstream=none$/),
     ]);
+  });
+
+  it("첫 글자 뒤에 상위 AI 서버가 실패해도 그 서버의 상태 코드만 로그에 남긴다", async () => {
+    const logged: string[] = [];
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args) => {
+        logged.push(args.join(" "));
+      });
+    }
+    const { RateLimitError } = await import("openai");
+
+    create.mockImplementation(async () =>
+      fakeStream(
+        [{ content: "비밀 답변" }],
+        new RateLimitError(429, {}, "비밀 오류", new Headers()),
+      ),
+    );
+    await (await POST(chatRequest(VALID))).text().catch(() => {});
+
+    expect(logged).toEqual([
+      expect.stringMatching(/^POST \/api\/chat 200 \d+ms$/),
+      expect.stringMatching(/^POST \/api\/chat stream_failed \d+ms upstream=429$/),
+    ]);
+    expect(logged.join("\n")).not.toContain("비밀");
   });
 
   it("상위 AI 서버 호출이 실패하면 그 서버의 상태 코드만 로그에 덧붙인다", async () => {
@@ -369,7 +435,7 @@ describe("POST /api/chat", () => {
         logged.push(args.join(" "));
       });
     }
-    const { AuthenticationError } = await import("groq-sdk");
+    const { AuthenticationError } = await import("openai");
 
     create.mockRejectedValue(
       new AuthenticationError(401, {}, "비밀 오류", new Headers()),
@@ -383,6 +449,56 @@ describe("POST /api/chat", () => {
       expect.stringMatching(/^POST \/api\/chat 502 \d+ms upstream=none$/),
     ]);
     expect(logged.join("\n")).not.toContain("비밀");
+  });
+});
+
+describe("streamAnswer 끊김 방어", () => {
+  beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    vi.stubEnv("LLM_MODE", "");
+    vi.stubEnv("VERCEL_ENV", "");
+    create.mockReset();
+    constructed.length = 0;
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  const request = (signal?: AbortSignal) => ({
+    question: VALID.question,
+    context: VALID.context,
+    signal,
+  });
+
+  it("스트림이 끝난 뒤 신호가 이미 끊겼으면 완성된 답처럼 끝내지 않고 failed로 던진다", async () => {
+    const controller = new AbortController();
+    create.mockImplementation(async () =>
+      (async function* () {
+        yield { choices: [{ delta: { content: "검색어:" }, finish_reason: null }] };
+        controller.abort();
+        // 끊긴 연결에서 SDK가 오류 없이 조용히 반복을 끝낸 경우를 흉내 낸다.
+      })(),
+    );
+    const received: string[] = [];
+    const run = async () => {
+      for await (const text of streamAnswer(request(controller.signal))) {
+        received.push(text);
+      }
+    };
+    await expect(run()).rejects.toMatchObject({ kind: "failed" });
+    await expect(run()).rejects.toBeInstanceOf(LlmError);
+    expect(received).toContain("검색어:");
+  });
+
+  it("신호가 끊기지 않았거나 신호가 없으면 그대로 끝난다", async () => {
+    create.mockImplementation(async () =>
+      fakeStream([{ content: "검색어:" }, { finish: "stop" }]),
+    );
+    const collect = async (signal?: AbortSignal) => {
+      let all = "";
+      for await (const text of streamAnswer(request(signal))) all += text;
+      return all;
+    };
+    expect(await collect(new AbortController().signal)).toBe("검색어:");
+    expect(await collect()).toBe("검색어:");
   });
 });
 

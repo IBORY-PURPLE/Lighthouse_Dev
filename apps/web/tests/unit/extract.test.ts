@@ -10,7 +10,7 @@ import {
   requestSummaryJson,
 } from "@/lib/extract";
 
-// 일반 시험은 실제 OpenAI·Groq·Upstage를 부르지 않는다.
+// 일반 시험은 실제 OpenAI·Upstage를 부르지 않는다.
 const { openaiCreate } = vi.hoisted(() => ({ openaiCreate: vi.fn() }));
 
 vi.mock("openai", () => {
@@ -25,7 +25,8 @@ const IMAGE = `data:image/jpeg;base64,${Buffer.from("fake-jpeg").toString("base6
 function clearKeys() {
   vi.stubEnv("OPENAI_API_KEY", "");
   vi.stubEnv("UPSTAGE_API_KEY", "");
-  vi.stubEnv("GROQ_API_KEY", "");
+  // 옛 Groq 키는 요약에 쓰이지 않는다. 남아 있어도 설정된 것으로 세지 않는다.
+  vi.stubEnv("GROQ_API_KEY", "old-groq-key");
   vi.stubEnv("EXTRACT_MODE", "");
   vi.stubEnv("VERCEL_ENV", "");
 }
@@ -141,7 +142,7 @@ describe("requestSummaryJson", () => {
   beforeEach(clearKeys);
   afterEach(() => vi.unstubAllEnvs());
 
-  it("mock이면 고정 JSON이고, Groq 키가 없으면 설정 안 됨이다", async () => {
+  it("mock이면 고정 JSON이고, OpenAI 키가 없으면(옛 Groq 키만 있어도) 설정 안 됨이다", async () => {
     expect(isSummaryConfigured()).toBe(false);
     await expect(requestSummaryJson({ product: "", text: "가" })).rejects.toMatchObject({
       kind: "not_configured",

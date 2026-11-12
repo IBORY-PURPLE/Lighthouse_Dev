@@ -1,12 +1,12 @@
 import "server-only";
-import Groq, { APIError } from "groq-sdk";
+import OpenAI, { APIError } from "openai";
 import { buildSystemPrompt, type ChatContext } from "@/lib/prompt";
 
 // 답변 스트림. TSD §9. 제품 코드는 streamAnswer만 쓴다.
 
 export type LlmMode = "mock" | "live";
 
-export const LLM_MODEL = "openai/gpt-oss-120b";
+export const LLM_MODEL = "gpt-6-luna";
 export const MAX_COMPLETION_TOKENS = 800;
 export const TRUNCATED_NOTICE = "답변이 길어 일부가 잘렸습니다.";
 
@@ -16,7 +16,7 @@ export function getLlmMode(): LlmMode {
 }
 
 export function isLlmConfigured(): boolean {
-  return getLlmMode() === "mock" || Boolean(process.env.GROQ_API_KEY?.trim());
+  return getLlmMode() === "mock" || Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
 export class LlmError extends Error {
@@ -54,16 +54,18 @@ export async function* streamAnswer(
   }
 
   try {
-    const groq = new Groq({
-      apiKey: process.env.GROQ_API_KEY,
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
       maxRetries: 1,
       timeout: 20_000,
     });
-    const stream = await groq.chat.completions.create(
+    // 추론을 끈다. 기본 추론이 켜져 있으면 추론 토큰이 max_completion_tokens를 먼저 써서 글자 없이 끝날 수 있다.
+    const stream = await client.chat.completions.create(
       {
         model: LLM_MODEL,
         stream: true,
         max_completion_tokens: MAX_COMPLETION_TOKENS,
+        reasoning_effort: "none",
         messages: [
           { role: "system", content: buildSystemPrompt(request.context) },
           { role: "user", content: request.question },
@@ -76,13 +78,15 @@ export async function* streamAnswer(
     let truncated = false;
     for await (const chunk of stream) {
       const choice = chunk.choices[0];
-      const text = choice?.delta.content;
+      const text = choice?.delta?.content;
       if (text) {
         hasText = true;
         yield text;
       }
       if (choice?.finish_reason === "length") truncated = true;
     }
+    // 28초 예산이나 브라우저가 끊은 신호로 반복이 오류 없이 끝나면 끊긴 답이 완성된 답처럼 끝나지 않게 한다.
+    if (request.signal?.aborted) throw new LlmError("failed");
     if (!hasText) throw new LlmError("failed");
     if (truncated) yield `\n${TRUNCATED_NOTICE}`;
   } catch (error) {

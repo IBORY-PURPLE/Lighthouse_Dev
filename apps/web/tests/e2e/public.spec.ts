@@ -66,21 +66,21 @@ test("공개 주소 접근 코드와 health", async ({ request }) => {
   // PR 2: health에 저장소 종류(store)를 더했다(시험 변경). 키 값은 없다.
   expect(Object.keys(body).sort()).toEqual([
     "extractEngine",
-    "groqKeyConfigured",
+    "llmKeyConfigured",
     "llmMode",
     "ok",
     "store",
   ]);
   expect(body.llmMode).toBe("live");
   expect(["supabase", "memory"]).toContain(body.store);
-  console.log(`groqKeyConfigured=${body.groqKeyConfigured}`);
+  console.log(`llmKeyConfigured=${body.llmKeyConfigured}`);
   // memory면 실패가 아니라 "흉내"다(실제 저장소에 연결되지 않음).
   console.log(`store=${body.store}${body.store === "memory" ? " (흉내)" : ""}`);
   console.log(`extractEngine=${body.extractEngine}`);
 });
 
-// 가짜 음성 입력 기준이다. 답변만 실제 Groq이고 실행마다 유료 호출이 1회 든다.
-test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이어 보기, 실제 Groq 답변", async ({
+// 가짜 음성 입력 기준이다. 답변만 실제 OpenAI이고 실행마다 유료 호출이 1회 든다.
+test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이어 보기, 실제 OpenAI 답변", async ({
   page,
 }) => {
   test.setTimeout(120_000);
