@@ -9,12 +9,10 @@ import { POST as claim } from "@/app/api/volunteer/requests/[requestId]/claim/ro
 import { POST as release } from "@/app/api/volunteer/requests/[requestId]/release/route";
 import { POST as result } from "@/app/api/volunteer/requests/[requestId]/result/route";
 import { GET as detail } from "@/app/api/volunteer/requests/[requestId]/route";
-import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import { resetRequestStoresForTest } from "@/lib/requestStore";
 import { readVolunteerId, VOLUNTEER_COOKIE } from "@/lib/volunteerSession";
 
 const ORIGIN = "http://localhost:3000";
-const CODE = "right-code";
 const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 
 let counter = 0;
@@ -43,8 +41,8 @@ function setCookies(response: NextResponse) {
 }
 
 /** 입장해서 lh_vol 쿠키 헤더를 돌려준다. */
-async function signIn(nickname = "민지") {
-  const response = await enter(enterRequest({ code: CODE, nickname }));
+async function signIn() {
+  const response = await enter(enterRequest(undefined));
   expect(response.status).toBe(200);
   const cookies = setCookies(response);
   return `${VOLUNTEER_COOKIE}=${cookies[VOLUNTEER_COOKIE].value}`;
@@ -99,7 +97,8 @@ async function fillDemo(cookie: string) {
 
 describe("봉사자 서버 함수", () => {
   beforeEach(() => {
-    vi.stubEnv("DEMO_ACCESS_CODE", CODE);
+    // 입장 코드가 아니라 lh_vol 서명 비밀이다.
+    vi.stubEnv("DEMO_ACCESS_CODE", "test-signing-secret");
     vi.stubEnv("STORE_MODE", "memory");
     vi.stubEnv("VERCEL", "");
     resetRequestStoresForTest();
@@ -111,8 +110,8 @@ describe("봉사자 서버 함수", () => {
   });
 
   describe("POST /api/volunteer/enter", () => {
-    it("200: lh_vol(HttpOnly·Lax·30일)와 lh_access가 심긴다", async () => {
-      const response = await enter(enterRequest({ code: CODE, nickname: "민지" }));
+    it("200: 코드·별명·본문 없이 lh_vol(HttpOnly·Lax·30일)만 심긴다. lh_access는 심지 않는다", async () => {
+      const response = await enter(enterRequest(undefined));
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ ok: true });
       expect(response.headers.get("cache-control")).toBe("no-store");
@@ -125,155 +124,95 @@ describe("봉사자 서버 함수", () => {
       expect(vol.raw).toMatch(/Path=\//);
       expect(vol.raw).not.toMatch(/Secure/i); // http://localhost
       expect(readVolunteerId(vol.value)).toMatch(/^d-[0-9a-f]{16}$/);
-
-      const access = cookies[ACCESS_COOKIE];
-      expect(access.value).toBe(hashAccessCode(CODE));
-      expect(access.raw).toMatch(/HttpOnly/i);
-      expect(access.raw).toMatch(/Max-Age=604800/);
+      expect(Object.keys(cookies)).toEqual([VOLUNTEER_COOKIE]);
     });
 
-    it("https 주소나 Vercel에서는 쿠키가 Secure다", async () => {
-      vi.stubEnv("VERCEL", "1");
-      const response = await enter(enterRequest({ code: CODE, nickname: "민지" }));
-      const cookies = setCookies(response);
-      expect(cookies[VOLUNTEER_COOKIE].raw).toMatch(/Secure/i);
-      expect(cookies[ACCESS_COOKIE].raw).toMatch(/Secure/i);
-    });
-
-    it("이미 입장한 기기는 같은 ID를 유지한다(새 lh_vol을 심지 않는다)", async () => {
-      const cookie = await signIn();
-      const response = await enter(
-        enterRequest({ code: CODE, nickname: "다른 별명" }, { cookie }),
-      );
-      expect(response.status).toBe(200);
-      const cookies = setCookies(response);
-      expect(cookies[VOLUNTEER_COOKIE]).toBeUndefined();
-      expect(cookies[ACCESS_COOKIE]).toBeDefined();
-    });
-
-    it("lh_access가 있으면 코드 없이 별명만으로 입장한다", async () => {
-      const cookie = `${ACCESS_COOKIE}=${hashAccessCode(CODE)}`;
-      const response = await enter(enterRequest({ nickname: "민지" }, { cookie }));
+    it("본문이 있어도 읽지 않는다(옛 화면이 코드·별명을 보내도 200)", async () => {
+      const response = await enter(enterRequest({ code: "anything", nickname: "민지" }));
       expect(response.status).toBe(200);
       expect(setCookies(response)[VOLUNTEER_COOKIE]).toBeDefined();
     });
 
-    it("틀린 코드나 코드 없음은 401 invalid_code이고 쿠키가 없다", async () => {
-      for (const body of [{ code: "wrong", nickname: "민지" }, { nickname: "민지" }, { code: "", nickname: "민지" }]) {
-        const response = await enter(enterRequest(body));
-        expect(response.status).toBe(401);
-        expect(await response.json()).toEqual({ ok: false, error: "invalid_code" });
-        expect(response.headers.getSetCookie()).toEqual([]);
-      }
+    it("https 주소나 Vercel에서는 쿠키가 Secure다", async () => {
+      vi.stubEnv("VERCEL", "1");
+      const response = await enter(enterRequest(undefined));
+      expect(setCookies(response)[VOLUNTEER_COOKIE].raw).toMatch(/Secure/i);
     });
 
-    it("별명이 비었거나 12자를 넘으면 400 invalid_nickname", async () => {
-      for (const nickname of ["", "   ", "열두글자를넘는아주긴별명입니다"]) {
-        const response = await enter(enterRequest({ code: CODE, nickname }));
-        expect(response.status).toBe(400);
-        expect(await response.json()).toEqual({ ok: false, error: "invalid_nickname" });
-      }
-      // 12자는 된다.
-      expect((await enter(enterRequest({ code: CODE, nickname: "열두글자별명입니다요요" }))).status).toBe(200);
+    it("이미 입장한 기기는 같은 ID를 유지한다(새 lh_vol을 심지 않는다)", async () => {
+      const cookie = await signIn();
+      const response = await enter(enterRequest(undefined, { cookie }));
+      expect(response.status).toBe(200);
+      expect(setCookies(response)[VOLUNTEER_COOKIE]).toBeUndefined();
     });
 
-    it("본문이 JSON이 아니거나 모양이 틀리거나 1KB를 넘으면 400 invalid_request", async () => {
-      for (const body of ["not json", "[]", "null", { code: CODE }, { code: 5, nickname: "민지" }, { nickname: 1 }]) {
-        const response = await enter(enterRequest(body));
-        expect(response.status).toBe(400);
-        expect(await response.json()).toEqual({ ok: false, error: "invalid_request" });
-      }
-      const big = await enter(enterRequest({ code: CODE, nickname: "민지", pad: "x".repeat(1100) }));
-      expect(big.status).toBe(400);
+    it("틀린 lh_vol을 가진 기기는 새 열쇠를 받는다", async () => {
+      const response = await enter(
+        enterRequest(undefined, { cookie: `${VOLUNTEER_COOKIE}=v1.abc.def` }),
+      );
+      expect(response.status).toBe(200);
+      expect(setCookies(response)[VOLUNTEER_COOKIE]).toBeDefined();
     });
 
-    it("같은 주소가 10분에 10회를 넘으면 429(Retry-After)", async () => {
+    it("같은 주소에서 몇 번을 불러도 횟수 제한이 없다(행사장 와이파이는 주소를 같이 쓴다)", async () => {
       const client = freshClient();
-      for (let index = 0; index < 10; index += 1) {
-        const response = await enter(enterRequest({ code: "wrong", nickname: "민지" }, { client }));
-        expect(response.status).toBe(401);
+      for (let index = 0; index < 30; index += 1) {
+        expect((await enter(enterRequest(undefined, { client }))).status).toBe(200);
       }
-      const limited = await enter(enterRequest({ code: CODE, nickname: "민지" }, { client }));
-      expect(limited.status).toBe(429);
-      expect(await limited.json()).toEqual({ ok: false, error: "rate_limited" });
-      expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
-      // 다른 주소는 영향이 없다.
-      expect((await enter(enterRequest({ code: CODE, nickname: "민지" }))).status).toBe(200);
     });
 
-    it("입장 코드가 설정되지 않은 서버는 503 not_configured", async () => {
+    it("서명 비밀(DEMO_ACCESS_CODE)이 없으면 503 not_configured이고 쿠키가 없다", async () => {
       vi.stubEnv("DEMO_ACCESS_CODE", "");
-      const response = await enter(enterRequest({ code: CODE, nickname: "민지" }));
+      const response = await enter(enterRequest(undefined));
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({ ok: false, error: "not_configured" });
+      expect(response.headers.getSetCookie()).toEqual([]);
     });
 
-    it("로그에는 상태 코드와 시간만 남고 별명·코드는 없다", async () => {
+    it("서명 비밀이 바뀌면 이전 기기 쿠키는 무효가 되고 새로 입장해야 한다", async () => {
+      const cookie = await signIn();
+      expect(await (await get(me, "/api/volunteer/me", cookie)).json()).toEqual({ entered: true });
+      vi.stubEnv("DEMO_ACCESS_CODE", "another-secret");
+      expect(await (await get(me, "/api/volunteer/me", cookie)).json()).toEqual({ entered: false });
+      expect((await get(queue, "/api/volunteer/queue", cookie)).status).toBe(401);
+    });
+
+    it("로그에는 상태 코드와 시간만 남는다", async () => {
       const info = vi.mocked(console.info);
-      await enter(enterRequest({ code: CODE, nickname: "비밀별명" }));
+      await enter(enterRequest(undefined));
       const lines = info.mock.calls.map((call) => String(call[0]));
       expect(lines).toHaveLength(1);
       expect(lines[0]).toMatch(/^POST \/api\/volunteer\/enter 200 \d+ms$/);
-      expect(lines[0]).not.toContain("비밀별명");
-      expect(lines[0]).not.toContain(CODE);
     });
   });
 
   describe("GET /api/volunteer/me", () => {
-    it("입장 전: entered false, needsCode true", async () => {
+    it("입장 전: entered false(코드 칸 안내 needsCode는 없다)", async () => {
       const response = await get(me, "/api/volunteer/me");
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ entered: false, needsCode: true });
+      expect(await response.json()).toEqual({ entered: false });
     });
 
-    it("입장 뒤: entered true. lh_access만 있으면 needsCode false", async () => {
+    it("입장 뒤: entered true", async () => {
       const cookie = await signIn();
-      expect(await (await get(me, "/api/volunteer/me", cookie)).json()).toEqual({
-        entered: true,
-        needsCode: true, // lh_access 쿠키는 보내지 않았다
-      });
-      const both = `${cookie}; ${ACCESS_COOKIE}=${hashAccessCode(CODE)}`;
-      expect(await (await get(me, "/api/volunteer/me", both)).json()).toEqual({
-        entered: true,
-        needsCode: false,
-      });
-      const accessOnly = `${ACCESS_COOKIE}=${hashAccessCode(CODE)}`;
-      expect(await (await get(me, "/api/volunteer/me", accessOnly)).json()).toEqual({
-        entered: false,
-        needsCode: false,
-      });
+      expect(await (await get(me, "/api/volunteer/me", cookie)).json()).toEqual({ entered: true });
     });
 
     it("위조한 lh_vol은 entered false", async () => {
-      expect(await (await get(me, "/api/volunteer/me", `${VOLUNTEER_COOKIE}=v1.abc.def`)).json()).toMatchObject({
-        entered: false,
-      });
-    });
-  });
-
-  describe("입장한 기기의 접근 쿠키(lh_access) 새로 고침", () => {
-    it("lh_vol만 있는 요청에 lh_access를 다시 심는다(입장 7일 뒤 /api/chat 401 방지)", async () => {
-      const cookie = await signIn(); // lh_vol만 보낸다
-      for (const [handler, path] of [
-        [queue, "/api/volunteer/queue"],
-        [me, "/api/volunteer/me"],
-      ] as const) {
-        const response = await get(handler, path, cookie);
-        expect(response.status).toBe(200);
-        const access = setCookies(response)[ACCESS_COOKIE];
-        expect(access.value).toBe(hashAccessCode(CODE));
-        expect(access.raw).toMatch(/HttpOnly/i);
-        expect(access.raw).toMatch(/Max-Age=604800/i);
-        expect(access.raw).toMatch(/SameSite=lax/i);
+      for (const forged of [
+        `${VOLUNTEER_COOKIE}=v1.abc.def`,
+        `${VOLUNTEER_COOKIE}=v2.abc`,
+        `${VOLUNTEER_COOKIE}=v1.${"!".repeat(43)}.${"B".repeat(43)}`,
+        `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}.${"B".repeat(43)}`,
+      ]) {
+        expect(await (await get(me, "/api/volunteer/me", forged)).json()).toEqual({ entered: false });
       }
     });
 
-    it("입장하지 않은 요청에는 심지 않는다", async () => {
-      expect(setCookies(await get(me, "/api/volunteer/me"))[ACCESS_COOKIE]).toBeUndefined();
-      const forged = `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}.${"B".repeat(43)}`;
-      const denied = await get(queue, "/api/volunteer/queue", forged);
-      expect(denied.status).toBe(401);
-      expect(setCookies(denied)[ACCESS_COOKIE]).toBeUndefined();
+    it("응답에 접근 쿠키(lh_access)를 심지 않는다", async () => {
+      const cookie = await signIn();
+      expect(Object.keys(setCookies(await get(me, "/api/volunteer/me", cookie)))).toEqual([]);
+      expect(Object.keys(setCookies(await get(queue, "/api/volunteer/queue", cookie)))).toEqual([]);
     });
   });
 
@@ -297,8 +236,8 @@ describe("봉사자 서버 함수", () => {
       }
     });
 
-    it("lh_access만 있어도 봉사자용 함수는 열리지 않는다", async () => {
-      const cookie = `${ACCESS_COOKIE}=${hashAccessCode(CODE)}`;
+    it("옛 접근 쿠키(lh_access)만 있어도 봉사자용 함수는 열리지 않는다", async () => {
+      const cookie = "lh_access=legacy-value";
       expect((await get(queue, "/api/volunteer/queue", cookie)).status).toBe(401);
     });
   });
@@ -352,8 +291,8 @@ describe("봉사자 서버 함수", () => {
     });
 
     it("claim: 200 claimed → 다시 누르면 already_mine, 다른 요청은 409 busy, 남이 누르면 409 already_claimed", async () => {
-      const a = await signIn("가");
-      const b = await signIn("나");
+      const a = await signIn();
+      const b = await signIn();
       const { waiting } = await fillDemo(a);
       const [first, second] = waiting.map((item) => item.requestId);
 
@@ -392,8 +331,8 @@ describe("봉사자 서버 함수", () => {
     });
 
     it("상세: 내 진행 중은 200 {request, result:null}, 남의 것은 403, 없는 것은 404", async () => {
-      const a = await signIn("가");
-      const b = await signIn("나");
+      const a = await signIn();
+      const b = await signIn();
       const { waiting } = await fillDemo(a);
       const target = waiting[0].requestId;
       await idRoute(claim, "POST", target, a);
@@ -418,8 +357,8 @@ describe("봉사자 서버 함수", () => {
     });
 
     it("상세: 이 기기에서 보낸 완료 요청은 결과와 함께 보인다. 다른 기기는 403", async () => {
-      const a = await signIn("가");
-      const b = await signIn("나");
+      const a = await signIn();
+      const b = await signIn();
       const { sent } = await fillDemo(a);
       const done = await idRoute(detail, "GET", sent[0].requestId, a);
       expect(done.status).toBe(200);
@@ -431,8 +370,8 @@ describe("봉사자 서버 함수", () => {
     });
 
     it("release: 내 것은 200 대기로, 남의 것은 403, 없는 것은 404. 그 뒤 다른 봉사자가 맡을 수 있다", async () => {
-      const a = await signIn("가");
-      const b = await signIn("나");
+      const a = await signIn();
+      const b = await signIn();
       const { waiting } = await fillDemo(a);
       const target = waiting[0].requestId;
       await idRoute(claim, "POST", target, a);

@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { devices, expect, type Browser, type Page } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../../playwright.config";
 
 // 봉사자 화면 v1(입장·목록·맡기) 시험 도우미. 컨텍스트마다 x-forwarded-for를 무작위로 해서
-// 입장 횟수 제한(주소별 10분 10회)이 시험끼리 번지지 않게 한다.
+// 주소별 횟수 제한이 시험끼리 번지지 않게 한다.
 
 export const FIRST_DEMO_QUOTE = "“소니 무선 헤드셋 사고 싶어요 · 30만 원 안쪽”";
 export const DEMO_QUOTES = [
@@ -33,23 +32,9 @@ export async function openDevice(
   return context.newPage();
 }
 
-/** /volunteer를 열어 입장 코드(필요하면)와 별명으로 입장하고 대기열 화면까지 간다. */
-export async function enterAs(
-  page: Page,
-  nickname = "민지",
-  { needsCode = true }: { needsCode?: boolean } = {},
-): Promise<void> {
+/** /volunteer를 열면 화면이 스스로 기기 쿠키를 받는다(코드·별명 없음). 대기열 화면까지 기다린다. */
+export async function enterAs(page: Page): Promise<void> {
   await page.goto("/volunteer");
-  await expect(
-    page.getByRole("heading", { level: 1, name: "봉사자 입장" }),
-  ).toBeVisible();
-  if (needsCode) {
-    await page.getByLabel("입장 코드").fill(E2E_ACCESS_CODE);
-    await expect(page.getByLabel("입장 코드")).toHaveValue(E2E_ACCESS_CODE);
-  }
-  await page.getByLabel("별명").fill(nickname);
-  await expect(page.getByLabel("별명")).toHaveValue(nickname);
-  await page.getByRole("button", { name: "시작하기" }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "대기열" }),
   ).toBeVisible();

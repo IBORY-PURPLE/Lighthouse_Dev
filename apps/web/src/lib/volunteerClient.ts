@@ -18,7 +18,6 @@ import {
 
 // 봉사자 화면이 서버 함수를 부르는 브라우저 쪽 도우미와 기기 저장소 접근. 서버 코드를 가져오지 않는다.
 
-export const NICKNAME_KEY = "lh.vol.nickname.v1";
 export const SEEN_KEY = "lh.vol.seen.v1";
 export const FLASH_KEY = "lh.vol.flash.v1";
 
@@ -34,7 +33,6 @@ export interface QueueResponse extends QueueData {
 
 export interface MeResponse {
   entered: boolean;
-  needsCode: boolean;
 }
 
 export interface DetailResponse {
@@ -185,35 +183,16 @@ export type EnterOutcome =
   | { kind: "ok" }
   | { kind: "error"; message: string };
 
-/** 입장. 코드는 lh_access가 없는 기기에서만 보낸다. */
-export async function enterVolunteer(
-  code: string | null,
-  nickname: string,
-): Promise<EnterOutcome> {
-  let response: Response;
+/** 입장. 코드와 별명 없이 기기 쿠키(lh_vol)만 받는다. 이미 받은 기기는 같은 ID를 유지한다. */
+export async function enterVolunteer(): Promise<EnterOutcome> {
   try {
-    response = await fetch("/api/volunteer/enter", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(code === null ? { nickname } : { code, nickname }),
-      cache: "no-store",
-    });
+    const response = await fetch("/api/volunteer/enter", { method: "POST", cache: "no-store" });
+    return response.ok
+      ? { kind: "ok" }
+      : { kind: "error", message: VOLUNTEER_MESSAGES.connectFailed };
   } catch {
     return { kind: "error", message: VOLUNTEER_MESSAGES.connectFailed };
   }
-  if (response.ok) return { kind: "ok" };
-  const body = await readJson(response);
-  const error = typeof body?.error === "string" ? body.error : "";
-  if (response.status === 401 || error === "invalid_code") {
-    return { kind: "error", message: VOLUNTEER_MESSAGES.invalidCode };
-  }
-  if (error === "invalid_nickname") {
-    return { kind: "error", message: VOLUNTEER_MESSAGES.invalidNickname };
-  }
-  if (response.status === 429) {
-    return { kind: "error", message: VOLUNTEER_MESSAGES.enterTooMany };
-  }
-  return { kind: "error", message: VOLUNTEER_MESSAGES.connectFailed };
 }
 
 // ----- 기기 저장소(실패해도 화면은 돌아가야 한다) -----
@@ -285,9 +264,6 @@ export function clearLegacyDrafts() {
     // 지우지 못해도 화면은 돌아간다.
   }
 }
-
-export const readNickname = () => readLocal(NICKNAME_KEY) ?? "";
-export const saveNickname = (nickname: string) => writeLocal(NICKNAME_KEY, nickname);
 
 /** 직전 목록의 대기 요청 id. 없으면 첫 불러오기다. */
 export function readSeen(): string[] | null {

@@ -54,7 +54,7 @@ WBS #8 확정 전 가정(③은 챗봇 대화, ④는 스크린샷 업로드만)
       │   작업 중 값(답, AI 도움, 작은 썸네일)은 기기 localStorage에만 있다
       ▼
 Vercel 서버 함수 (Next.js, Node 22, 기본 지역 iad1 — §11에서 icn1 검토)
-  /enter, /api/health, /api/match(시연 이어 보기)
+  /enter(옛 링크 이동만), /api/health, /api/match(시연 이어 보기)
   /api/requests, /api/requests/{id}                         플로우 A
   /api/volunteer/queue, /api/volunteer/requests/{id}[/claim|/release|/result]   플로우 B ②⑥
   /api/volunteer/research                                   ③④⑤ 리서치 AI (상태 없음)
@@ -89,7 +89,7 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 - v2의 "이미지 조각·글자 읽기 원문·요약 초안·근거 원문은 탭 메모리"와 "대체 경로 이미지는 Storage 비공개 버킷" 행은 v2.1에서 없앴다.
 - 이미지와 상세페이지 원문을 서버에 남기지 않는 이유: 상세페이지 보관은 멘토가 지적한 법적 위험이다. 리서치 챗에서도 서버는 사진을 저장하지 않고, 결과에는 사진 장수와 설명 글만 들어간다.
 - DB는 서버 라우트만 서버 키(secret 또는 service_role)로 SQL 함수(RPC)를 호출해 다룬다. 표는 RLS를 켜고 정책을 두지 않아 브라우저 직접 접근을 막는다. 브라우저에는 Supabase 키를 내보내지 않고 Realtime도 쓰지 않는다.
-- 봉사자 식별: 입장하면 기기 열쇠 쿠키(`lh_vol`)를 받고, 서버는 그 열쇠에서 뽑은 봉사자 ID를 쓴다(`volunteerSession.ts`). 실제 로그인은 범위 밖이다.
+- 봉사자 식별: 입장하면 기기 열쇠 쿠키(`lh_vol`)를 받고, 서버는 그 열쇠에서 뽑은 봉사자 ID를 쓴다(`volunteerSession.ts`). 실제 로그인은 범위 밖이다. QA 기간에는 접근 코드와 입장 코드가 없고 `lh_access` 쿠키도 없다. 링크만 있으면 이용자·봉사자 화면 모두 바로 쓰고, 봉사자 화면은 처음 열 때 스스로 `POST /api/volunteer/enter`를 불러 `lh_vol`을 받는다(쿠키는 비밀이 아니라 기기 번호표다). `DEMO_ACCESS_CODE`는 코드 입력용이 아니라 이 쿠키의 서명 비밀이다. 값을 바꾸면 모든 봉사자 기기의 입장이 풀리고(다시 열면 새로 받는다), 맡은 요청은 새 ID로 바뀌어 이어 보지 못한다. 없으면 입장이 503 `not_configured`다. 되돌리려면 이 변경(PR)을 revert한다.
 
 ## 3. 기술 선택
 
@@ -131,7 +131,7 @@ apps/web/                                   Vercel Root Directory
   src/app/api/volunteer/research/route.ts   리서치 AI(§8.7)
   src/components/{SpeechInput,StatusRegion,DemoHandoff,VolunteerChat}.tsx
   src/components/{ResearchChat,ResearchCards,ResearchSummary,SentView}.tsx   리서치 챗 화면, 카드, 보내기 전 확인, 보낸 결과
-  src/lib/{access,rateLimit,llm,prompt,chat,speech,parseRequest,matchHandoff,volunteers,answerRules}.ts
+  src/lib/{rateLimit,llm,prompt,chat,speech,parseRequest,matchHandoff,volunteers,answerRules}.ts
   src/lib/requestStore.ts                   서버 전용. 저장소 인터페이스, 메모리 구현, Supabase 구현
   src/lib/volunteerView.ts                  화면·서버 공용 타입(VolunteerRequestView 등)
   src/lib/research.ts                       화면·서버 공용. 카드 순서·필수 여부 상수, 상태, 구매 인증, 화면 문구
@@ -155,14 +155,14 @@ apps/web/                                   Vercel Root Directory
 | `GROQ_API_KEY` | 같음(로컬만) | 로컬 실험 서버(`apps/web/experiments/vision/`) 전용. 제품 코드는 읽지 않는다 |
 | `UPSTAGE_API_KEY` | 같음(사람이 등록, 선택) | v2.1에서 글자 읽기를 없앴다. 코드는 더 이상 이 키를 읽지 않는다(Vercel에 남아 있으면 지워도 된다) |
 | Supabase 연동 변수 | Vercel(Supabase 연동이 넣음) | 코드는 URL `SUPABASE_URL ?? NEXT_PUBLIC_SUPABASE_URL`, 키 `SUPABASE_SECRET_KEY ?? SUPABASE_SERVICE_ROLE_KEY`를 읽는다. 값은 보지 않는다 |
-| `DEMO_ACCESS_CODE` | Vercel, 로컬은 시험 설정 | v1 그대로 |
+| `DEMO_ACCESS_CODE` | Vercel, 로컬은 시험 설정 | 코드 입력용이 아니라 봉사자 기기 쿠키(`lh_vol`) 서명 비밀. 값을 바꾸면 모든 봉사자 기기의 입장이 풀린다. 없으면 입장이 503 |
 | `LLM_MODE` | 시험 설정 | `mock`이면 가짜 응답 |
 | `STORE_MODE` | 시험 설정 | `memory`면 서버 메모리 가짜 저장소 |
 | `EXTRACT_MODE` | 시험 설정 | v2에서는 글자 읽기·요약 가짜 응답. v2.1부터는 `/api/health`의 `extractEngine` 값에만 영향. 리서치 AI의 가짜 응답은 `LLM_MODE=mock`이다 |
 
 - 세 `*_MODE`는 모두 `VERCEL_ENV=production`에서 무시하고 실제로 동작한다(v1 `llm.ts:13-16`과 같은 규칙).
 - Supabase 키가 없으면 저장소는 메모리로 떨어지고, `/api/health`의 `store`가 `memory`라고 알린다.
-- 키 파일 규칙(`.env` 미커밋, `.vercelignore`, `.demo-access.local`)은 v1 그대로다.
+- 키 파일 규칙(`.env` 미커밋, `.vercelignore`)은 v1 그대로다. `.demo-access.local`은 더 이상 읽지 않는다.
 
 ## 6. 음성 입력
 
@@ -245,11 +245,11 @@ recognition.maxAlternatives = 1;
 
 ## 8. API
 
-공통: 접근 쿠키가 없으면 401. 사용자 문장, 이미지, 봉사자가 쓴 글은 로그에 남기지 않고 상태 코드, 소요 시간과 라우트별 짧은 분류 값만 남긴다(리서치는 §8.7). 새 라우트의 실패 본문은 `{ "ok": false, "error": "<코드>" }`다. 봉사자 API(`/api/volunteer/*`)는 봉사자 쿠키(`lh_vol`)가 없거나 맞지 않으면 401 `unauthorized`, 경로의 id가 UUID가 아니면 400 `invalid_request`, 저장소 오류는 503 `store_unavailable`, 횟수 초과는 429 `rate_limited`(+`Retry-After`)다.
+공통: QA 기간에는 접근 코드가 없어 이용자 쪽 라우트(`/api/requests`, `/api/match`, `/api/chat`, `/api/health`)는 쿠키 없이 열리고, 남은 보호는 접속 주소별 횟수 제한뿐이다. 사용자 문장, 이미지, 봉사자가 쓴 글은 로그에 남기지 않고 상태 코드, 소요 시간과 라우트별 짧은 분류 값만 남긴다(리서치는 §8.7). 새 라우트의 실패 본문은 `{ "ok": false, "error": "<코드>" }`다. 봉사자 API(`/api/volunteer/*`)는 봉사자 쿠키(`lh_vol`)가 없거나 맞지 않으면 401 `unauthorized`, 경로의 id가 UUID가 아니면 400 `invalid_request`, 저장소 오류는 503 `store_unavailable`, 횟수 초과는 429 `rate_limited`(+`Retry-After`)다.
 
 ### 8.1 v1에서 이어지는 것
 
-- `GET /enter?code=...`, `POST /api/match`: v1 그대로. `/api/match`와 `lh.match.v1`은 ②가 병합될 때까지 시연 이어 보기용이다.
+- `GET /enter?code=...`: 코드를 읽지 않고 쿠키 없이 `/`로 303 이동만 한다(퍼진 옛 링크 유지). `POST /api/match`: v1 그대로. `/api/match`와 `lh.match.v1`은 ②가 병합될 때까지 시연 이어 보기용이다.
 - `GET /api/health`: v1 응답에 `store: "supabase" | "memory"`, `extractEngine: "openai" | "mock" | null`을 더한다. 키 값은 반환하지 않는다. v2.1에서 글자 읽기를 없앴지만 `extractEngine` 필드와 `extract.ts`의 `getExtractEngine`은 남아 있고, 값은 리서치 챗 사진 설명이 실제로 쓰는 조건(OpenAI 키, `LLM_MODE`·`EXTRACT_MODE`의 mock)을 따른다(`upstage` 값은 없앴다). 필드를 없앨지는 정하지 않았다.
 
 ### 8.2 공용 요청 모양

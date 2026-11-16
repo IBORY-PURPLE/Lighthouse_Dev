@@ -14,7 +14,10 @@ const VERSION = "v1";
 const KEY_LENGTH = 43;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
-/** 입장 코드에서 서명 비밀을 만든다. 코드가 설정되지 않았으면 null(늘 무효). */
+/**
+ * 서명 비밀을 DEMO_ACCESS_CODE에서 만든다. QA 기간에는 이 값을 입력받거나 검사하지 않고 서명용으로만 쓴다.
+ * 값을 바꾸면 모든 봉사자 기기 쿠키가 무효가 된다. 설정되지 않았으면 null(늘 무효).
+ */
 function signingSecret(): Buffer | null {
   const code = process.env.DEMO_ACCESS_CODE?.trim();
   if (!code) return null;

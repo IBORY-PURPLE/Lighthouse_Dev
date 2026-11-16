@@ -3,10 +3,8 @@ import AxeBuilder from "@axe-core/playwright";
 import {
   expect,
   test,
-  type APIRequestContext,
   type Page,
 } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
 import { fail, installFakeSpeech, say } from "./helpers/fakeSpeech";
 import {
   answerFlowA,
@@ -80,16 +78,7 @@ async function openUserScreen(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
   await installFakeSpeech(page);
-  await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-  await expect(page).toHaveURL(/\/$/);
-
-  // Windows WebKit은 Secure 쿠키를 저장은 해도 http://localhost로 보내지 않는다.
-  // /enter가 준 값을 그대로 두고 시험 안에서만 Secure를 뺀다. 운영은 HTTPS다.
-  const access = (await context.cookies()).find(
-    (cookie) => cookie.name === "lh_access",
-  );
-  expect(access).toBeDefined();
-  if (access) await context.addCookies([{ ...access, secure: false }]);
+  await page.goto("/");
 }
 
 /** 플로우 A로 세 질문에 답하고(질문 1 = sentence) 요약에서 매칭을 요청한다. */
@@ -274,9 +263,12 @@ test.describe("매칭 흐름", () => {
 });
 
 test.describe("접수 실패 안내", () => {
-  test("쿠키 없음: 접근 코드 안내, 답 유지, 매칭 요청에 초점", async ({
+  test("401(서버가 접근을 거절한 경우): 접근 코드 안내, 답 유지, 매칭 요청에 초점", async ({
     page,
   }) => {
+    await page.route("**/api/requests", (route) =>
+      route.fulfill({ status: 401, json: { ok: false, error: "unauthorized" } }),
+    );
     await installFakeSpeech(page);
     await page.goto("/");
     await hearAndConfirm(page, PASS_SENTENCE);
@@ -505,26 +497,18 @@ test.describe("역할 분리", () => {
 });
 
 test.describe("POST /api/match", () => {
-  async function accessCookie(request: APIRequestContext) {
-    const entered = await request.get(`/enter?code=${E2E_ACCESS_CODE}`, {
-      maxRedirects: 0,
-    });
-    return (entered.headers()["set-cookie"] ?? "").split(";")[0];
-  }
-
-  test("쿠키 없음 401", async ({ request }) => {
+  test("쿠키 없이도 200이다(QA 기간에는 접근 코드가 없다)", async ({ request }) => {
     const response = await request.post("/api/match", {
-      headers: { cookie: "" },
+      headers: { "x-forwarded-for": nextClient() },
       data: { text: PASS_SENTENCE },
     });
-    expect(response.status()).toBe(401);
+    expect(response.status()).toBe(200);
   });
 
   test("길이 초과 400, 200자는 통과, 품목 없음 422", async ({ request }) => {
-    const cookie = await accessCookie(request);
     const post = (text: string) =>
       request.post("/api/match", {
-        headers: { cookie, "x-forwarded-for": nextClient() },
+        headers: { "x-forwarded-for": nextClient() },
         data: { text },
       });
 
@@ -537,9 +521,8 @@ test.describe("POST /api/match", () => {
   });
 
   test("서버 전용 명단의 담당 품목을 응답에 넣지 않는다", async ({ request }) => {
-    const cookie = await accessCookie(request);
     const response = await request.post("/api/match", {
-      headers: { cookie, "x-forwarded-for": nextClient() },
+      headers: { "x-forwarded-for": nextClient() },
       data: { text: PASS_SENTENCE },
     });
     expect(Object.keys((await response.json()).volunteer).sort()).toEqual([
@@ -551,11 +534,10 @@ test.describe("POST /api/match", () => {
   test("분당 31번째는 429이고 다른 접속 주소는 영향이 없다", async ({
     request,
   }) => {
-    const cookie = await accessCookie(request);
     const client = nextClient();
     const post = (forwardedFor: string) =>
       request.post("/api/match", {
-        headers: { cookie, "x-forwarded-for": forwardedFor },
+        headers: { "x-forwarded-for": forwardedFor },
         data: { text: PASS_SENTENCE },
       });
 

@@ -1,5 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
+import { NextResponse } from "next/server";
 import { getExtractEngine } from "@/lib/extract";
 import { getLlmMode } from "@/lib/llm";
 import { getRequestStore } from "@/lib/requestStore";
@@ -9,14 +8,7 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
-export function GET(request: NextRequest) {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
-    return NextResponse.json(
-      { ok: false, error: "unauthorized" },
-      { status: 401, headers: NO_STORE },
-    );
-  }
-
+export function GET() {
   return NextResponse.json(
     {
       ok: true,

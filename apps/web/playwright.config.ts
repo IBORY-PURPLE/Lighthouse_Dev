@@ -1,7 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const E2E_PORT = Number(process.env.E2E_PORT ?? 3100);
-export const E2E_ACCESS_CODE = "e2e-test-code";
 
 const baseURL = process.env.BASE_URL ?? `http://localhost:${E2E_PORT}`;
 
@@ -37,7 +36,8 @@ export default defineConfig({
           LLM_MODE: "mock",
           STORE_MODE: "memory",
           EXTRACT_MODE: "mock",
-          DEMO_ACCESS_CODE: E2E_ACCESS_CODE,
+          // 입장 코드가 아니라 봉사자 기기 쿠키(lh_vol) 서명 비밀이다.
+          DEMO_ACCESS_CODE: "e2e-signing-secret",
         },
       },
 });

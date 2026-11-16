@@ -1,6 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
 
 test("첫 화면이 열리고 접근성 위반이 없다", async ({ page }) => {
   await page.goto("/");
@@ -14,38 +13,24 @@ test("첫 화면이 열리고 접근성 위반이 없다", async ({ page }) => {
   expect(blocking).toEqual([]);
 });
 
-test("/enter와 /api/health 접근 흐름", async ({ request }) => {
-  const wrong = await request.get("/enter?code=wrong", { maxRedirects: 0 });
-  expect(wrong.status()).toBe(401);
-
-  const noCookie = await request.get("/api/health");
-  expect(noCookie.status()).toBe(401);
-
-  const right = await request.get(`/enter?code=${E2E_ACCESS_CODE}`, {
-    maxRedirects: 0,
-  });
-  expect(right.status()).toBe(303);
-  expect(right.headers()["location"]).toBe("/");
-
-  const cookie = (right.headers()["set-cookie"] ?? "").split(";")[0];
-  const health = await request.get("/api/health", {
-    headers: { cookie },
-  });
+test("/api/health는 쿠키 없이 열리고, 옛 /enter 링크는 /로 이동한다", async ({ request }) => {
+  const health = await request.get("/api/health");
   expect(health.status()).toBe(200);
   expect((await health.json()).llmMode).toBe("mock");
+
+  const old = await request.get("/enter?code=old-link-value", { maxRedirects: 0 });
+  expect(old.status()).toBe(303);
+  expect(old.headers()["location"]).toBe("/");
 });
 
-test("브라우저로 맞는 코드를 열면 코드 없는 /로 이동하고 쿠키가 생긴다", async ({
+test("브라우저로 옛 /enter 링크를 열면 코드 없는 /로 이동하고 쿠키는 생기지 않는다", async ({
   page,
   context,
 }) => {
-  await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
+  await page.goto("/enter?code=old-link-value");
   await expect(page).toHaveURL(/\/$/);
-  expect(page.url()).not.toContain(E2E_ACCESS_CODE);
-
-  const cookies = await context.cookies();
-  const access = cookies.find((cookie) => cookie.name === "lh_access");
-  expect(access?.httpOnly).toBe(true);
+  expect(page.url()).not.toContain("old-link-value");
+  expect(await context.cookies()).toEqual([]);
 });
 
 test("음성 시험 페이지가 Next 뒤에서도 열린다", async ({ page }) => {

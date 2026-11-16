@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
 import {
   aiBox,
   answerModel,
@@ -898,7 +897,7 @@ test.describe("봉사자 리서치 챗(가짜 AI 응답 기준)", () => {
     expect(await readStored(page)).not.toBeNull();
 
     const other = await openDevice(browser, baseURL);
-    await enterAs(other, "다른봉사자");
+    await enterAs(other);
     const forbidden = await other.request.post("/api/volunteer/research", {
       data: { requestId: id, kind: "model" },
     });
@@ -1070,7 +1069,7 @@ test.describe("봉사자 리서치 챗(가짜 AI 응답 기준)", () => {
     await page.context().close();
   });
 
-  test("9-2. 카드를 열었을 때 입장 정보(401)가 사라져 있으면 입장 확인 화면으로 돌아간다", async ({
+  test("9-2. 카드를 열었을 때 입장 정보(401)가 사라져 있으면 /volunteer로 돌아가 다시 입장한다", async ({
     browser,
     baseURL,
   }) => {
@@ -1103,7 +1102,7 @@ test.describe("봉사자 리서치 챗(가짜 AI 응답 기준)", () => {
       if (request.url().includes("/api/volunteer"))
         requested.push(request.url());
     });
-    await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
+    await page.goto("/enter?code=old-link-value");
     await expect(page).toHaveURL(/\/$/);
     await expect(
       page.getByRole("heading", { name: "LightHouse" }),
@@ -1124,40 +1123,7 @@ test.describe("봉사자 리서치 챗(가짜 AI 응답 기준)", () => {
     }
   });
 
-  test("11. 접근 쿠키(lh_access)가 끝난 기기도 리서치 카드를 다시 열면 AI 제안이 온다", async ({
-    browser,
-    baseURL,
-  }) => {
-    const page = await openSonyResearch(browser, baseURL);
-    // 입장 7일 뒤처럼 lh_access만 지운다. lh_vol은 30일이라 남아 있다.
-    await page.context().clearCookies({ name: "lh_access" });
-    const names = (await page.context().cookies()).map((cookie) => cookie.name);
-    expect(names).not.toContain("lh_access");
-    expect(names).toContain("lh_vol");
-    // 기기에 남은 AI 제안(캐시)이 있으면 서버를 부르지 않고 그려서 이 시험이 아무것도 확인하지 못한다. 지우고 다시 연다.
-    // 먼저 AI 제안이 기기에 저장될 때까지 기다린다(저장이 지운 뒤에 일어나면 지운 것이 되살아난다).
-    await expect
-      .poll(async () => (await readStored(page)) ?? "")
-      .toContain('"help":{"model"');
-    await page.evaluate(
-      (key) => window.localStorage.removeItem(key),
-      storageKey(page),
-    );
-    const research = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/volunteer/research") &&
-        response.request().method() === "POST",
-    );
-    await page.reload();
-    expect((await research).status()).toBe(200);
-    await expect(
-      page.getByRole("heading", { level: 1, name: "리서치 챗" }),
-    ).toBeVisible();
-    await expect(page.getByTestId("candidate-chip")).toHaveCount(3);
-    await page.context().close();
-  });
-
-  test("9-3. 보내기에서 입장 정보(401)가 사라져 있으면 입장 화면으로 돌아간다", async ({
+  test("9-3. 보내기에서 입장 정보(401)가 사라져 있으면 /volunteer로 돌아가 다시 입장한다", async ({
     browser,
     baseURL,
   }) => {
@@ -1184,7 +1150,7 @@ test.describe("봉사자 리서치 챗(가짜 AI 응답 기준)", () => {
     const id = requestIdOf(page);
     // 다른 봉사자가 시연용 요청 다시 채우기를 누르면 시연 요청이 모두 지워진다.
     const other = await openDevice(browser, baseURL);
-    await enterAs(other, "다른봉사자");
+    await enterAs(other);
     await refill(other);
     await other.context().close();
 
@@ -1606,7 +1572,7 @@ test.describe("봉사자 리서치 챗(가짜 AI 응답 기준)", () => {
   test("19. 지워진 옛 요약 주소는 봉사자용 한국어 404로, 이용자 쪽 없는 주소는 바뀌지 않는다", async ({
     page,
   }) => {
-    await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
+    await page.goto("/enter?code=old-link-value");
     const gone = await page.goto(
       "/volunteer/requests/6f1c2e4a-1111-4222-8333-444455556666/summary",
     );

@@ -3,10 +3,8 @@ import AxeBuilder from "@axe-core/playwright";
 import {
   expect,
   test,
-  type APIRequestContext,
   type Page,
 } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
 import { fail, installFakeSpeech, say } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
 
@@ -56,15 +54,7 @@ async function openVolunteer(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
   await installFakeSpeech(page);
-  await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-  await expect(page).toHaveURL(/\/$/);
-
-  // Windows WebKit은 Secure 쿠키를 http://localhost로 보내지 않는다(match.spec.ts 참고).
-  const access = (await context.cookies()).find(
-    (cookie) => cookie.name === "lh_access",
-  );
-  expect(access).toBeDefined();
-  if (access) await context.addCookies([{ ...access, secure: false }]);
+  await page.goto("/");
 
   await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
   // PR 2: 대기번호 화면에서는 "접수 완료" 제목에 초점이 있다. 이어 보기 버튼은 그 아래에 있다.
@@ -273,9 +263,11 @@ test.describe("봉사자 챗봇", () => {
 });
 
 test.describe("챗봇 오류 안내", () => {
-  test("쿠키 없음: 접근 코드 안내, 다시 시도에 초점", async ({ page, context }) => {
+  test("401(서버가 접근을 거절한 경우): 접근 코드 안내, 다시 시도에 초점", async ({ page }) => {
+    await page.route("**/api/chat", (route) =>
+      route.fulfill({ status: 401, json: { ok: false, error: "unauthorized" } }),
+    );
     await openVolunteer(page);
-    await context.clearCookies();
     await ask(page);
 
     await expect(status(page)).toHaveText(STATUS.noAccess);
@@ -418,11 +410,7 @@ test.describe("역할 분리", () => {
     const context = page.context();
     await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
     await installFakeSpeech(page);
-    await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-    const access = (await context.cookies()).find(
-      (cookie) => cookie.name === "lh_access",
-    );
-    if (access) await context.addCookies([{ ...access, secure: false }]);
+    await page.goto("/");
 
     await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
     await expect(
@@ -441,29 +429,20 @@ test.describe("POST /api/chat", () => {
     context: { brand: "Sony", item: "헤드셋" },
   };
 
-  async function accessCookie(request: APIRequestContext) {
-    const entered = await request.get(`/enter?code=${E2E_ACCESS_CODE}`, {
-      maxRedirects: 0,
-    });
-    return (entered.headers()["set-cookie"] ?? "").split(";")[0];
-  }
-
-  test("쿠키 없음 401", async ({ request }) => {
+  test("쿠키 없이도 200이다(QA 기간에는 접근 코드가 없다)", async ({ request }) => {
     const response = await request.post("/api/chat", {
-      headers: { cookie: "" },
+      headers: { "x-forwarded-for": nextClient() },
       data: VALID,
     });
-    expect(response.status()).toBe(401);
-    expect((await response.json()).error).toBe("unauthorized");
+    expect(response.status()).toBe(200);
   });
 
   test("가짜 답변 text/plain, 질문 301자와 2KB 초과는 400", async ({
     request,
   }) => {
-    const cookie = await accessCookie(request);
     const post = (data: unknown) =>
       request.post("/api/chat", {
-        headers: { cookie, "x-forwarded-for": nextClient() },
+        headers: { "x-forwarded-for": nextClient() },
         data: data as object,
       });
 
@@ -490,11 +469,10 @@ test.describe("POST /api/chat", () => {
   test("분당 21번째는 429이고 다른 접속 주소는 영향이 없다", async ({
     request,
   }) => {
-    const cookie = await accessCookie(request);
     const client = nextClient();
     const post = (forwardedFor: string) =>
       request.post("/api/chat", {
-        headers: { cookie, "x-forwarded-for": forwardedFor },
+        headers: { "x-forwarded-for": forwardedFor },
         data: VALID,
       });
 

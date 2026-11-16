@@ -8,7 +8,6 @@ import { GET as queue } from "@/app/api/volunteer/queue/route";
 import { POST as claim } from "@/app/api/volunteer/requests/[requestId]/claim/route";
 import { POST as result } from "@/app/api/volunteer/requests/[requestId]/result/route";
 import { maxDuration, POST, runtime } from "@/app/api/volunteer/research/route";
-import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import { LLM_MODEL } from "@/lib/llm";
 import { isResearchResponse, type ResearchRequestBody } from "@/lib/research";
 import { resetRequestStoresForTest } from "@/lib/requestStore";
@@ -26,18 +25,16 @@ vi.mock("openai", async (importOriginal) => {
 });
 
 const ORIGIN = "http://localhost:3000";
-const CODE = "right-code";
 const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
 
 let counter = 0;
 const freshClient = () => `203.0.113.${(counter += 1) % 250}-${randomUUID()}`;
 
-async function signIn(nickname = "민지") {
+async function signIn() {
   const response = await enter(
     new NextRequest(`${ORIGIN}/api/volunteer/enter`, {
       method: "POST",
-      body: JSON.stringify({ code: CODE, nickname }),
       headers: { "x-forwarded-for": freshClient() },
     }),
   );
@@ -124,7 +121,8 @@ const chatReply = (json: unknown) => ({ choices: [{ message: { content: typeof j
 
 describe("POST /api/volunteer/research", () => {
   beforeEach(() => {
-    vi.stubEnv("DEMO_ACCESS_CODE", CODE);
+    // 입장 코드가 아니라 lh_vol 서명 비밀이다.
+    vi.stubEnv("DEMO_ACCESS_CODE", "test-signing-secret");
     vi.stubEnv("STORE_MODE", "memory");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");
@@ -149,11 +147,9 @@ describe("POST /api/volunteer/research", () => {
   });
 
   describe("권한·본문 검사", () => {
-    it("401: 쿠키가 없거나, 접근 쿠키(lh_access)만 있을 때", async () => {
+    it("401: 기기 쿠키(lh_vol)가 없을 때", async () => {
       const { id } = await claimed();
       expect((await research({ requestId: id, kind: "model" })).status).toBe(401);
-      const access = `${ACCESS_COOKIE}=${hashAccessCode(CODE)}`;
-      expect((await research({ requestId: id, kind: "model" }, access)).status).toBe(401);
     });
 
     it("404: 없는 요청, 403: 남이 맡은 요청, 409: 이미 보낸 요청", async () => {
@@ -162,7 +158,7 @@ describe("POST /api/volunteer/research", () => {
       expect(missing.status).toBe(404);
       expect(await missing.json()).toEqual({ ok: false, error: "not_found" });
 
-      const other = await signIn("다른 사람");
+      const other = await signIn();
       const notYours = await research({ requestId: id, kind: "model" }, other);
       expect(notYours.status).toBe(403);
       expect(await notYours.json()).toEqual({ ok: false, error: "not_yours" });
