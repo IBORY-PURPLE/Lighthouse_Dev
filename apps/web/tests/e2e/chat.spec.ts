@@ -11,7 +11,7 @@ import { fail, installFakeSpeech, say } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
 
 // 전부 가짜 음성 입력과 가짜 답변(LLM_MODE=mock) 기준이다.
-// 실제 음성 인식, VoiceOver 낭독, 실제 Groq 답변은 여기서 판정하지 않는다.
+// 실제 음성 인식, VoiceOver 낭독, 실제 OpenAI 답변은 여기서 판정하지 않는다.
 
 const REQUEST_SENTENCE = "sony껄로 헤드셋 사고싶어";
 const PASS_QUESTION = "sony 헤드셋 제품을 찾는 가이드 알려줘";
@@ -71,7 +71,7 @@ async function openVolunteer(page: Page) {
   const handoff = page.getByRole("button", { name: "봉사자 화면으로(시연)" });
   await expect(handoff).toBeVisible();
   await handoff.click();
-  await expect(page).toHaveURL(/\/volunteer$/);
+  await expect(page).toHaveURL(/\/volunteer\/demo$/);
   await expect(heading(page)).toBeFocused();
 }
 
@@ -265,7 +265,7 @@ test.describe("봉사자 챗봇", () => {
   });
 
   test("매칭 정보가 없으면 챗봇을 보여 주지 않는다", async ({ page }) => {
-    await page.goto("/volunteer");
+    await page.goto("/volunteer/demo");
     await expect(status(page)).toHaveText("매칭 정보가 없습니다.");
     await expect(askButton(page)).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);
@@ -325,7 +325,7 @@ test.describe("챗봇 오류 안내", () => {
     });
   }
 
-  test("Groq 실패 502: 안내와 다시 시도, 다시 시도하면 답변", async ({ page }) => {
+  test("AI 호출 실패 502: 안내와 다시 시도, 다시 시도하면 답변", async ({ page }) => {
     await page.route("**/api/chat", (route) =>
       route.fulfill({ status: 502, json: { ok: false, error: "llm_failed" } }),
     );

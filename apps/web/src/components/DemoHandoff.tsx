@@ -13,7 +13,7 @@ interface DemoHandoffProps {
 
 /**
  * 시연 예외: 같은 탭에서 봉사자 화면으로 이어 본다. 접수 완료(대기번호) 화면에서만 그린다.
- * 누르면 /api/match로 시연 봉사자를 정하고 lh.match.v1에 저장한 뒤 /volunteer로 간다(notes C1).
+ * 누르면 /api/match로 시연 봉사자를 정하고 lh.match.v1에 저장한 뒤 /volunteer/demo로 간다(notes C1).
  */
 export function DemoHandoff({ product, onFailed }: DemoHandoffProps) {
   const router = useRouter();
@@ -28,7 +28,7 @@ export function DemoHandoff({ product, onFailed }: DemoHandoffProps) {
     const outcome = await requestMatch(product);
     if (outcome.kind === "matched") {
       saveMatch(outcome.match);
-      router.push("/volunteer");
+      router.push("/volunteer/demo");
       return;
     }
     setBusy(false);

@@ -1,95 +1,82 @@
 "use client";
 
-import Link from "next/link";
-import {
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { StatusRegion } from "@/components/StatusRegion";
-import { VolunteerChat } from "@/components/VolunteerChat";
-import {
-  parseStoredMatch,
-  readStoredMatch,
-  requestLabel,
-} from "@/lib/matchHandoff";
-import {
-  createInitialModel,
-  PRIMARY_INPUT,
-  speechInputReducer,
-} from "@/lib/speech";
+import { VolunteerEntry } from "@/components/VolunteerEntry";
+import { VolunteerQueue } from "@/components/VolunteerQueue";
+import { fetchMe, type MeResponse } from "@/lib/volunteerClient";
+import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
 
-/**
- * 낭독 영역은 빈 채로 먼저 그려져 있어야 VoiceOver가 변화를 읽는다.
- * 같은 탭 이동으로 열릴 때 내용이 처음부터 있으면 읽지 않을 수 있어 조금 뒤에 채운다.
- */
-const ANNOUNCE_DELAY_MS = 100;
+type Gate = { kind: "checking" } | { kind: "failed" } | { kind: "ready"; me: MeResponse };
 
-// sessionStorage는 열려 있는 동안 이 탭 안에서 바뀌지 않으므로 구독할 변화가 없다.
-const subscribeNothing = () => () => {};
-const notOnServer = () => undefined;
+/** 입장 전에는 입장 화면, 입장 뒤에는 요청 목록. 이 기기가 입장했는지는 서버(/me)가 알려 준다. */
+function VolunteerHome() {
+  const [gate, setGate] = useState<Gate>({ kind: "checking" });
 
-export default function VolunteerPage() {
-  const stored = useSyncExternalStore(
-    subscribeNothing,
-    readStoredMatch,
-    notOnServer,
-  );
-  const match = useMemo(() => parseStoredMatch(stored), [stored]);
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  const [announced, setAnnounced] = useState(false);
-  const [initialChatModel] = useState(() =>
-    createInitialModel(PRIMARY_INPUT),
-  );
-  const [chatModel, chatDispatch] = useReducer(
-    speechInputReducer,
-    initialChatModel,
-  );
-
-  useEffect(() => {
-    headingRef.current?.focus();
-    const timer = setTimeout(() => setAnnounced(true), ANNOUNCE_DELAY_MS);
-    return () => clearTimeout(timer);
+  const check = useCallback(async () => {
+    const result = await fetchMe();
+    setGate(
+      result.kind === "ok"
+        ? { kind: "ready", me: result.data }
+        : { kind: "failed" },
+    );
   }, []);
 
-  const hydrated = stored !== undefined;
-  const arrivalMessage = !announced
-    ? ""
-    : match
-      ? `시연: 봉사자 화면으로 바뀌었습니다. 이용자 요청: ${requestLabel(match.request)}.`
-      : "매칭 정보가 없습니다.";
-  // 낭독 영역은 화면에 하나만 둔다. 입력을 건드린 뒤에는 도착 안내로 돌아가지 않는다.
-  // 듣기 전에 일부러 비운 영역에 도착 안내가 다시 나오면 낭독이 마이크에 섞인다.
-  const message =
-    chatModel === initialChatModel ? arrivalMessage : chatModel.status;
+  useEffect(() => {
+    // 응답이 오면 상태를 바꾼다(effect 본문에서 바로 바꾸지 않는다).
+    let cancelled = false;
+    void fetchMe().then((result) => {
+      if (cancelled) return;
+      setGate(
+        result.kind === "ok"
+          ? { kind: "ready", me: result.data }
+          : { kind: "failed" },
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  if (gate.kind === "checking") {
+    return (
+      <div className="vol-root">
+        <main className="vol-page vol-page--plain">
+          <StatusRegion message="" />
+          <p className="vol-empty">불러오는 중입니다.</p>
+        </main>
+      </div>
+    );
+  }
+  if (gate.kind === "failed") {
+    return (
+      <div className="vol-root">
+        <main className="vol-page vol-page--plain">
+          <h1>봉사자</h1>
+          <StatusRegion message={VOLUNTEER_MESSAGES.connectFailed} />
+          <button type="button" className="vol-btn vol-btn--block" onClick={() => void check()}>
+            다시 시도
+          </button>
+        </main>
+      </div>
+    );
+  }
+  if (gate.me.entered) {
+    // 쿠키가 없어졌거나 틀리면 입장 상태를 다시 묻는다.
+    return <VolunteerQueue onUnauthorized={() => void check()} />;
+  }
   return (
-    <main className="volunteer-screen">
-      <h1 ref={headingRef} tabIndex={-1}>
-        봉사자 화면(시연)
-      </h1>
-      <StatusRegion message={message} />
-      {match && (
-        <>
-          <dl className="match-summary">
-            <dt>이용자 요청</dt>
-            <dd>{requestLabel(match.request)}</dd>
-            <dt>이용자가 한 말</dt>
-            <dd>{match.request.raw}</dd>
-            <dt>연결된 봉사자</dt>
-            <dd>{match.volunteer.displayName}</dd>
-          </dl>
-          <VolunteerChat
-            match={match}
-            model={chatModel}
-            dispatch={chatDispatch}
-          />
-        </>
-      )}
-      {hydrated && !match && <Link href="/">이용자 화면으로 돌아가기</Link>}
-    </main>
+    <VolunteerEntry
+      needsCode={gate.me.needsCode}
+      onEntered={() => setGate({ kind: "ready", me: { entered: true, needsCode: false } })}
+    />
+  );
+}
+
+export default function VolunteerPage() {
+  return (
+    <Suspense fallback={null}>
+      <VolunteerHome />
+    </Suspense>
   );
 }
