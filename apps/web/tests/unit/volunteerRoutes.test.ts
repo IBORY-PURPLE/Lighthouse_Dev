@@ -7,6 +7,7 @@ import { GET as me } from "@/app/api/volunteer/me/route";
 import { GET as queue } from "@/app/api/volunteer/queue/route";
 import { POST as claim } from "@/app/api/volunteer/requests/[requestId]/claim/route";
 import { POST as release } from "@/app/api/volunteer/requests/[requestId]/release/route";
+import { POST as result } from "@/app/api/volunteer/requests/[requestId]/result/route";
 import { GET as detail } from "@/app/api/volunteer/requests/[requestId]/route";
 import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import { resetRequestStoresForTest } from "@/lib/requestStore";
@@ -57,7 +58,9 @@ function get(handler: typeof queue | typeof me, path: string, cookie?: string) {
   );
 }
 
-function idRoute<T extends typeof claim | typeof release | typeof detail>(
+function idRoute<
+  T extends typeof claim | typeof release | typeof detail | typeof result,
+>(
   handler: T,
   method: "GET" | "POST",
   id: string,
@@ -248,6 +251,32 @@ describe("봉사자 서버 함수", () => {
     });
   });
 
+  describe("입장한 기기의 접근 쿠키(lh_access) 새로 고침", () => {
+    it("lh_vol만 있는 요청에 lh_access를 다시 심는다(입장 7일 뒤 /api/chat 401 방지)", async () => {
+      const cookie = await signIn(); // lh_vol만 보낸다
+      for (const [handler, path] of [
+        [queue, "/api/volunteer/queue"],
+        [me, "/api/volunteer/me"],
+      ] as const) {
+        const response = await get(handler, path, cookie);
+        expect(response.status).toBe(200);
+        const access = setCookies(response)[ACCESS_COOKIE];
+        expect(access.value).toBe(hashAccessCode(CODE));
+        expect(access.raw).toMatch(/HttpOnly/i);
+        expect(access.raw).toMatch(/Max-Age=604800/i);
+        expect(access.raw).toMatch(/SameSite=lax/i);
+      }
+    });
+
+    it("입장하지 않은 요청에는 심지 않는다", async () => {
+      expect(setCookies(await get(me, "/api/volunteer/me"))[ACCESS_COOKIE]).toBeUndefined();
+      const forged = `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}.${"B".repeat(43)}`;
+      const denied = await get(queue, "/api/volunteer/queue", forged);
+      expect(denied.status).toBe(401);
+      expect(setCookies(denied)[ACCESS_COOKIE]).toBeUndefined();
+    });
+  });
+
   describe("lh_vol이 없거나 틀리면 401 unauthorized", () => {
     it("모든 봉사자용 서버 함수", async () => {
       const forged = `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}.${"B".repeat(43)}`;
@@ -257,6 +286,7 @@ describe("봉사자 서버 함수", () => {
           await idRoute(detail, "GET", MISSING_ID, cookie),
           await idRoute(claim, "POST", MISSING_ID, cookie),
           await idRoute(release, "POST", MISSING_ID, cookie),
+          await idRoute(result, "POST", MISSING_ID, cookie),
           await post(reset, "/api/volunteer/demo/reset", cookie),
         ];
         for (const response of responses) {
@@ -294,7 +324,7 @@ describe("봉사자 서버 함수", () => {
       const body = await (await get(queue, "/api/volunteer/queue", cookie)).json();
       expect(body.persistent).toBe(false);
       expect(body.notice).toBe(
-        "임시 저장소를 쓰고 있습니다. 서버가 다시 뜨면 시연 요청과 맡은 상태가 사라질 수 있습니다.",
+        "임시 저장소를 쓰고 있습니다. 시연 요청과 맡은 상태가 갑자기 사라질 수 있습니다(DB 적용 전).",
       );
     });
   });

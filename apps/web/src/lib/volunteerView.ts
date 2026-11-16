@@ -53,6 +53,15 @@ export interface SentResult {
   candidates: SentCandidate[];
 }
 
+/** 요청 상세의 후보 카드 한 장(시연용 예시 후보). 가격·재고는 담지 않는다. */
+export interface CandidateView {
+  id: string;
+  name: string;
+  /** 후보 출처 글자. 지금은 "11번가 검색". */
+  seller: string;
+  url: string;
+}
+
 export interface QueueData {
   waiting: QueueItem[];
   mine: VolunteerRequestView | null;
@@ -147,9 +156,10 @@ export const VOLUNTEER_MESSAGES = {
   releasedToQueue: "요청을 대기열로 돌려놓았어요",
   notYours: "이 요청은 내 담당이 아니에요",
   notFound: "요청을 찾지 못했어요",
+  notYoursAnymore: "이 요청은 더 이상 내 담당이 아니에요",
   invalidCode: "입장 코드가 올바르지 않습니다",
   invalidNickname: "별명은 1~12자로 넣어 주세요",
   enterTooMany: "시도가 너무 많습니다. 10분 뒤 다시 해 주세요.",
   tempStore:
-    "임시 저장소를 쓰고 있습니다. 서버가 다시 뜨면 시연 요청과 맡은 상태가 사라질 수 있습니다.",
+    "임시 저장소를 쓰고 있습니다. 시연 요청과 맡은 상태가 갑자기 사라질 수 있습니다(DB 적용 전).",
 } as const;
