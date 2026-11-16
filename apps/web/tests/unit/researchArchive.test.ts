@@ -17,6 +17,7 @@ import type { ResearchMessage, SlotState } from "@/lib/researchSession";
 
 const DAY = 24 * 60 * 60 * 1000;
 const T0 = Date.parse("2026-11-17T01:00:00Z");
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 const JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
 const BENEFIT_URL = "https://shop.example.com/event/headset";
 
@@ -205,7 +206,8 @@ describe("메모리 보내기 기록", () => {
     expect((await research.send({ ...r.actor, baseVersion: version, reviewRev: rev, candidates: [{ ...CANDIDATES[0], name: "720N 010-1111-2222" }] })).outcome).toBe("sent");
     const [a] = research.archiveSnapshot().archives;
     const [rv] = research.archiveSnapshot().reviews;
-    expect(JSON.stringify([a, rv])).not.toMatch(/\d{3}[- ]\d{4}[- ]\d{4}|\d{2}-\d{3}-\d{4}|@|data:/);
+    // 무작위 uuid의 숫자 조각이 전화번호 모양으로 읽히지 않게 uuid는 빼고 본다.
+    expect(JSON.stringify([a, rv]).replace(UUID_RE, "")).not.toMatch(/\d{3}[- ]\d{4}[- ]\d{4}|\d{2}-\d{3}-\d{4}|@|data:/);
     expect(a.request.product).toBe("소니 헤드셋 [전화번호]");
     expect(rv.product).toBe("소니 헤드셋 [전화번호]");
     expect(a.messages[0].text).toBe("번호 [전화번호] 메일 [이메일]  끝");

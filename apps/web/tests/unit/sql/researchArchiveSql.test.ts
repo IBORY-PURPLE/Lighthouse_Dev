@@ -57,6 +57,7 @@ async function count(text: string, params: unknown[] = []): Promise<number> {
 }
 
 const vol = () => `d-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 const JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
 const BENEFIT_URL = "https://shop.example.com/event/headset";
 const OTHER_URL = "https://card.example.com/promo";
@@ -351,7 +352,8 @@ describe("보내기", () => {
     expect((await send(r, version, confirmed.review.rev, [{ name: "720N 010-1111-2222", url: "https://e.com", guide: "g", summary: [] }])).outcome).toBe("sent");
     const a = await one<Json>("select * from public.research_archives where request_id = $1", [r.id]);
     const rv = await one<Json>("select * from public.research_reviews where request_id = $1", [r.id]);
-    const raw = JSON.stringify([a, rv]);
+    // 무작위 uuid의 숫자 조각이 전화번호 모양으로 읽히지 않게(가끔 시험이 흔들렸다) uuid는 빼고 본다.
+    const raw = JSON.stringify([a, rv]).replace(UUID_RE, "");
     expect(raw).not.toMatch(/\d{3}[- ]\d{4}[- ]\d{4}|\d{2}-\d{3}-\d{4}|@|data:/);
     expect(a.request.product).toBe("소니 헤드셋 [전화번호]");
     expect(rv.product).toBe("소니 헤드셋 [전화번호]");
