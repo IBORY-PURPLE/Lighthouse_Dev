@@ -304,7 +304,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     // 먼 거리는 바로 이동한다(긴 부드러운 스크롤은 읽는 흐름을 끊는다). 움직임 줄이기에서는 항상 바로 이동한다.
     const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
     el.scrollTo({ top: el.scrollHeight, behavior: reducedMotion() || distance > 600 ? "auto" : "smooth" });
-  }, [messageCount, optimistic.length, thinking, reviewStatus, editing, uploadingThumb]);
+  }, [messageCount, optimistic.length, thinking, reviewStatus, editing, uploadingThumb, reviewReasons.length]);
 
   // 입력창 묶음 높이를 알려 대화가 그 뒤로 가려지지 않게 한다.
   useLayoutEffect(() => {
