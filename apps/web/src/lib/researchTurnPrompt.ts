@@ -32,6 +32,8 @@ const TURN = [
   "- purchase: 봉사자가 직접 샀다·갖고 있다·쓰고 있다고 말하면 bought, 알아보기만 했다·사지 않았다고 말하면 research다. 어느 쪽인지 말에서 알 수 없으면 쓰지 않는다. 자료의 구매가 unset일 때만 의미가 있다. evidence는 fills와 같다(예: '쓰고 있어요'도 구매한 것으로 본다).",
   "- intent: reply(칸에 답함), ask_back(AI에게 물음), show_review(리뷰를 만들자고 함), skip(건너뛰자고 함), other(그 밖).",
   "- next: 다음에 물을 칸. action은 ask_slot(slot에 자료 '빈칸' 중 하나, text에 질문 한두 문장 120자 이내), reask(직전 질문 칸을 한 번 더), propose_review(빈칸이 없을 때). 이미 찬 칸과 건너뛴 칸은 묻지 않는다. 질문은 해요체로 쓰고 가격과 재고를 묻지 않는다.",
+  "- 질문 순서: 자료 '빈칸' 목록의 순서가 질문 번호 순서이고 기본이다. 목록 맨 앞 칸을 묻는다. 봉사자가 이번 말에서 직접 꺼낸 주제일 때만 다른 칸을 고른다(꺼내지 않은 칸으로 건너뛰지 않는다). 사진(photo)은 서버가 묻는다. 순서상 다음이 사진이면 next를 쓰지 않는다.",
+  "- 자유 글(next.text, guide)에 링크·주소·도메인을 쓰지 않는다.",
   "- guide는 ask_back일 때만 쓴다: queries(검색어 1~3개, 40자 이내), checks(확인할 조건 1~3개, 60자 이내), steps(찾는 순서 1~3개, 60자 이내). 가격·재고·할인·순위는 쓰지 않는다.",
   "- 기종 이름과 모델 번호는 자료(요청, 봉사자말, 보인후보, 채운칸)에 있는 것만 쓴다. 자료에 없는 기종을 지어내거나 추천하지 않는다.",
   "- reason은 판단 이유 한 줄(80자 이내)이다.",
@@ -40,7 +42,7 @@ const TURN = [
   "- purchase, guide, next는 해당 없으면 생략한다. fills는 없으면 빈 배열이다.",
   "",
   "예시 1) 자료: 구매 unset, 봉사자말 \"WH-CH720N 샀어요. 가벼워서 좋아요\"",
-  '{"intent":"reply","fills":[{"slot":"model","value":"WH-CH720N","evidence":"WH-CH720N 샀어요"},{"slot":"pros","value":"가벼워서 좋아요","evidence":"가벼워서 좋아요"}],"purchase":{"value":"bought","evidence":"WH-CH720N 샀어요"},"next":{"action":"ask_slot","slot":"altReason","text":"WH-CH720N을 고른 이유가 뭐예요?"},"reason":"기종과 장점을 말함"}',
+  '{"intent":"reply","fills":[{"slot":"model","value":"WH-CH720N","evidence":"WH-CH720N 샀어요"},{"slot":"pros","value":"가벼워서 좋아요","evidence":"가벼워서 좋아요"}],"purchase":{"value":"bought","evidence":"WH-CH720N 샀어요"},"reason":"기종과 장점을 말함. 순서상 다음은 사진이라 next는 쓰지 않음"}',
   "예시 2) 자료: 직전질문칸 model, 봉사자말 \"소니 헤드셋은 어디서 찾아요? 가격도 알려줘\"",
   '{"intent":"ask_back","fills":[],"guide":{"queries":["소니 헤드셋","소니 헤드셋 후기"],"checks":["기종 이름이 같은지","구성품과 사용 방법"],"steps":["공식 페이지를 연다","상세 페이지를 읽는다","후기를 2~3개 비교한다"]},"reason":"찾는 방법을 물음"}',
 ].join("\n");

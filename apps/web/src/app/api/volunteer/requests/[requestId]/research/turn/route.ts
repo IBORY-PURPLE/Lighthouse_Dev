@@ -105,52 +105,70 @@ export async function POST(
       // 제한에 닿았으면 begin이 만든 처리 중 자리를 닫고 사용량을 되돌린다: 기준 version이 어긋난 apply는 stale 경로를 타서
       // 두 가지를 모두 처리한다. 세션 version은 0 이상이라 -1은 어떤 동시 턴이 끼어들어도 항상 어긋난다.
       // 그래서 같은 clientTurnId로 나중에 다시 보내도 정상 처리된다.
+      // 처리 중 자리를 닫는다(기록 없이 사용량을 되돌림). 실패해도 삼킨다: 닫지 못하면 그 자리는 같은 clientTurnId를 202로 붙잡는다.
+      const closeTurn = async () => {
+        try {
+          await store.apply({ ...actor, clientTurnId, baseVersion: -1, patch: null, messages: [], next: [] });
+        } catch {
+          // best effort
+        }
+      };
       const limit = checkTurnLimit(volunteerId);
       if (!limit.allowed) {
-        await store.apply({ ...actor, clientTurnId, baseVersion: -1, patch: null, messages: [], next: [] });
+        await closeTurn();
         return fail(429, "rate_limited", { "Retry-After": String(limit.retryAfterSeconds) });
       }
 
-      const found = detail ? await detail : null;
-      const context =
-        found && found.kind === "ok"
-          ? { product: found.request.product, brand: found.request.brand, item: found.request.item }
-          : { product: "", brand: null, item: null };
-      const run = await runTurn({
-        session: begun.session,
-        input,
-        context,
-        capped: begun.ai === "capped" ? { cap: begun.cap ?? "request" } : null,
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(AI_DEADLINE_MS)]),
-      });
+      // begin 뒤에 예외가 나면(DB 지연·시간 초과 등) 자리를 닫고 다시 던진다. apply가 끝난 뒤에는 닫지 않는다.
+      let settled = false;
+      try {
+        const found = detail ? await detail : null;
+        const context =
+          found && found.kind === "ok"
+            ? { product: found.request.product, brand: found.request.brand, item: found.request.item }
+            : { product: "", brand: null, item: null };
+        const run = await runTurn({
+          session: begun.session,
+          input,
+          context,
+          capped: begun.ai === "capped" ? { cap: begun.cap ?? "request" } : null,
+          signal: AbortSignal.any([request.signal, AbortSignal.timeout(AI_DEADLINE_MS)]),
+        });
 
-      const applied = await store.apply({
-        ...actor,
-        clientTurnId,
-        baseVersion,
-        patch: run.plan.patch,
-        messages: run.plan.messages,
-        next: run.plan.next,
-      });
-      switch (applied.outcome) {
-        case "ok":
-        case "duplicate": {
-          const label = applied.outcome === "ok" ? run.plan.label : labelFromMessages(applied.response.messages);
-          tail = logTail({
-            kind: "turn",
-            ai: label,
-            cap: begun.ai === "capped" ? (begun.cap ?? "request") : null,
-            up: label === "fallback" ? run.upstream : null,
-            usage: run.usage,
-          });
-          return succeed(turnBody(applied.response, label));
+        const applied = await store.apply({
+          ...actor,
+          clientTurnId,
+          baseVersion,
+          patch: run.plan.patch,
+          messages: run.plan.messages,
+          next: run.plan.next,
+        });
+        settled = true;
+        switch (applied.outcome) {
+          case "ok":
+          case "duplicate": {
+            const label = applied.outcome === "ok" ? run.plan.label : labelFromMessages(applied.response.messages);
+            tail = logTail({
+              kind: "turn",
+              ai: label,
+              cap: begun.ai === "capped" ? (begun.cap ?? "request") : null,
+              up: label === "fallback" ? run.upstream : null,
+              usage: run.usage,
+            });
+            return succeed(turnBody(applied.response, label));
+          }
+          case "stale":
+            return failWith(409, "stale", { version: applied.version });
+          case "bad_patch":
+            // 서버가 만든 patch가 칸 규칙에 어긋났다(서버 버그). 처리 중 자리를 닫아 같은 clientTurnId가 202에 갇히지 않게 한다.
+            await closeTurn();
+            return fail(500, "internal_error");
+          default:
+            return guardResponse(applied.outcome);
         }
-        case "stale":
-          return failWith(409, "stale", { version: applied.version });
-        case "bad_patch":
-          return fail(500, "internal_error");
-        default:
-          return guardResponse(applied.outcome);
+      } catch (error) {
+        if (!settled) await closeTurn();
+        throw error;
       }
     },
     undefined,

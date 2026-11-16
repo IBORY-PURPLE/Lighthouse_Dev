@@ -199,7 +199,7 @@ describe("GET /api/volunteer/requests/{id}/research", () => {
     expect(view.messages.length).toBeGreaterThan(0);
   });
 
-  it("보낸 뒤에는 대화가 지워지므로 {stage:'sent', sentAt}만 준다", async () => {
+  it("보낸 뒤에는 대화가 지워지므로 stage·sentAt과 빈 messages·slots·photos를 준다", async () => {
     const o = await opened();
     const sent = await result(
       req(`${o.id}/result`, "POST", o.cookie, {
@@ -211,7 +211,7 @@ describe("GET /api/volunteer/requests/{id}/research", () => {
     const view = await (await get(o.id, o.cookie)).json();
     expect(view).toMatchObject({ stage: "sent" });
     expect(typeof view.sentAt).toBe("string");
-    expect(view.messages).toBeUndefined();
+    expect(view).toMatchObject({ messages: [], slots: {}, photos: [], extras: [], pending: {} });
     // 보낸 뒤의 턴은 거부한다.
     const late = await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }));
     expect(late.status).toBe(409);
@@ -322,6 +322,31 @@ describe("POST …/research/turn", () => {
     await store.begin({ requestId: o.id, volunteerId: volunteerOf(o.cookie), sessionId: o.sessionId, kind: "turn", clientTurnId: pending.clientTurnId, baseVersion: 0 });
     const response = await post(o.id, o.cookie, pending);
     expect(response.status).toBe(202);
+  });
+
+  it("apply가 bad_patch여도 처리 중 자리를 닫아 같은 clientTurnId를 다시 보내면 처리된다(202에 갇히지 않음)", async () => {
+    const o = await opened();
+    const actual = await vi.importActual<typeof import("@/lib/researchStore")>("@/lib/researchStore");
+    const real = actual.getResearchStore();
+    const spy = vi.spyOn(real, "apply").mockResolvedValueOnce({ outcome: "bad_patch" } as never);
+    const first = body(o, { type: "quick", replyId: "purchase.bought" });
+    const failed = await post(o.id, o.cookie, first);
+    expect(failed.status).toBe(500);
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls[1]?.[0]).toMatchObject({ baseVersion: -1, clientTurnId: first.clientTurnId });
+    const again = await post(o.id, o.cookie, first);
+    expect(again.status).toBe(200);
+    expect((await again.json()).session.purchase).toBe("bought");
+  });
+
+  it("apply가 던져도 처리 중 자리를 닫는다", async () => {
+    const o = await opened();
+    const actual = await vi.importActual<typeof import("@/lib/researchStore")>("@/lib/researchStore");
+    const real = actual.getResearchStore();
+    vi.spyOn(real, "apply").mockRejectedValueOnce(new Error("db down"));
+    const first = body(o, { type: "quick", replyId: "purchase.bought" });
+    expect((await post(o.id, o.cookie, first)).status).toBeGreaterThanOrEqual(500);
+    expect((await post(o.id, o.cookie, first)).status).toBe(200);
   });
 
   it("요청당 AI 상한: 한도를 넘으면 AI 없이 CAP 문구와 기본 질문으로 이어 간다", async () => {
