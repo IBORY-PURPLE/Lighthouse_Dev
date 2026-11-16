@@ -1,4 +1,4 @@
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { createRateLimiter } from "@/lib/rateLimit";
 import { getRequestStore } from "@/lib/requestStore";
 import { benefitShortcuts, subjectOf, type ResearchResponse } from "@/lib/research";
@@ -6,6 +6,7 @@ import { answerResearch, fallbackResponse } from "@/lib/researchAi";
 import { guardResponse, logTail, readJsonBody, type AiLabel } from "@/lib/researchApi";
 import { capsFromEnv, type NextMessage } from "@/lib/researchSession";
 import { getResearchStore } from "@/lib/researchStore";
+import { fitMessage } from "@/lib/researchTurn";
 import {
   CAP_DAILY,
   CAP_REQUEST,
@@ -30,6 +31,7 @@ const MAX_BODY_BYTES = 2 * 1024;
 /** maxDuration(60초) 안에 끝나도록 AI를 끊는다. */
 const AI_DEADLINE_MS = 50_000;
 const MODEL_CACHE_KEY = "model";
+const CHIP_URL_MAX = 500;
 
 type ModelBody = Extract<ResearchResponse, { items: unknown }>;
 
@@ -38,21 +40,23 @@ function modelMessage(body: ModelBody, subject: string, notice: string | null): 
   const count = body.items.length;
   const caption =
     count === 0 ? MODEL_CHIPS_EMPTY : body.ai === "ok" ? MODEL_CHIPS_CAPTION(count) : MODEL_CHIPS_FALLBACK(count);
-  return {
+  // 인용 주소는 길이 제한이 없어서 너무 길면 뺀다(메시지 본문은 8,192바이트까지다).
+  const urlOf = (url: string | null) => (url !== null && url.length <= CHIP_URL_MAX ? url : null);
+  return fitMessage({
     role: "ai",
     tag: "search",
     slot: "model",
     body: {
       kind: "text",
       text: notice ?? MODEL_CHIPS_INTRO,
-      chips: body.items.map((item) => ({ label: item.name, value: item.name, url: item.url })),
+      chips: body.items.map((item) => ({ label: item.name, value: item.name, url: urlOf(item.url) })),
       chipSlot: "model",
       chipsCaption: caption,
       ownLabel: OWN_LABEL,
       shortcuts: benefitShortcuts(subject),
     },
     ai: body.ai === "ok" ? "ok" : "fallback",
-  };
+  });
 }
 
 export async function POST(
@@ -65,25 +69,31 @@ export async function POST(
     request,
     "requests/[id]/research/search",
     async ({ volunteerId }) => {
-      if (!isUuid(requestId)) return fail(400, "invalid_request");
+      // 분당 8회는 실제로 AI 검색을 부르는 요청만 센다. 틀린 요청·캐시 적중·처리 중(202)·권한 오류는 세지 않는다.
+      const refused = (response: NextResponse) => {
+        checkSearchLimit.refund(volunteerId);
+        return response;
+      };
+      if (!isUuid(requestId)) return refused(fail(400, "invalid_request"));
       const id = requestId.toLowerCase();
       const raw = await readJsonBody(request, MAX_BODY_BYTES);
-      if (!raw.ok) return fail(raw.status, raw.error);
+      if (!raw.ok) return refused(fail(raw.status, raw.error));
       const value = raw.value as { sessionId?: unknown; kind?: unknown } | null;
       const sessionId = typeof value?.sessionId === "string" ? value.sessionId : "";
       // 11/18 핵심은 model만이다. 다른 종류는 A3에서 더한다.
-      if (!isUuid(sessionId) || value?.kind !== "model") return fail(400, "invalid_request");
+      if (!isUuid(sessionId) || value?.kind !== "model") return refused(fail(400, "invalid_request"));
 
       const found = await getRequestStore().getForVolunteer(id, volunteerId);
-      if (found.kind === "not_found") return fail(404, "not_found");
-      if (found.kind === "not_yours") return fail(403, "not_yours");
-      if (found.request.status !== "in_progress") return fail(409, "not_in_progress");
+      if (found.kind === "not_found") return refused(fail(404, "not_found"));
+      if (found.kind === "not_yours") return refused(fail(403, "not_yours"));
+      if (found.request.status !== "in_progress") return refused(fail(409, "not_in_progress"));
       const context = { product: found.request.product, brand: found.request.brand, item: found.request.item };
       const subject = subjectOf(context);
 
       const store = getResearchStore();
       const actor = { requestId: id, volunteerId, sessionId: sessionId.toLowerCase() };
       const begun = await store.begin({ ...actor, kind: "search", cacheKey: MODEL_CACHE_KEY, units: 1, caps: capsFromEnv() });
+      if (begun.outcome !== "ok" && begun.outcome !== "capped") checkSearchLimit.refund(volunteerId);
       if (begun.outcome === "pending") return succeed({ pending: true }, 202);
       if (begun.outcome === "cached") {
         // 이미 찾았다. 메시지는 이미 대화에 있으니 새로 주지 않고 마지막 번호만 알린다.

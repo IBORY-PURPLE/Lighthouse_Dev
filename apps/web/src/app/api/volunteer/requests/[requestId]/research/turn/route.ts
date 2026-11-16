@@ -1,4 +1,4 @@
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { createRateLimiter } from "@/lib/rateLimit";
 import { getRequestStore } from "@/lib/requestStore";
 import {
@@ -58,12 +58,17 @@ export async function POST(
     request,
     "requests/[id]/research/turn",
     async ({ volunteerId }) => {
-      if (!isUuid(requestId)) return fail(400, "invalid_request");
+      // 본문이 틀린 요청은 일이 아니라서 제한에 세지 않는다.
+      const refused = (response: NextResponse) => {
+        checkTurnLimit.refund(volunteerId);
+        return response;
+      };
+      if (!isUuid(requestId)) return refused(fail(400, "invalid_request"));
       const id = requestId.toLowerCase();
       const raw = await readJsonBody(request, MAX_BODY_BYTES);
-      if (!raw.ok) return fail(raw.status, raw.error);
+      if (!raw.ok) return refused(fail(raw.status, raw.error));
       const parsed = parseTurnBody(raw.value);
-      if (!parsed.ok) return fail(400, parsed.error);
+      if (!parsed.ok) return refused(fail(400, parsed.error));
       const { clientTurnId, sessionId, baseVersion, input } = parsed.body;
 
       const store = getResearchStore();
@@ -77,6 +82,10 @@ export async function POST(
           : null;
       const begun = await store.begin({ ...actor, kind: "turn", baseVersion, clientTurnId, caps: capsFromEnv() });
 
+      // 분당 제한은 새 일(AI 턴)만 센다. 저장 응답·처리 중·stale·권한 오류는 세지 않고 돌려준다.
+      // 이미 제한에 닿은 뒤의 재전송은 begin 전에 429(Retry-After)로 기다리게 하며, 그때는 아무것도 저장되지 않아
+      // 같은 clientTurnId로 나중에 다시 보내도 정상 처리된다.
+      if (begun.outcome !== "ok") checkTurnLimit.refund(volunteerId);
       switch (begun.outcome) {
         case "duplicate": {
           const label = labelFromMessages(begun.response.messages);

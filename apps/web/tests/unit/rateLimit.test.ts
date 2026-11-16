@@ -25,6 +25,22 @@ describe("createRateLimiter", () => {
     expect(check("a")).toEqual({ allowed: false, retryAfterSeconds: 45 });
   });
 
+  it("refund는 방금 센 1회를 돌려주고, 창이 끝났거나 센 적이 없으면 아무것도 하지 않는다", () => {
+    const { check, advance } = limiter(2);
+    check.refund("none");
+    expect(check("a").allowed).toBe(true);
+    expect(check("a").allowed).toBe(true);
+    expect(check("a").allowed).toBe(false);
+    check.refund("a");
+    expect(check("a").allowed).toBe(true);
+    expect(check("a").allowed).toBe(false);
+    advance(61_000);
+    check.refund("a");
+    expect(check("a").allowed).toBe(true);
+    expect(check("a").allowed).toBe(true);
+    expect(check("a").allowed).toBe(false);
+  });
+
   it("창이 지나면 다시 허용한다", () => {
     const { check, advance } = limiter(1);
     expect(check("a").allowed).toBe(true);

@@ -409,7 +409,7 @@ const purchaseFillMessage = (purchase: "bought" | "research", ai: MessageAi): Ne
 });
 
 /** 한 메시지의 본문이 8KB(DB 한도 8,192바이트)를 넘지 않게 한다. 넘으면 글을 줄이고 목록을 뺀다. */
-function fitMessage(message: NextMessage): NextMessage {
+export function fitMessage(message: NextMessage): NextMessage {
   if (bytesOf(message.body) <= BODY_BYTES_MAX) return message;
   const text = typeof message.body.text === "string" ? [...message.body.text].slice(0, 400).join("") : "";
   return { ...message, body: { kind: "text", text } };
@@ -649,6 +649,16 @@ export function planTurn(args: PlanArgs): TurnPlan {
         turn = ai.turn;
       }
 
+      // 주소가 든 말: 참고 글(refs)에 해당하면 AI가 칸을 채우지 못하게 하고, 아래 3)에서 "직접 확인 필요" 링크 카드로 받는다.
+      // (서버는 외부 주소를 열지 않으므로 봉사자가 확인하기 전에는 값으로 넣지 않는다. design.md 4.6, 4.10)
+      const url = URL_IN_TEXT.exec(input.text)?.[0] ?? null;
+      const linkCard =
+        url !== null &&
+        isHttps(url) &&
+        url.length <= URL_MAX &&
+        isAskable({ ...nowPost(), slots: session.slots }, "refs") &&
+        (lastSlot === "refs" || (turn?.fills.some((fill) => fill.slot === "refs") ?? false));
+
       // 1) 구매 여부와 칸 채우기(AI가 읽은 것만, evidence 검사를 통과한 것만)
       let filledCount = 0;
       if (turn) {
@@ -660,6 +670,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
         }
         const altIncoming: string[] = [];
         for (const fill of turn.fills) {
+          if (fill.slot === "refs" && linkCard) continue;
           if (fill.slot === "alts") {
             altIncoming.push(fill.value);
             continue;
@@ -694,16 +705,8 @@ export function planTurn(args: PlanArgs): TurnPlan {
         break;
       }
 
-      // 3) 참고 글 질문에서 링크를 붙여 넣음: AI 검색 없이 "직접 확인 필요" 링크 카드
-      const url = URL_IN_TEXT.exec(input.text)?.[0] ?? null;
-      if (
-        lastSlot === "refs" &&
-        url &&
-        isHttps(url) &&
-        url.length <= URL_MAX &&
-        slotsPatch.refs === undefined &&
-        isAskable(nowPost(), "refs")
-      ) {
+      // 3) 참고 글에 링크를 붙여 넣음: AI 검색 없이 "직접 확인 필요" 링크 카드
+      if (linkCard && url && slotsPatch.refs === undefined) {
         messages.push({
           role: "ai",
           tag: "search",

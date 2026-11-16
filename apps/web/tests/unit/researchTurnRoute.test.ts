@@ -336,6 +336,29 @@ describe("POST …/research/turn", () => {
     expect(turnLogs().at(-1)).toMatch(/kind=turn ai=capped cap=daily in=0 out=0 ws=0$/);
   });
 
+  it("분당 20회는 새 턴만 센다: 같은 clientTurnId 재전송은 세지 않고, 21번째 새 턴은 429", async () => {
+    const o = await opened();
+    const first = body(o, { type: "quick", replyId: "review.more" });
+    for (let index = 0; index < 30; index += 1) {
+      expect((await post(o.id, o.cookie, first)).status, `재전송 ${index}`).toBe(200);
+    }
+    // 새 턴 19개를 더하면 20번째까지 받고, 그다음은 429 + Retry-After.
+    for (let index = 0; index < 19; index += 1) {
+      expect((await post(o.id, o.cookie, body(o, { type: "quick", replyId: "review.more" }))).status).toBe(200);
+    }
+    const limited = await post(o.id, o.cookie, body(o, { type: "quick", replyId: "review.more" }));
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("본문이 틀린 요청은 분당 제한에 세지 않는다", async () => {
+    const o = await opened();
+    for (let index = 0; index < 25; index += 1) {
+      expect((await post(o.id, o.cookie, body(o, { type: "text", text: "   " }))).status).toBe(400);
+    }
+    expect((await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }))).status).toBe(200);
+  });
+
   it("503: research 표를 못 쓰면 store_unavailable", async () => {
     const o = await opened();
     storeProbe.unavailable = true;
@@ -443,6 +466,45 @@ describe("POST …/research/search (model)", () => {
     const again = await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" });
     expect(again.status).toBe(200);
     expect(await again.json()).toEqual({ messages: [], lastSeq: first.lastSeq });
+  });
+
+  it("분당 8회는 AI 검색을 부른 요청만 센다: 캐시 적중·처리 중(202)은 세지 않는다", async () => {
+    const o = await opened();
+    await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" });
+    for (let index = 0; index < 12; index += 1) {
+      expect((await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" })).status, `캐시 ${index}`).toBe(200);
+    }
+    const second = await opened();
+    await getResearchStore().begin({ requestId: second.id, volunteerId: volunteerOf(second.cookie), sessionId: second.sessionId, kind: "search", cacheKey: "model", units: 1 });
+    for (let index = 0; index < 12; index += 1) {
+      expect((await find(second.id, second.cookie, { sessionId: second.sessionId, kind: "model" })).status, `처리 중 ${index}`).toBe(202);
+    }
+  });
+
+  it("인용 주소가 아주 길어도 메시지 본문은 8,192바이트 안에 든다(긴 주소는 뺀다)", async () => {
+    vi.stubEnv("LLM_MODE", "");
+    const longUrl = `https://www.sony.co.kr/headphones/${"a".repeat(9000)}`;
+    responsesCreate.mockResolvedValueOnce({
+      output: [
+        { type: "web_search_call", action: { type: "search", sources: [{ url: longUrl }] } },
+        {
+          type: "message",
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({ items: [{ name: "Sony WH-CH720N", note: "가벼운 무선 헤드셋", url: longUrl }] }),
+              annotations: [{ type: "url_citation", url: longUrl }],
+            },
+          ],
+        },
+      ],
+    });
+    const o = await opened();
+    const response = await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" });
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(Buffer.byteLength(JSON.stringify(data.messages[0].body), "utf8")).toBeLessThanOrEqual(8000);
+    expect(data.messages[0].body.chips).toEqual([{ label: "Sony WH-CH720N", value: "Sony WH-CH720N", url: null }]);
   });
 
   it("검색이 처리 중이면 202", async () => {

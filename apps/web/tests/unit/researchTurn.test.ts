@@ -610,6 +610,28 @@ describe("건너뛰기·칩·고치기·링크", () => {
     expect(checked.chosen).toBe("propose_review");
   });
 
+  it("AI가 참고 글 칸을 주소로 채우려 해도 값으로 넣지 않고 링크 카드로 받는다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    await h.step(say("WH-CH520"), replyAi(fill("model", "WH-CH520")));
+    await h.step(say("가벼워 보여요"), replyAi(fill("pros", "가벼워 보여요")));
+    await h.step({ type: "skip", slot: "alts" });
+    await h.step(say("무게가 맘에 들어요"), replyAi(fill("altReason", "무게가 맘에 들어요")));
+    await h.step({ type: "skip", slot: "benefits" });
+    const url = "https://blog.example.com/post/2";
+    const said = `이 글을 참고했어요 ${url}`;
+    const card = await h.step(say(said), replyAi(fill("refs", said, said)));
+    expect(card.view.slots.refs).toBeUndefined();
+    expect(card.messages.find((message) => message.body.kind === "link")?.body).toMatchObject({ url, note: text.LINK_NOTE });
+    expect(card.messages.filter((message) => message.tag === "fill")).toEqual([]);
+    // 다른 칸(혜택 질문 중)에 AI가 refs를 채우려 해도 같다. 주소가 든 refs 값은 링크 확인을 거친다.
+    const h2 = await harness();
+    await h2.step({ type: "quick", replyId: "purchase.research" });
+    const other = await h2.step(say(said), replyAi(fill("refs", said, said)));
+    expect(other.view.slots.refs).toBeUndefined();
+    expect(other.messages.some((message) => message.body.kind === "link")).toBe(true);
+  });
+
   it("메시지 본문은 8,192바이트 이하다", async () => {
     const h = await harness();
     await h.step({ type: "quick", replyId: "purchase.bought" });
