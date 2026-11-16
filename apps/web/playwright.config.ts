@@ -16,8 +16,14 @@ export default defineConfig({
   projects: [
     {
       name: "e2e",
-      testIgnore: "public.spec.ts",
+      testIgnore: ["public.spec.ts", "research-*.spec.ts"],
       use: { ...devices["iPhone 15"] },
+    },
+    {
+      // 대화형 리서치 챗은 노트북 크롬 화면이다(design.md 6절).
+      name: "e2e-desktop",
+      testMatch: "research-*.spec.ts",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
     {
       name: "public",

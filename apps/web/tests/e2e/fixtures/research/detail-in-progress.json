@@ -1,0 +1,17 @@
+{
+  "request": {
+    "requestId": "req-e2e-1",
+    "status": "in_progress",
+    "product": "소니 무선 헤드셋 사고 싶어요",
+    "budget": "30만 원 안쪽",
+    "condition": "새 제품",
+    "brand": "소니",
+    "item": "헤드셋",
+    "conditionKind": "new",
+    "createdAt": "2026-11-17T00:00:00.000Z",
+    "claimedAt": "2026-11-17T00:01:00.000Z",
+    "doneAt": null,
+    "isDemo": true
+  },
+  "result": null
+}

@@ -1,0 +1,70 @@
+{
+  "version": 5,
+  "messages": [
+    {
+      "seq": 16,
+      "role": "volunteer",
+      "body": {
+        "text": "소음 차단이 더 좋고, 오래 써도 귀가 편했어요."
+      },
+      "turnId": null
+    },
+    {
+      "seq": 17,
+      "role": "ai",
+      "tag": "fill",
+      "slot": "altReason",
+      "body": {
+        "text": "대안 이유: 소음 차단이 더 좋고, 오래 써도 귀가 편했어요"
+      },
+      "ai": "ok"
+    },
+    {
+      "seq": 18,
+      "role": "ai",
+      "tag": "question",
+      "slot": "benefits",
+      "body": {
+        "text": "살 때 받은 혜택이 있었어요? 카드 할인, 무료 배송, 쿠폰처럼 말해 주세요. 그걸 바탕으로 지금 받을 수 있는 혜택을 찾아볼게요."
+      },
+      "ai": "ok"
+    }
+  ],
+  "session": {
+    "stage": "chat",
+    "purchase": "bought",
+    "verified": true,
+    "slots": {
+      "model": {
+        "value": "WH-CH720N",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "pros": {
+        "value": "가볍고 귀가 덜 아파요",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "photo": {
+        "value": "사진 1장",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "alts": {
+        "value": "WH-CH520",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "altReason": {
+        "value": "소음 차단이 더 좋고, 오래 써도 귀가 편했어요",
+        "status": "filled",
+        "by": "volunteer"
+      }
+    },
+    "extras": [],
+    "pending": {},
+    "review": {}
+  },
+  "followUp": null,
+  "ai": "ok"
+}

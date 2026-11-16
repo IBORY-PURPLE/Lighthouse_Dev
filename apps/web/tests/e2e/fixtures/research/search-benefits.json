@@ -1,0 +1,51 @@
+{
+  "messages": [
+    {
+      "seq": 21,
+      "role": "ai",
+      "tag": "search",
+      "slot": "benefits",
+      "ai": "ok",
+      "body": {
+        "kind": "benefits",
+        "headline": "카드 할인과 무료 배송 기준으로 웹에서 4곳을 찾았어요.",
+        "items": [
+          {
+            "id": "b1",
+            "title": "공식 스토어 행사와 사은품",
+            "kind": "소니 공식 스토어",
+            "condition": "공식 스토어에서 진행하는 행사 목록이에요",
+            "compare": "받았던 무료 배송과 같은 종류예요",
+            "url": "https://www.sony.co.kr/event"
+          },
+          {
+            "id": "b2",
+            "title": "카드 결제 할인 행사",
+            "kind": "카드사 이벤트 페이지",
+            "condition": "결제 카드에 따라 달라요",
+            "compare": "카드 할인을 받았던 말과 같은 종류예요",
+            "url": "https://card.example.com/sony"
+          },
+          {
+            "id": "b3",
+            "title": "신규 쿠폰과 배송 혜택",
+            "kind": "오픈마켓 쿠폰 모음",
+            "condition": "가입 첫 구매 쿠폰이 있어요",
+            "compare": "무료 배송은 같고, 쿠폰은 새로 찾은 혜택이에요",
+            "url": "https://market.example.com/coupon"
+          },
+          {
+            "id": "b4",
+            "title": "상품 페이지 혜택 안내",
+            "kind": "대형 쇼핑몰 상품 페이지",
+            "condition": "",
+            "compare": "AI가 이 사이트를 열 수 없었어요. 직접 열어 확인해 주세요",
+            "url": "https://shop.example.com/p/1",
+            "mode": "check"
+          }
+        ]
+      }
+    }
+  ],
+  "lastSeq": 21
+}

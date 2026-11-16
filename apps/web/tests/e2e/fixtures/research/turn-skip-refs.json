@@ -1,0 +1,85 @@
+{
+  "version": 8,
+  "messages": [
+    {
+      "seq": 24,
+      "role": "volunteer",
+      "body": {
+        "text": "건너뛰기"
+      },
+      "turnId": null
+    },
+    {
+      "seq": 25,
+      "role": "ai",
+      "tag": "review",
+      "slot": null,
+      "body": {
+        "text": "모은 정보로 이용자에게 보낼 리뷰를 만들어 볼까요?",
+        "quick": [
+          {
+            "id": "review.make",
+            "label": "리뷰 만들기",
+            "tone": "primary",
+            "action": "review_make"
+          },
+          {
+            "id": "review.more",
+            "label": "더 답할게요"
+          }
+        ]
+      },
+      "ai": "ok"
+    }
+  ],
+  "session": {
+    "stage": "chat",
+    "purchase": "bought",
+    "verified": true,
+    "slots": {
+      "model": {
+        "value": "WH-CH720N",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "pros": {
+        "value": "가볍고 귀가 덜 아파요",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "photo": {
+        "value": "사진 1장",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "alts": {
+        "value": "WH-CH520",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "altReason": {
+        "value": "소음 차단이 더 좋고, 오래 써도 귀가 편했어요",
+        "status": "filled",
+        "by": "volunteer"
+      },
+      "benefits": {
+        "value": "카드 할인, 무료 배송",
+        "status": "filled",
+        "by": "volunteer",
+        "links": [
+          "https://www.sony.co.kr/event"
+        ]
+      },
+      "refs": {
+        "value": "",
+        "status": "skipped",
+        "by": "volunteer"
+      }
+    },
+    "extras": [],
+    "pending": {},
+    "review": {}
+  },
+  "followUp": null,
+  "ai": "ok"
+}

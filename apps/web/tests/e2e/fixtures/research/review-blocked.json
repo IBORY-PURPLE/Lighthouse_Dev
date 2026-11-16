@@ -1,0 +1,6 @@
+{
+  "error": "review_blocked",
+  "reasons": [
+    "가격 숫자는 넣을 수 없어요. 숫자를 빼 주세요."
+  ]
+}
