@@ -7,7 +7,9 @@ import { unknownModelTokens } from "@/lib/researchCheck";
 import type { NextCandidate, NextMessage, ResearchView, SlotKey, SlotState } from "@/lib/researchSession";
 import { planTurn, runTurn, validateAiTurn, type AiMode, type TurnPlan } from "@/lib/researchTurn";
 import { textViolations, type Violation } from "../helpers/researchJudge";
+import { buildReviewMaterial, buildTemplateReview, checkReviewText, reviewKnownMaterial, writeReview } from "@/lib/researchReview";
 import cases from "./research-turn-cases.json";
+import reviewCases from "./research-review-cases.json";
 
 // 대화형 리서치 턴(POST …/research/turn의 AI 부분)을 실제 OpenAI로 부르는 고정 사례 시험이다.
 // 실행: apps/web 에서 `npm run test:research-turn` (= vitest run --config vitest.chatbot.config.mts tests/chatbot/research-turn.test.ts).
@@ -276,5 +278,105 @@ describe.skipIf(!hasKey)("실제 OpenAI 턴 응답", () => {
     expect(records.length).toBe(live);
     const ok = records.filter((record) => record.ai === "ok").length;
     expect(ok, `ai=ok ${ok}/${records.length}`).toBeGreaterThanOrEqual(Math.ceil(records.length * 0.9));
+  });
+});
+
+// ---- 검증 리뷰(블록 A4): POST …/research/review의 AI 부분 -------------------------------------
+// 사례 3개: 정상, 가격·재고 유도, 자료에 없는 기종명 유도. 최종 문단(AI가 검사를 통과했으면 AI 문단, 아니면 서버 틀 문단)에서
+// 금지 표현(가격·재고·할인)·자료에 없는 기종명·주소·전화번호가 없는지를 코드로 판정한다. 칸 값의 명령형 문장을 인용하지 않는지는 판정하지 않는다(가격·기종 유도 문장은 위 검사로 걸린다).
+
+interface ReviewCase {
+  id: string;
+  note: string;
+  context: ResearchContext;
+  purchase: "bought" | "research";
+  photos: number;
+  slots: Partial<Record<SlotKey, string>>;
+  expect: { verified: boolean };
+}
+const REVIEW_CASES = reviewCases as ReviewCase[];
+
+function reviewView(entry: ReviewCase): ResearchView {
+  const slots: ResearchView["slots"] = {};
+  for (const [key, value] of Object.entries(entry.slots)) {
+    slots[key as SlotKey] = value === "" ? { value: "", status: "skipped", by: "volunteer" } : { value: value ?? "", status: "filled", by: "volunteer" };
+  }
+  if (entry.photos > 0) slots.photo = { value: `${entry.photos}장`, status: "filled", by: "volunteer" };
+  const photos = Array.from({ length: entry.photos }, (_, index) => ({
+    id: `p${index}`,
+    description: null,
+    seenModel: null,
+    shot: null,
+    createdAt: "2026-11-17T00:00:00.000Z",
+  }));
+  return {
+    sessionId: "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d",
+    volunteerId: "d-0000000000000001",
+    purchase: entry.purchase,
+    slots,
+    extras: [],
+    counters: { asked: {}, reasked: {} },
+    pending: {},
+    review: {},
+    version: 7,
+    lastSeq: 20,
+    createdAt: "2026-11-17T00:00:00.000Z",
+    updatedAt: "2026-11-17T00:00:00.000Z",
+    photos,
+    messages: [],
+  } as ResearchView;
+}
+
+function judgeReview(text: string, known: readonly string[]): Violation[] {
+  const violations = textViolations("review", text);
+  const unknown = unknownModelTokens(text, known);
+  if (unknown.length > 0) violations.push({ rule: "자료에 없는 기종", field: "review", snippet: unknown.join(",").slice(0, 40) });
+  for (const reason of checkReviewText(text, known, "edit")) violations.push({ rule: "리뷰 검사", field: "review", snippet: reason.slice(0, 40) });
+  return violations;
+}
+
+describe("검증 리뷰 고정 사례", () => {
+  it("사례 3개: 정상, 가격 유도, 기종명 유도", () => {
+    expect(REVIEW_CASES.map((entry) => entry.id)).toEqual(["review-normal", "review-price-bait", "review-model-bait"]);
+  });
+
+  it("AI 없음(서버 틀 문단)도 사례마다 위반이 없다: 키 없이 돈다", () => {
+    for (const entry of REVIEW_CASES) {
+      const source = { view: reviewView(entry), context: entry.context };
+      const text = buildTemplateReview(buildReviewMaterial(source));
+      expect(judgeReview(text, reviewKnownMaterial(source)), entry.id).toEqual([]);
+      expect(text, entry.id).toContain(entry.slots.model ?? "");
+    }
+  });
+});
+
+describe.skipIf(!hasKey)("실제 OpenAI 리뷰 응답", () => {
+  const records: { id: string; ai: string; ms: number; usage: { in: number; out: number }; violations: Violation[] }[] = [];
+
+  it.each(REVIEW_CASES)(
+    "$id: $note",
+    async (entry) => {
+      if (records.length > 0) await sleep(INTERVAL_MS);
+      const source = { view: reviewView(entry), context: entry.context };
+      const material = buildReviewMaterial(source);
+      const known = reviewKnownMaterial(source);
+      const startedAt = Date.now();
+      const written = await writeReview(material, known, AbortSignal.timeout(40_000));
+      const text = written.text ?? buildTemplateReview(material);
+      const violations = judgeReview(text, known);
+      records.push({ id: entry.id, ai: written.text ? "ok" : "fallback", ms: Date.now() - startedAt, usage: written.usage, violations });
+      expect(violations).toEqual([]);
+      // AI가 만든 문단이면 AI 문단 기준(150~700자, 3~7문장)도 통과한 것이다.
+      if (written.text) expect(checkReviewText(written.text, known, "ai")).toEqual([]);
+      expect(material.구매 === "구매 인증됨").toBe(entry.expect.verified);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it("실제 호출이 일어났고 대부분 AI 문단이다", () => {
+    write("research-review-results.json", { model: LLM_MODEL, records });
+    expect(records.length).toBe(REVIEW_CASES.length);
+    const ok = records.filter((record) => record.ai === "ok").length;
+    expect(ok, `ai=ok ${ok}/${records.length}`).toBeGreaterThanOrEqual(2);
   });
 });

@@ -3,6 +3,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildResultFromSession } from "@/lib/researchResult";
+import { checkCandidate } from "@/lib/resultInput";
 
 // 리서치 챗 대화 저장 SQL 시험(PGlite = 진짜 Postgres를 WASM으로). design.md 5절, 7절.
 // 한계: PGlite는 연결이 하나라 진짜 동시 실행(잠금 대기, skip locked)은 못 본다.
@@ -773,6 +775,68 @@ describe("내려놓기·정리·트리거", () => {
     const def = await one<{ d: string }>("select pg_get_functiondef('public.research_sweep(interval)'::regprocedure) as d");
     expect(def.d).toMatch(/for update skip locked/i);
     expect(def.d).toMatch(/pg_try_advisory_xact_lock/);
+  });
+});
+
+describe("A4 라우트의 호출 순서(사진 말풍선 → 다음 질문, 결과 보내기)", () => {
+  it("add_photo(다음 질문 없음) → add_message(cache key 없음) → apply(후보 목록)로 말풍선이 질문보다 앞에 온다", async () => {
+    const r = await opened();
+    await apply(r, "a", 0, { purchase: "bought", slots: { model: slot("720N") } }, [], [ask("ask_slot", "photo", "사진을 올려 주세요")]);
+    const state = (await open(r.id, r.volunteerId)).view;
+    const added = await call("public.research_add_photo($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, JPEG, null, null, null, "{}", "[]", "[]",
+    ]);
+    expect(added).toMatchObject({ outcome: "ok", chosen: null, messages: [] });
+    const bubble = await call("public.research_add_message($1::uuid, $2, $3::uuid, $4, $5::jsonb, $6::jsonb, $7)", [
+      r.id, r.volunteerId, r.sessionId, null,
+      JSON.stringify([{ role: "volunteer", tag: null, slot: "photo", body: { kind: "photo", photoId: added.photoId }, ai: null }]),
+      null, "done",
+    ]);
+    expect(bubble.outcome).toBe("ok");
+    expect(added.session.pending.lastQuestion.slot).toBe("photo");
+    const applied = await apply(r, `photo-${added.photoId}`, added.session.version, null, [], [ask("ask_slot", "pros", "장점 질문")]);
+    expect(applied.outcome).toBe("ok");
+    expect(applied.response.chosen).toBe("ask_slot");
+    const seqs = (await db.query<{ seq: number; kind: string | null; text: string | null }>(
+      "select seq, body->>'kind' as kind, body->>'text' as text from public.research_messages where request_id = $1 order by seq",
+      [r.id],
+    )).rows;
+    expect(seqs.slice(-2).map((row) => row.kind ?? row.text)).toEqual(["photo", "장점 질문"]);
+    expect(applied.response.lastSeq).toBe(seqs.at(-1)?.seq);
+    expect(state.version + 1).toBe(added.session.version);
+    // apply가 version을 더 올리지 않고, 같은 turn id를 다시 부르면 저장된 응답이다.
+    expect(applied.response.version).toBe(added.session.version);
+    expect((await apply(r, `photo-${added.photoId}`, added.session.version, null, [], [])).outcome).toBe("duplicate");
+  });
+
+  it("buildResultFromSession의 후보로 보내면 results에 그대로 저장된다", async () => {
+    const r = await opened();
+    const v = await fillRequired(r, "a", 0, true);
+    await call("public.research_add_photo($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, JPEG, null, null, null, "{}", "[]", "[]",
+    ]);
+    const text = "720N은 직접 구매해서 쓰는 봉사자가 사진으로 인증한 헤드셋이에요. 가벼워서 편하다고 해요.";
+    const draft = await call("public.research_set_review($1::uuid, $2, $3::uuid, $4::int, $5::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, null, JSON.stringify({ text, status: "draft" }),
+    ]);
+    expect(draft.outcome).toBe("ok");
+    const confirmed = await call("public.research_set_review($1::uuid, $2, $3::uuid, $4::int, $5::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, v + 1, JSON.stringify({ text, status: "confirmed" }),
+    ]);
+    const view = (await open(r.id, r.volunteerId)).view;
+    const candidates = buildResultFromSession(view);
+    expect(candidates[0]).toMatchObject({ name: "720N", guide: text });
+    const sent = await call("public.research_send($1::uuid, $2, $3::uuid, $4::int, $5::int, $6::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, v + 1, confirmed.review.rev, JSON.stringify(candidates),
+    ]);
+    expect(sent.outcome).toBe("sent");
+    const stored = await one<{ candidates: { name: string; guide: string; summary: { label: string; value: string }[] }[] }>(
+      "select candidates from public.results where request_id = $1",
+      [r.id],
+    );
+    expect(stored.candidates[0].guide).toBe(text);
+    expect(stored.candidates[0].summary.find((entry) => entry.label === "구매 인증")?.value).toBe("구매 인증됨");
+    for (const candidate of stored.candidates) expect(checkCandidate(candidate).ok).toBe(true);
   });
 });
 
