@@ -1,6 +1,7 @@
 # LightHouse 기술 설계서(TSD) v2: 봉사자 흐름(플로우 A·B) 반영
 
 작성일: 2026-11-09. 상태: **확정(2026-11-09 이용자 승인)**. 사람용 1쪽 요약은 `docs/human_tsd.md`.
+v2.2(2026-11-17, **초안: 이용자 승인(A39) 전**): 리서치 챗을 대화형으로 바꾸면서 서버가 대화 상태를 갖는다. 바뀐 곳은 핵심 결정 2·3, §2 데이터 표, §8.3(대화 표 6개·함수 9개·보관 규칙)이다. 공식 페이지 사진 읽기 원칙 예외(TSD 원칙 줄), 화면 절(D안 E1~E12), 결과 guide = 검증 리뷰 문단은 해당 PR(PR 3~5)에서 이 문서에 더한다. 설계 근거는 `docs/plans/2026-11-16-research-chat-backend/design.md`다.
 v2.1(2026-11-13): 봉사자 ③④⑤를 리서치 챗 한 화면으로 합침. 바뀐 곳은 핵심 결정 3, §1 플로우 B·시연 예외, §2, §3, §4, §5, §7.1, §8 공통, §8.1, §8.2, §8.3, §8.7·§8.8·사진 축소, §9·§9.1, §10, §12, §13이다(v2.1 문서는 이용자 승인 전. 설계 근거는 2026-11-12 이용자 지시).
 이전 판: v1(11/4 밤샘 범위)은 git 기록(`f8b77c6`)에 있다. 바뀐 점과 근거는 `docs/plans/2026-11-09-overnight/tsd-review.md`.
 적용 범위: 11/24 중간 시연까지의 데모 시나리오 V2(① 음성 요청 ② 요청 전달 ③ 탐색 조언 ④ 정보 요약 ⑤ 사람 검증 ⑥ 결과 전달 ⑦ 듣고 열기). v2.1부터 ③④⑤는 리서치 챗 한 화면에서 한다. 설계 출처는 FigJam의 "MVP 플로우 A · 사용자 요청"과 "MVP 플로우 B · 봉사자 수행"이다.
@@ -9,8 +10,8 @@ v2.1(2026-11-13): 봉사자 ③④⑤를 리서치 챗 한 화면으로 합침. 
 
 **v2의 핵심 결정**
 1. 백엔드는 Next.js 서버 함수(TypeScript) 하나다. FastAPI 등 별도 서버는 11/24 시연 전에는 두지 않는다(§3, 재검토 조건은 `tsd-review.md`).
-2. 서버 상태는 Supabase Postgres의 `requests`(대기열)와 `results`(결과함) 두 표뿐이다. 동시 선택은 SQL 함수의 조건부 UPDATE로 막는다(§2, §8.3).
-3. ③④⑤의 작업 중 값은 봉사자 기기에만 있다. 서버는 이미지와 원문을 저장하지 않는다(§2). v2에서는 탭 메모리(대화, 이미지 조각, 글자 읽기 원문, 요약 초안)였고, v2.1에서 리서치 챗의 답·AI 도움·작은 썸네일을 기기 `localStorage`에 두는 것으로 바꿨다.
+2. 서버 상태는 Supabase Postgres의 `requests`(대기열)와 `results`(결과함)에, v2.2부터 리서치 챗 대화 표 6개(`research_sessions`, `research_messages`, `research_turns`, `research_photos`, `research_usage`, `ai_usage_daily`)가 더해진다. 동시 선택은 SQL 함수의 조건부 UPDATE로 막고, 대화 표는 요청 행을 먼저 잠그는 SQL 함수로만 바꾼다(§2, §8.3). *(v2.2 초안)*
+3. ③④⑤의 작업 중 값(대화, 칸, 구매 인증 사진 작은 썸네일 최대 3장)은 v2.2부터 서버 DB의 대화 표에 둔다. 서버는 이미지 원본과 원문, 상세 페이지를 저장하지 않는다(§2). 보관은 보내기·내려놓기 때 즉시 삭제하고, 6시간 동안 활동이 없으면 요청을 대기열로 돌리며 대화도 지운다(§8.3). v2에서는 탭 메모리, v2.1에서는 기기 `localStorage`였다. *(v2.2 초안)*
 4. 데모 단계마다 브랜치 하나다(§12).
 
 ## 1. 합격 흐름
@@ -82,12 +83,14 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 이용자의 세 답(제품·예산·새/중고), 대기번호, 상태 | Supabase `requests` | §8.3 보관 규칙 |
 | 결과(후보명, 구매 링크, 가이드, 확정 요약) | Supabase `results` | 완료 뒤 7일(이용자 결정 대기) |
 | 이용자 기기의 지난 요청 표시 | 이용자 `localStorage` `lh.request.v1` | "새 요청하기"까지 |
-| 리서치 챗 진행 단계, 카드별 답, 구매 여부, 받은 AI 도움, 사진 작은 썸네일(최대 3장)·설명 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 보내기·내려놓기에 성공하면 지움. 서버 저장 안 함 |
+| 리서치 챗 대화, 칸 7개 값, 구매 여부, 추가 답, 검수한 리뷰 문단, 구매 인증 사진 작은 썸네일(JPEG, 최대 3장) | Supabase `research_sessions`·`research_messages`·`research_turns`·`research_photos`(v2.2 초안) | 보내기·내려놓기 때 즉시 삭제(DB 트리거). 6시간 활동이 없으면 요청을 대기열로 돌리고 같이 삭제. §8.3 |
+| 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
+| (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
 | 서버로 보내는 축소 사진(사진 설명용) | 봉사자 탭 메모리 | 새로 고치면 사라짐. 서버는 AI에 넘긴 뒤 버림 |
 | 시연 이어 보기 화면의 챗봇 대화 | 봉사자 탭 메모리 | 탭을 닫으면 사라짐 |
 
 - v2의 "이미지 조각·글자 읽기 원문·요약 초안·근거 원문은 탭 메모리"와 "대체 경로 이미지는 Storage 비공개 버킷" 행은 v2.1에서 없앴다.
-- 이미지와 상세페이지 원문을 서버에 남기지 않는 이유: 상세페이지 보관은 멘토가 지적한 법적 위험이다. 리서치 챗에서도 서버는 사진을 저장하지 않고, 결과에는 사진 장수와 설명 글만 들어간다.
+- 이미지와 상세페이지 원문을 서버에 남기지 않는 이유: 상세페이지 보관은 멘토가 지적한 법적 위험이다. v2.2의 사진은 구매 인증용(착샷·실제 소유 사진)뿐이고 상세 페이지 캡처는 받지 않는다. 서버는 원본을 저장하지 않고 브라우저가 줄인 작은 JPEG 썸네일(60,000자 이하)만 대화가 살아 있는 동안 둔다. 결과에는 사진이 들어가지 않는다. *(v2.2 초안)*
 - DB는 서버 라우트만 서버 키(secret 또는 service_role)로 SQL 함수(RPC)를 호출해 다룬다. 표는 RLS를 켜고 정책을 두지 않아 브라우저 직접 접근을 막는다. 브라우저에는 Supabase 키를 내보내지 않고 Realtime도 쓰지 않는다.
 - 봉사자 식별: 입장하면 기기 열쇠 쿠키(`lh_vol`)를 받고, 서버는 그 열쇠에서 뽑은 봉사자 ID를 쓴다(`volunteerSession.ts`). 실제 로그인은 범위 밖이다. QA 기간에는 접근 코드와 입장 코드가 없고 `lh_access` 쿠키도 없다. 링크만 있으면 이용자·봉사자 화면 모두 바로 쓰고, 봉사자 화면은 처음 열 때 스스로 `POST /api/volunteer/enter`를 불러 `lh_vol`을 받는다(쿠키는 비밀이 아니라 기기 번호표다). `DEMO_ACCESS_CODE`는 코드 입력용이 아니라 이 쿠키의 서명 비밀이다. 값을 바꾸면 모든 봉사자 기기의 입장이 풀리고(다시 열면 새로 받는다), 맡은 요청은 새 ID로 바뀌어 이어 보지 못한다. 없으면 입장이 503 `not_configured`다. 되돌리려면 이 변경(PR)을 revert한다.
 
@@ -319,6 +322,35 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 - 동시 선택은 Postgres Read Committed에서 UPDATE의 WHERE를 다시 평가하는 성질로 막는다(먼저 누른 사람만 성공). advisory lock이나 SKIP LOCKED는 쓰지 않는다. 근거: https://www.postgresql.org/docs/current/transaction-iso.html
 - 반환 열 이름은 `out_`으로 시작하고 표 열은 별칭으로 한정한다. 반환 이름이 열 이름과 같으면 PL/pgSQL에서 "ambiguous" 오류가 난다.
 - 초안 SQL은 `tsd-review.md`의 근거 문서와 워크플로 산출물에 있다. 실제 Postgres에서 돌려 보기 전까지는 추정이다(§10, §13).
+
+### 8.3.1 리서치 챗 대화 표와 SQL 함수(v2.2 초안, 마이그레이션 `20261117000000_research_conversation.sql`)
+
+추가형이다. 위 표 2개와 함수 5개는 바꾸지 않는다. 모든 표는 RLS를 켜고 정책이 없으며 `revoke all from anon, authenticated`다.
+
+| 표 | 내용 | 지워지는 때 |
+|---|---|---|
+| `research_sessions` | 요청당 세션 1개. 구매 여부, 칸 7개(`slots`), 추가 답, 질문 횟수(`counters`), 확인 필요(`pending`), 리뷰(`review`), 검색 캐시, `version`, `next_seq` | 요청이 in_progress에서 벗어나거나 봉사자가 바뀔 때(트리거), 요청 삭제(cascade) |
+| `research_messages` / `research_turns` | 대화 메시지(≤8,192바이트), 같은 `clientTurnId` 중복 방지와 처리 중 자리 | 세션과 함께 |
+| `research_photos` | 구매 인증 사진 JPEG 썸네일(≤60,000자), 설명·표기 기종·촬영 종류는 null 허용 | 세션과 함께 |
+| `research_usage` | 요청당 AI 턴·웹 검색·사진·리뷰 횟수 | 요청이 지워질 때만(세션이 지워져도 남음) |
+| `ai_usage_daily` | 서울 날짜별 웹 검색·AI 호출 횟수 | 없음(날짜당 한 줄) |
+
+| 함수 | 하는 일 |
+|---|---|
+| `research_open(p_request_id, p_volunteer_id, p_after)` | `p_after`가 없으면 6시간 정리 뒤 소유를 확인하고 세션을 만들어 전부 돌려준다. 있으면 읽기만(폴링) |
+| `research_begin(...)` | 소유·`session_id` 확인, 중복 턴·처리 중, stale(세지 않음), 검색 캐시, 요청당·하루 상한 확인, 스냅숏 |
+| `research_apply(...)` | 중복이면 저장된 응답(stale보다 먼저), stale, patch 반영, 칸이 바뀌면 `version+1`이고 확정 리뷰는 draft로, 다음 질문 후보 중 첫 유효 후보를 메시지로 |
+| `research_add_message` / `research_add_photo` / `research_remove_photo` | 검색 결과 저장, 사진(3장, 리서치만이면 거부) 넣기·지우기와 같은 처리에서 다음 질문 |
+| `research_set_review` / `research_send` | 리뷰 draft·confirmed 저장, 보내기(필수 칸·확정 리뷰·`version` 확인 뒤 요청 done과 `results` 삽입. 다시 보내면 existing) |
+| `research_sweep(p_idle)` | 6시간 넘게 활동이 없는 in_progress 요청을 `release_request`와 같은 값으로 대기열에 돌린다 |
+| 트리거 `research_drop_on_leave` | `requests`가 in_progress에서 벗어나거나 봉사자가 바뀌면 그 세션을 지운다 |
+
+- 필수 칸: 기종, 장점, 대안 대신 고른 이유, 구매함이면 사진, 구매 여부 정해짐. 리서치만이면 사진 칸이 없다.
+- 잠금 순서는 언제나 `requests` → `research_sessions` → `research_usage` → `ai_usage_daily`다. 세션을 쓰는 함수는 요청 행을 `for share`로, 요청을 바꾸는 `research_send`·`research_sweep`은 `for no key update`·`skip locked`로 먼저 잠근다. 그래서 내려놓기·보내기·정리와 교착이 없고, 소유 확인 뒤 내려놓기가 끝나 세션이 남는 경합도 없다.
+- 상한: 요청당 AI 턴 40, 웹 검색 12, 사진 올리기 6, 리뷰 3. 하루 웹 검색 60, AI 호출 600(환경변수 `RESEARCH_DAILY_SEARCH_CAP`·`RESEARCH_DAILY_AI_CAP`로 바꿈).
+- 함수는 모두 `security invoker`, `set search_path = ''`, `revoke execute from public, anon, authenticated`, `grant to service_role`다. 시험은 PGlite(`tests/unit/sql/researchSql.test.ts`).
+- 되돌리기: `supabase/rollback/20261117000000_research_conversation_down.sql`을 사람이 실행하고 `supabase migration repair --status reverted 20261117000000 --linked`를 실행한다.
+- 휴대폰 사진 링크(`photo_links`)는 11/18 뒤 마이그레이션 2(`20261119000000_photo_links.sql`)에서 더한다.
 
 ### 8.4 플로우 A(①②)
 
