@@ -79,6 +79,32 @@ export interface RequestStore {
   ): Promise<CompleteOutcome>;
   /** 시연 행만 지우고 대기 5건을 넣는다. volunteerId가 있으면 그 기기의 완료 1건도. 대기 건수를 돌려준다. */
   resetDemo(volunteerId: string | null): Promise<number>;
+  /**
+   * 메모리 저장소 전용: 맡은 지 idleMs가 넘었고 활동(activityOf가 주는 시각)도 그만큼 없는 요청을
+   * release와 같은 값으로 대기열에 돌린다. 돌린 개수를 준다. Supabase는 research_sweep이 한다.
+   */
+  returnIdle?(
+    idleMs: number,
+    activityOf?: (requestId: string) => number | null,
+  ): Promise<number>;
+}
+
+/**
+ * 요청이 in_progress에서 벗어나거나(내려놓기·보내기·6시간 반환) 지워질 때 부르는 알림.
+ * 메모리 리서치 저장소가 이 요청의 대화(세션)를 지우려고 구독한다(DB의 research_drop_on_leave 트리거와 같은 일).
+ */
+export type RequestLeaveListener = (requestId: string) => void;
+const leaveListeners = new Set<RequestLeaveListener>();
+
+export function onRequestLeave(listener: RequestLeaveListener): () => void {
+  leaveListeners.add(listener);
+  return () => {
+    leaveListeners.delete(listener);
+  };
+}
+
+function notifyLeave(requestId: string): void {
+  for (const listener of leaveListeners) listener(requestId);
 }
 
 /** 저장소를 쓸 수 없다(네트워크, 권한, 모양 이상). 라우트는 503 store_unavailable. */
@@ -187,6 +213,7 @@ export function createMemoryStore(
   };
 
   function removeRow(row: MemoryRow) {
+    notifyLeave(row.id);
     state.rows.delete(row.id);
     state.byClient.delete(row.clientRequestId);
     state.results.delete(row.id);
@@ -368,6 +395,7 @@ export function createMemoryStore(
       row.volunteerId = null;
       row.claimedAt = null;
       row.releaseCount += 1;
+      notifyLeave(row.id);
       return "released";
     },
     async complete(requestId, volunteerId, candidates) {
@@ -385,7 +413,25 @@ export function createMemoryStore(
       row.status = "done";
       row.doneAt = current;
       state.results.set(requestId, { volunteerId, candidates, sentAt: current });
+      notifyLeave(row.id);
       return { outcome: "completed", sentAt: new Date(current).toISOString() };
+    },
+    async returnIdle(idleMs, activityOf) {
+      const current = now();
+      sweep(current);
+      let returned = 0;
+      for (const row of state.rows.values()) {
+        if (row.status !== "in_progress") continue;
+        const activity = Math.max(row.claimedAt ?? 0, activityOf?.(row.id) ?? 0);
+        if (current - activity < idleMs) continue;
+        row.status = "waiting";
+        row.volunteerId = null;
+        row.claimedAt = null;
+        row.releaseCount += 1;
+        notifyLeave(row.id);
+        returned += 1;
+      }
+      return returned;
     },
     async resetDemo(volunteerId) {
       const current = now();
@@ -917,6 +963,10 @@ export function createSupabaseStore(
         () => fallback.resetDemo(volunteerId),
       );
     },
+    // 6시간 반환은 Supabase에서는 research_sweep이 한다. 메모리로 떨어졌을 때만 이 호출이 일한다.
+    async returnIdle(idleMs, activityOf) {
+      return fallback.returnIdle ? fallback.returnIdle(idleMs, activityOf) : 0;
+    },
   };
 }
 
@@ -925,6 +975,7 @@ export function createSupabaseStore(
 interface StoreCache {
   memory?: RequestStore;
   supabase?: RequestStore;
+  client?: RpcClient;
 }
 
 const globalCache = globalThis as typeof globalThis & {
@@ -958,13 +1009,17 @@ export function getRequestStore(): RequestStore {
   const settings = forcedMemory ? null : supabaseSettings();
   stores.memory ??= createMemoryStore();
   if (!settings) return stores.memory;
-  stores.supabase ??= createSupabaseStore(
-    createClient(settings.url, settings.key, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    }) as unknown as RpcClient,
-    stores.memory,
-  );
+  stores.client ??= createClient(settings.url, settings.key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  }) as unknown as RpcClient;
+  stores.supabase ??= createSupabaseStore(stores.client, stores.memory);
   return stores.supabase;
+}
+
+/** 리서치 저장소가 같은 Supabase 연결을 쓰도록 getRequestStore()가 만든 클라이언트를 준다. Supabase를 안 쓰면 null. */
+export function getSupabaseRpcClient(): RpcClient | null {
+  getRequestStore();
+  return cache().client ?? null;
 }
 
 /** 시험에서 접수·조회만 가짜로 넣을 때 쓰는 부분 저장소. 봉사자 메서드는 비워도 된다. */
