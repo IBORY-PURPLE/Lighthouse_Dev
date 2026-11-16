@@ -54,7 +54,7 @@ async function openVolunteer(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
   await installFakeSpeech(page);
-  await page.goto("/?basic=1");
+  await page.goto("/classic");
 
   await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
   // PR 2: 대기번호 화면에서는 "접수 완료" 제목에 초점이 있다. 이어 보기 버튼은 그 아래에 있다.
@@ -410,7 +410,7 @@ test.describe("역할 분리", () => {
     const context = page.context();
     await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
     await installFakeSpeech(page);
-    await page.goto("/?basic=1");
+    await page.goto("/classic");
 
     await completeFlowA(page, { ...DEFAULT_ANSWERS, product: REQUEST_SENTENCE });
     await expect(

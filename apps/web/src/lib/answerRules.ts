@@ -55,21 +55,17 @@ function sectionViolations(answer: string): AnswerViolation[] {
   return violations;
 }
 
-/** 세 항목 형식과 무관한 금지 표현(금액, 재고 단정, 모델명)만 본다. 이용자 대화 답에도 쓴다. */
-export function forbiddenClaims(text: string): AnswerViolation[] {
+export function checkAnswer(answer: string): AnswerViolation[] {
   return [
-    ...PRICE_PATTERNS.flatMap((pattern) => matches(text, pattern)).map(
+    ...sectionViolations(answer),
+    ...PRICE_PATTERNS.flatMap((pattern) => matches(answer, pattern)).map(
       (detail): AnswerViolation => ({ rule: "price", detail }),
     ),
-    ...matches(text, STOCK_PATTERN).map(
+    ...matches(answer, STOCK_PATTERN).map(
       (detail): AnswerViolation => ({ rule: "stock", detail }),
     ),
-    ...matches(text, MODEL_PATTERN).map(
+    ...matches(answer, MODEL_PATTERN).map(
       (detail): AnswerViolation => ({ rule: "model", detail }),
     ),
   ];
-}
-
-export function checkAnswer(answer: string): AnswerViolation[] {
-  return [...sectionViolations(answer), ...forbiddenClaims(answer)];
 }

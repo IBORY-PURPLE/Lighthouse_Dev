@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useReducer, useRef } from "react";
-import { AiConversation } from "@/components/AiConversation";
 import { DemoHandoff } from "@/components/DemoHandoff";
 import { SpeechInput, type SpeechInputLabels } from "@/components/SpeechInput";
 import { StatusRegion } from "@/components/StatusRegion";
@@ -11,7 +10,6 @@ import {
   QUESTIONS,
   requestFlowReducer,
   type FlowStep,
-  type RequestAnswers,
 } from "@/lib/requestFlow";
 import {
   checkRequest,
@@ -29,11 +27,7 @@ import {
 
 const MATCH_BUTTON = "봉사자 매칭 요청";
 
-/**
- * 이용자 화면. 기본은 AI 대화로 요청을 정하고, basic이면(또는 AI가 안 될 때) 고정 질문 3개로 간다.
- * 어느 쪽이든 정해진 요청은 같은 요약·접수·대기 상태로 이어진다.
- */
-export function UserHome({ basic }: { basic: boolean }) {
+export default function HomePage() {
   const [flow, flowDispatch] = useReducer(
     requestFlowReducer,
     PRIMARY_INPUT,
@@ -95,24 +89,8 @@ export function UserHome({ basic }: { basic: boolean }) {
   }, [step, question]);
 
   const handleStart = () => {
-    if (!basic) {
-      flowDispatch({ type: "startChat" });
-      return;
-    }
     dispatch({ type: "reset", mode: flow.inputMode });
     flowDispatch({ type: "start" });
-  };
-
-  const handleUseBasic = () => {
-    dispatch({ type: "reset", mode: flow.inputMode });
-    flowDispatch({ type: "useBasic" });
-  };
-
-  // AI 대화에서 이용자가 등록에 동의했다. 동의가 곧 접수 요청이라 요약 단계를 거쳐 바로 접수한다.
-  // 접수가 실패하면 요약 단계에서 같은 요청으로 다시 누를 수 있다.
-  const handleChatDone = (answers: RequestAnswers) => {
-    flowDispatch({ type: "chatDone", answers });
-    void register(answers);
   };
 
   const handleAnswer = (text: string) => {
@@ -126,19 +104,20 @@ export function UserHome({ basic }: { basic: boolean }) {
     flowDispatch({ type: "answer", text, inputMode: nextMode });
   };
 
-  const register = async (answers: RequestAnswers) => {
+  const handleMatch = async () => {
+    if (step !== "summary") return;
     // Safari는 눌린 버튼에 초점을 주지 않는다. 실패 안내 뒤에도 이 버튼에서 다시 누를 수 있게 둔다.
     matchRef.current?.focus();
     // 실패 뒤 다시 누르면 같은 id로 보내 번호가 둘로 늘지 않게 한다.
     const clientRequestId = flow.clientRequestId ?? crypto.randomUUID();
     flowDispatch({ type: "register", clientRequestId });
-    const outcome = await registerRequest(clientRequestId, answers);
+    const outcome = await registerRequest(clientRequestId, flow.answers);
     switch (outcome.kind) {
       case "queued":
         saveRequestRecord({
           requestId: outcome.requestId,
           queueNumber: outcome.queueNumber,
-          product: answers.product,
+          product: flow.answers.product,
         });
         flowDispatch({
           type: "registered",
@@ -155,11 +134,6 @@ export function UserHome({ basic }: { basic: boolean }) {
         flowDispatch({ type: "registerFailed", status: outcome.status });
         break;
     }
-  };
-
-  const handleMatch = () => {
-    if (step !== "summary") return;
-    void register(flow.answers);
   };
 
   const handleNewRequest = () => {
@@ -184,40 +158,17 @@ export function UserHome({ basic }: { basic: boolean }) {
       <h1 ref={headingRef} tabIndex={-1}>
         LightHouse 상품 요청
       </h1>
-      {/* AI 대화 화면은 자기 상태 영역을 가진다. 상태 영역은 한 화면에 하나만 둔다. */}
-      {step !== "chatting" && (
-        <StatusRegion message={step === "asking" ? model.status : flow.status} />
-      )}
+      <StatusRegion message={step === "asking" ? model.status : flow.status} />
       {step === "intro" && (
         <>
-          {basic ? (
-            <p className="flow-guide">
-              질문 3개에 답하면 봉사자에게 요청을 보냅니다. 답하는 동안에는
-              아무것도 보내지 않습니다.
-            </p>
-          ) : (
-            <p className="flow-guide">
-              AI와 이야기하며 찾는 제품을 정합니다. 말씀하신 내용은 AI 서버로
-              보내지고, 등록에 동의하기 전에는 봉사자에게 아무것도 보내지
-              않습니다.
-            </p>
-          )}
+          <p className="flow-guide">
+            질문 3개에 답하면 봉사자에게 요청을 보냅니다. 답하는 동안에는
+            아무것도 보내지 않습니다.
+          </p>
           <button type="button" className="big-button" onClick={handleStart}>
             시작하기
           </button>
-          {!basic && (
-            <button
-              type="button"
-              className="big-button big-button--secondary"
-              onClick={handleUseBasic}
-            >
-              기본 질문으로 하기
-            </button>
-          )}
         </>
-      )}
-      {step === "chatting" && (
-        <AiConversation onDone={handleChatDone} onUseBasic={handleUseBasic} />
       )}
       {step === "asking" && (
         <>

@@ -48,8 +48,6 @@ export const MAX_ANSWER_LENGTH = 200;
 export type FlowStep =
   | "checking"
   | "intro"
-  /** AI 대화(PR 3). 대화가 끝나면(done) summary로 가서 바로 접수한다. 기본 질문으로 바꿀 수 있다. */
-  | "chatting"
   | "asking"
   | "summary"
   | "registering"
@@ -75,11 +73,6 @@ export interface RequestFlowModel {
 
 export type RequestFlowAction =
   | { type: "start" }
-  | { type: "startChat" }
-  /** AI 대화가 끝났다(이용자가 등록에 동의). 정리된 요청으로 요약 단계에 간다. */
-  | { type: "chatDone"; answers: RequestAnswers }
-  /** AI 대화를 그만두고 고정 질문 3개로 간다. */
-  | { type: "useBasic" }
   | { type: "answer"; text: string; inputMode: InputMode }
   | { type: "register"; clientRequestId: string }
   | { type: "registered"; requestId: string; queueNumber: number }
@@ -123,20 +116,6 @@ export function requestFlowReducer(
   switch (action.type) {
     case "start":
       if (model.step !== "intro") return model;
-      return { ...model, step: "asking", question: 0, status: "" };
-    case "startChat":
-      if (model.step !== "intro") return model;
-      return { ...model, step: "chatting", status: "" };
-    case "chatDone":
-      if (model.step !== "chatting") return model;
-      return {
-        ...model,
-        answers: action.answers,
-        step: "summary",
-        status: summaryStatus(action.answers),
-      };
-    case "useBasic":
-      if (model.step !== "chatting" && model.step !== "intro") return model;
       return { ...model, step: "asking", question: 0, status: "" };
     case "answer": {
       if (model.step !== "asking") return model;
