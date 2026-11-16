@@ -31,6 +31,12 @@ import {
   type ResearchSessionData,
   type ResearchView,
 } from "./researchSession";
+import {
+  ARCHIVE_KEEP_MS,
+  buildArchive,
+  type ResearchArchive,
+  type ResearchReviewRecord,
+} from "./researchArchive";
 
 // 리서치 챗 대화 저장소. 인터페이스 하나에 메모리판과 Supabase판(RPC). design.md 5.1, 5.5.
 // 저장소 종류는 requestStore가 고른 것을 그대로 따른다. Supabase가 설정됐는데 research 표·함수가 없으면
@@ -179,6 +185,13 @@ export interface ResearchStore {
 
 // ---------- 메모리 ----------
 
+export type MemoryResearchStore = ResearchStore & {
+  drop(requestId: string): void;
+  close(): void;
+  /** 시험 전용: 보관 기록의 복사본. 화면·라우트는 쓰지 않는다. */
+  archiveSnapshot(): { archives: ResearchArchive[]; reviews: ResearchReviewRecord[] };
+};
+
 const THUMB_PATTERN = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
 const THUMB_MAX = 60_000;
 const OPEN_MESSAGE_LIMIT = 500;
@@ -233,12 +246,16 @@ function isoOf(time: number): string {
 export function createMemoryResearchStore(
   requests: RequestStore,
   options: { now?: () => number; listenLeave?: boolean } = {},
-): ResearchStore & { drop(requestId: string): void; close(): void } {
+): MemoryResearchStore {
   const now = options.now ?? Date.now;
   const sessions = new Map<string, MemorySession>();
   // 요청당 사용량은 세션이 지워져도 남는다(요청이 지워질 때만 같이 지운다).
   const usage = new Map<string, MemoryUsage>();
   const daily = new Map<string, { searches: number; aiCalls: number }>();
+  // 보낼 때 남기는 기록. 요청을 참조하지 않아 요청이 지워져도 남는다(DB 표와 같다).
+  // archives(대화 글)는 30일 뒤 sweep이 지우고, reviews(리뷰)는 지우지 않는다.
+  const archives = new Map<string, ResearchArchive>();
+  const reviews = new Map<string, ResearchReviewRecord>();
 
   function drop(requestId: string) {
     sessions.delete(requestId);
@@ -370,11 +387,15 @@ export function createMemoryResearchStore(
     };
   }
 
-  const store: ResearchStore & { drop(requestId: string): void; close(): void } = {
+  const store: MemoryResearchStore = {
     drop,
     close: unsubscribe,
+    archiveSnapshot: () => ({ archives: clone([...archives.values()]), reviews: clone([...reviews.values()]) }),
     storeKind: () => "memory",
     async sweep() {
+      for (const [requestId, archive] of archives) {
+        if (Date.parse(archive.createdAt) < now() - ARCHIVE_KEEP_MS) archives.delete(requestId);
+      }
       if (!requests.returnIdle) return 0;
       return requests.returnIdle(IDLE_RETURN_MS, (requestId) => sessions.get(requestId)?.updatedAt ?? null);
     },
@@ -694,12 +715,41 @@ export function createMemoryResearchStore(
       if (!Array.isArray(input.candidates) || input.candidates.length < 1 || input.candidates.length > 3) {
         return { outcome: "bad_request" };
       }
-      // complete가 요청을 done으로 바꾸면 알림으로 세션이 지워진다.
+      // complete가 요청을 done으로 바꾸면 알림으로 세션이 지워지므로, 보관할 글은 그 전에 만들어 둔다.
+      const request = await requests.getForVolunteer(input.requestId, input.volunteerId);
+      const kept =
+        request.kind === "ok"
+          ? buildArchive(
+              {
+                requestId: input.requestId,
+                now: now(),
+                isDemo: request.request.isDemo,
+                request: {
+                  product: request.request.product,
+                  budget: request.request.budget,
+                  condition: request.request.condition,
+                  brand: request.request.brand,
+                  item: request.request.item,
+                  conditionKind: request.request.conditionKind,
+                },
+                session: dataOf(session),
+                messages: session.messages.map((message) => clone(message)),
+                photoCount: session.photos.length,
+                candidates: input.candidates,
+              },
+              randomUUID,
+            )
+          : null;
       const done = await requests.complete(
         input.requestId,
         input.volunteerId,
         input.candidates as Parameters<RequestStore["complete"]>[2],
       );
+      // 처음 보낸 때만 넣는다. 재전송(existing)·같은 요청이 이미 있으면 다시 넣지 않는다.
+      if (done.outcome === "completed" && kept && !archives.has(input.requestId)) {
+        archives.set(input.requestId, kept.archive);
+        if (kept.review && !reviews.has(input.requestId)) reviews.set(input.requestId, kept.review);
+      }
       if (done.outcome === "completed" || done.outcome === "existing") {
         return { outcome: done.outcome === "completed" ? "sent" : "existing", sentAt: done.sentAt };
       }

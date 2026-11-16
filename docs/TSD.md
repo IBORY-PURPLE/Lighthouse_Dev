@@ -83,7 +83,9 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 이용자의 세 답(제품·예산·새/중고), 대기번호, 상태 | Supabase `requests` | §8.3 보관 규칙 |
 | 결과(후보명, 구매 링크, 가이드, 확정 요약) | Supabase `results` | 완료 뒤 7일(이용자 결정 대기) |
 | 이용자 기기의 지난 요청 표시 | 이용자 `localStorage` `lh.request.v1` | "새 요청하기"까지 |
-| 리서치 챗 대화, 칸 7개 값, 구매 여부, 추가 답, 검수한 리뷰 문단, 구매 인증 사진 작은 썸네일(JPEG, 최대 3장) | Supabase `research_sessions`·`research_messages`·`research_turns`·`research_photos`(v2.2 초안) | 보내기·내려놓기 때 즉시 삭제(DB 트리거). 6시간 활동이 없으면 요청을 대기열로 돌리고 같이 삭제. §8.3 |
+| 리서치 챗 대화, 칸 7개 값, 구매 여부, 추가 답, 검수한 리뷰 문단, 구매 인증 사진 작은 썸네일(JPEG, 최대 3장) | Supabase `research_sessions`·`research_messages`·`research_turns`·`research_photos`(v2.2 초안) | 보내기·내려놓기 때 즉시 삭제(DB 트리거). 보낼 때는 글만 복사해 `research_archives`·`research_reviews`에 남긴다(아래 두 행). 6시간 활동이 없으면 요청을 대기열로 돌리고 같이 삭제. §8.3 |
+| 보낸 대화를 글로만 복사한 것(역할·꼬리표·칸·글, 최종 칸, 리뷰 초안·최종본, 요청 품목·브랜드·문장). 사진·썸네일은 없음 | Supabase `research_archives`(v2.2 초안, **이용자 승인 전**, 결정 A45) | 보낸 날부터 30일(`research_sweep`이 지움). 요청 FK 없음: 요청이 지워져도 30일은 남는다. AI 질문 품질을 올리는 자료(RAG)용 |
+| 검수해 보낸 리뷰 문단과 품목·브랜드·기종, 구매 인증 여부, 같이 고민한 제품 이름, 봉사자가 확인한 혜택 링크 | Supabase `research_reviews`(v2.2 초안, **이용자 승인 전**, 결정 A45) | **영구**(삭제 규칙 없음). 요청 FK 없음. 같은 품목을 듣고 싶은 이용자에게 응답을 기다리지 않고 바로 전하는 확장용 |
 | 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
 | (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
 | 서버로 보내는 축소 사진(사진 설명용) | 봉사자 탭 메모리 | 새로 고치면 사라짐. 서버는 AI에 넘긴 뒤 버림 |
@@ -334,6 +336,8 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 | `research_photos` | 구매 인증 사진 JPEG 썸네일(≤60,000자), 설명·표기 기종·촬영 종류는 null 허용 | 세션과 함께 |
 | `research_usage` | 요청당 AI 턴·웹 검색·사진·리뷰 횟수 | 요청이 지워질 때만(세션이 지워져도 남음) |
 | `ai_usage_daily` | 서울 날짜별 웹 검색·AI 호출 횟수 | 없음(날짜당 한 줄) |
+| `research_archives`(마이그레이션 `20261117010000_research_archive.sql`, **이용자 승인 전**) | 보낼 때 대화를 글로만 복사. `request`(품목·브랜드·요청 문장), `purchase`, `verified`, `slots`(최종 칸, 썸네일·data URL 제외), `messages`(`[{seq, role, tag, slot, text}]`, 200KB 이하), `review`(초안·최종·rev), `is_demo`. `requests`를 참조하지 않는다(FK 없음) | 만든 지 30일 뒤 `research_sweep`이 삭제 |
+| `research_reviews`(같은 마이그레이션, **이용자 승인 전**) | 검수해 보낸 리뷰. `item`·`brand`·`product`·`model`, `purchase`·`verified`, `review_text`(1~1,000자), `alts`(같이 고민한 제품 이름), `benefit_links`(`[{title, url, kind, condition, confirmedAt}]`), `sent_at`, `is_demo`. `request_id` unique, FK 없음 | **영구**(삭제 규칙 없음) |
 
 | 함수 | 하는 일 |
 |---|---|
@@ -341,8 +345,8 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 | `research_begin(...)` | 소유·`session_id` 확인, 중복 턴·처리 중, stale(세지 않음), 검색 캐시, 요청당·하루 상한 확인, 스냅숏 |
 | `research_apply(...)` | 중복이면 저장된 응답(stale보다 먼저), stale, patch 반영, 칸이 바뀌면 `version+1`이고 확정 리뷰는 draft로, 다음 질문 후보 중 첫 유효 후보를 메시지로 |
 | `research_add_message` / `research_add_photo` / `research_remove_photo` | 검색 결과 저장, 사진(3장, 리서치만이면 거부) 넣기·지우기와 같은 처리에서 다음 질문 |
-| `research_set_review` / `research_send` | 리뷰 draft·confirmed 저장, 보내기(필수 칸·확정 리뷰·`version` 확인 뒤 요청 done과 `results` 삽입. 다시 보내면 existing) |
-| `research_sweep(p_idle)` | 6시간 넘게 활동이 없는 in_progress 요청을 `release_request`와 같은 값으로 대기열에 돌린다 |
+| `research_set_review` / `research_send` | 리뷰 draft·confirmed 저장, 보내기(필수 칸·확정 리뷰·`version` 확인 뒤 요청 done과 `results` 삽입. 다시 보내면 existing). 마이그레이션 `20261117010000`부터 요청을 done으로 바꾸기 전에 같은 트랜잭션에서 `research_archives`·`research_reviews`에 넣는다(재전송 때는 넣지 않음) |
+| `research_sweep(p_idle)` | 6시간 넘게 활동이 없는 in_progress 요청을 `release_request`와 같은 값으로 대기열에 돌린다. `20261117010000`부터 30일 지난 `research_archives`도 지운다(`research_reviews`는 지우지 않음) |
 | 트리거 `research_drop_on_leave` | `requests`가 in_progress에서 벗어나거나 봉사자가 바뀌면 그 세션을 지운다 |
 
 - 필수 칸: 기종, 장점, 대안 대신 고른 이유, 구매함이면 사진, 구매 여부 정해짐. 리서치만이면 사진 칸이 없다.
@@ -350,6 +354,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 - 상한: 요청당 AI 턴 40, 웹 검색 12, 사진 올리기 6, 리뷰 3. 하루 웹 검색 60, AI 호출 600(환경변수 `RESEARCH_DAILY_SEARCH_CAP`·`RESEARCH_DAILY_AI_CAP`로 바꿈).
 - 함수는 모두 `security invoker`, `set search_path = ''`, `revoke execute from public, anon, authenticated`, `grant to service_role`다. 시험은 PGlite(`tests/unit/sql/researchSql.test.ts`).
 - 되돌리기: `supabase/rollback/20261117000000_research_conversation_down.sql`을 사람이 실행하고 `supabase migration repair --status reverted 20261117000000 --linked`를 실행한다.
+- 보관 마이그레이션(`20261117010000_research_archive.sql`, 블록 A1b)은 `research_send`·`research_sweep`을 같은 시그니처로 `create or replace`하고 표 2개와 보조 함수 4개(`research_strip_data`, `research_body_text`, `research_archive_messages`, `research_archive_put`)를 더한다. 원격 적용은 이용자 허락(B15) 뒤다. 시험은 `tests/unit/sql/researchArchiveSql.test.ts`. 되돌리기: `supabase/rollback/20261117010000_research_archive_down.sql`을 한 번에 실행하고 `supabase migration repair --status reverted 20261117010000 --linked`를 실행한다(두 표의 데이터, 영구 리뷰 포함, 가 사라지니 먼저 내려받는다).
 - 휴대폰 사진 링크(`photo_links`)는 11/18 뒤 마이그레이션 2(`20261119000000_photo_links.sql`)에서 더한다.
 
 ### 8.4 플로우 A(①②)
