@@ -67,7 +67,9 @@ const DATA_URL_INLINE = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"')]+/gi
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const PHONE = /(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])/g;
 
-const URL_TOKEN = /([hH][tT][tT][pP][sS]?:\/\/[^\s"'<>)]+)|([^hH]+|[hH])/g;
+// 공백은 SQL과 같게 ASCII 공백류만 쓴다(\s는 유니코드 공백까지 잡아 SQL과 달라질 수 있다).
+const URL_TOKEN = /([hH][tT][tT][pP][sS]?:\/\/[^ \t\n\r\f\v]+)|([^hH]+|[hH])/g;
+const WORD_TOKEN = /([^ \t\n\r\f\v]+)|([ \t\n\r\f\v]+)/g;
 
 /** 주소 안의 %XX(ASCII 0x01~0x7F)를 더 바뀌지 않을 때까지(최대 20번) 푼다(SQL `research_url_decode`). */
 export function urlDecode(text: string): string {
@@ -92,17 +94,29 @@ function scrubPlain(text: string): string {
 
 /**
  * 보관할 글에서 사진 데이터(data URL)는 지우고 이메일·전화번호는 [이메일]·[전화번호]로 바꾼다(SQL `research_scrub_text`).
- * 글 속 http(s) 주소에 연락처·data URL이 섞여 있으면(%40처럼 인코딩된 것도 푼 뒤 본다) 가리면 깨지므로 주소 전체를 뺀다.
+ * 1) 글 속 http(s) 주소(공백 전까지 전부)에 연락처·data URL이 섞여 있으면 가리면 깨지므로 주소 전체를 뺀다.
+ *    %40처럼 인코딩된 것도 푼 뒤 보고, 20번을 풀어도 %XX가 남으면(여러 겹으로 숨김) 뺀다.
+ * 2) http가 아닌 덩어리(공백 사이)도 %XX를 풀면 연락처·data URL이 나오면 그 덩어리를 뺀다.
  */
 export function scrubText(text: string): string {
-  let out = "";
+  let first = "";
   for (const match of text.matchAll(URL_TOKEN)) {
     const url = match[1];
     if (url === undefined) {
-      out += match[2];
+      first += match[2];
     } else {
       const decoded = urlDecode(url);
-      if (scrubPlain(url) === url && scrubPlain(decoded) === decoded && !STILL_ENCODED.test(decoded)) out += url;
+      if (scrubPlain(url) === url && scrubPlain(decoded) === decoded && !STILL_ENCODED.test(decoded)) first += url;
+    }
+  }
+  let out = "";
+  for (const match of first.matchAll(WORD_TOKEN)) {
+    const word = match[1];
+    if (word === undefined) {
+      out += match[2];
+    } else {
+      const decoded = urlDecode(word);
+      if (decoded === word || scrubPlain(decoded) === decoded) out += word;
     }
   }
   return scrubPlain(out);

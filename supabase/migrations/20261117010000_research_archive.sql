@@ -92,19 +92,22 @@ returns text language sql immutable security invoker set search_path = '' as $$
 $$;
 
 -- 보관할 글에서 사진 데이터(data URL), 이메일, 전화번호를 지운다(data URL은 빈 글, 나머지는 [이메일]·[전화번호]로 바꾼다).
--- 글 속 http(s) 주소에 연락처·data URL이 섞여 있으면(%40처럼 인코딩된 것도 푼 뒤 본다) 가리면 깨지므로 주소 전체를 뺀다.
+-- 1) 글 속 http(s) 주소(공백 전까지 전부)에 연락처·data URL이 섞여 있으면 가리면 깨지므로 주소 전체를 뺀다.
+--    %40처럼 인코딩된 것도 푼 뒤 보고, 20번을 풀어도 %XX가 남으면(여러 겹으로 숨김) 뺀다.
+-- 2) http가 아닌 덩어리(공백 사이)도 %XX를 풀면 연락처·data URL이 나오면 그 덩어리를 뺀다.
 -- 대화 글 30일 보관본과 영구 리뷰에 사진 조각이나 연락처가 남지 않게 하는 마지막 안전망이다.
 create or replace function public.research_scrub_text(p_text text)
 returns text language plpgsql immutable security invoker set search_path = '' as $$
 declare
   v_out text := '';
+  v_out2 text := '';
   v_tok text[];
   v_dec text;
 begin
   if p_text is null then return null; end if;
   for v_tok in
     select m from regexp_matches(p_text,
-      '([hH][tT][tT][pP][sS]?://[^\s"''<>)]+)|([^hH]+|[hH])', 'g') as m
+      '([hH][tT][tT][pP][sS]?://[^ \t\n\r\f\v]+)|([^hH]+|[hH])', 'g') as m
   loop
     if v_tok[1] is not null then
       v_dec := public.research_url_decode(v_tok[1]);
@@ -118,7 +121,20 @@ begin
       v_out := v_out || v_tok[2];
     end if;
   end loop;
-  return public.research_scrub_plain(v_out);
+  for v_tok in
+    select m from regexp_matches(v_out, '([^ \t\n\r\f\v]+)|([ \t\n\r\f\v]+)', 'g') as m
+  loop
+    if v_tok[1] is not null then
+      v_dec := public.research_url_decode(v_tok[1]);
+      if v_dec <> v_tok[1] and public.research_scrub_plain(v_dec) <> v_dec then
+        continue;
+      end if;
+      v_out2 := v_out2 || v_tok[1];
+    else
+      v_out2 := v_out2 || v_tok[2];
+    end if;
+  end loop;
+  return public.research_scrub_plain(v_out2);
 end;
 $$;
 
