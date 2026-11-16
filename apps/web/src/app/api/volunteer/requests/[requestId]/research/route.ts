@@ -32,7 +32,8 @@ export async function GET(
       if (opened.outcome === "not_in_progress") {
         const detail = await getRequestStore().getForVolunteer(id, volunteerId);
         if (detail.kind === "ok" && detail.result) {
-          return succeed({ stage: "sent", sentAt: detail.result.sentAt });
+          // 화면이 같은 모양으로 읽도록 빈 값을 함께 준다(대화는 보낸 뒤 지워진다).
+          return succeed({ stage: "sent", sentAt: detail.result.sentAt, messages: [], slots: {}, photos: [], extras: [], pending: {} });
         }
       }
       return guardResponse(opened.outcome);

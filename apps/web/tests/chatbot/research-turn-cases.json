@@ -875,5 +875,58 @@
       "guide": true,
       "noFill": true
     }
+  },
+  {
+    "id": "r1-statement-suffix",
+    "group": "r1",
+    "note": "R1: '잘 나요' 같은 평서문 끝말이 묻는 말로 읽히지 않고, 구매 여부와 기종을 읽는다(리뷰 지적)",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "unset",
+      "slots": {},
+      "asked": [],
+      "reasked": [],
+      "lastQuestion": "purchase",
+      "shownModels": []
+    },
+    "text": "소니 WH-CH720N 샀어요. 소리가 잘 나요",
+    "mode": "live",
+    "expect": {
+      "purchase": "bought",
+      "fillSlot": "model",
+      "fillContains": "720N"
+    }
+  },
+{
+    "id": "r1-pros-statement",
+    "group": "r1",
+    "note": "R1: '오래가요' 같은 평서문 장점을 장점 칸으로 읽는다(리뷰 지적)",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N"
+      },
+      "asked": [
+        "model",
+        "pros"
+      ],
+      "reasked": [],
+      "lastQuestion": "pros",
+      "shownModels": []
+    },
+    "text": "배터리가 오래가요",
+    "mode": "live",
+    "expect": {
+      "fillSlot": "pros"
+    }
   }
 ]
