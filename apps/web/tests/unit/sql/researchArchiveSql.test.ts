@@ -38,9 +38,12 @@ const SCRUB_CASES: Array<[string, string]> = [
   ["네 번 https://shop.example/?email=a%25252540b.com 끝", "네 번  끝"],
   [`서른 번 https://shop.example/?email=a${"%" + "25".repeat(29) + "40"}b.com 끝`, "서른 번  끝"],
   ["대문자 HTTPS://shop.example/?e=a%40b.com 끝", "대문자  끝"],
+  ["주민 900101-1234567 번호 / 900101-5234567 / 9001011234567", "주민 [주민번호] 번호 / 900101-5234567 / 9001011234567"],
+  ["카드 1234-5678-9012-3456 / 1234 5678 9012 3456 / 1234567890123456 끝", "카드 [카드번호] / [카드번호] / [카드번호] 끝"],
+  ["구분이 섞이면 그대로 1234-5678 9012-3456 끝", "구분이 섞이면 그대로 1234-5678 9012-3456 끝"],
   ["정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr 010-1234-5678", "정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr [전화번호]"],
 ];
-const NEW_FUNCTIONS = ["research_scrub_text", "research_final_review", "research_strip_data", "research_body_text", "research_archive_messages", "research_archive_put"];
+const NEW_FUNCTIONS = ["research_url_decode", "research_scrub_plain", "research_scrub_text", "research_final_review", "research_strip_data", "research_body_text", "research_archive_messages", "research_archive_put"];
 const EXISTING_FUNCTIONS = ["register_request", "claim_request", "release_request", "complete_request", "reset_demo_requests"];
 
 const sql = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
@@ -581,6 +584,144 @@ describe("30일 보관과 영구 보관", () => {
     const swept = await one<{ n: number }>("select public.research_sweep() as n");
     expect(swept.n).toBeGreaterThanOrEqual(1);
     expect((await one<{ status: string }>("select status from public.requests where id = $1", [idle.id])).status).toBe("waiting");
+  });
+});
+
+describe("보관은 보내기를 막지 않는다", () => {
+  const setLinks = (id: string, links: string[]) =>
+    db.query(
+      `update public.research_sessions set slots = slots || jsonb_build_object(
+         'benefits', jsonb_build_object('value', 'x', 'links', $2::jsonb, 'status', 'confirmed', 'by', 'volunteer', 'at', '2026-11-17T02:00:00Z'))
+       where request_id = $1`,
+      [id, JSON.stringify(links)],
+    );
+  const benefitCard = (url: string) => ({
+    role: "ai", tag: "search", slot: "benefits", ai: "ok",
+    body: { kind: "benefits", items: [{ title: "제".repeat(60), kind: "종".repeat(40), condition: "조".repeat(80), compare: "", url }] },
+  });
+
+  it("혜택 링크는 앱 상한과 같은 4개까지만 영구 리뷰에 넣는다(순서 유지)", async () => {
+    const { r, version, rev } = await ready();
+    const links = Array.from({ length: 7 }, (_, i) => `https://shop.example.com/e/${i}`);
+    await setLinks(r.id, links);
+    expect((await send(r, version, rev)).outcome).toBe("sent");
+    const rv = await one<Json>("select benefit_links from public.research_reviews where request_id = $1", [r.id]);
+    expect(rv.benefit_links.map((l: Json) => l.url)).toEqual(links.slice(0, 4));
+  });
+
+  it("링크 4개가 최대 길이(한글 주소 500자)여도 보내기는 성공하고 영구 표 한도(8,000바이트) 안으로 뒤에서부터 덜어 낸다", async () => {
+    // tests/unit/researchArchive.test.ts의 같은 이름 시험과 같은 입력·같은 결과(앞 3개).
+    const urls = Array.from({ length: 4 }, (_, i) => `https://shop.example.com/${i}${"가".repeat(474)}`);
+    const { r, version, rev } = await ready(urls.map(benefitCard));
+    await setLinks(r.id, urls);
+    expect((await send(r, version, rev)).outcome).toBe("sent");
+    const rv = await one<Json>("select benefit_links, octet_length(benefit_links::text) as n from public.research_reviews where request_id = $1", [r.id]);
+    expect(rv.benefit_links.map((l: Json) => l.url)).toEqual(urls.slice(0, 3));
+    expect(rv.n).toBeLessThanOrEqual(7500);
+    expect(await count("public.research_archives where request_id = $1", [r.id])).toBe(1);
+  });
+
+  it("가리면서 칸이 30,000바이트를 넘으면 칸은 {}로 줄여 담고 보내기와 영구 리뷰는 그대로 된다", async () => {
+    const { r, version, rev } = await ready();
+    await db.query(
+      `update public.research_sessions set slots = slots || jsonb_build_object('pros', jsonb_build_object(
+         'value', $2::text, 'status', 'filled', 'by', 'volunteer')) where request_id = $1`,
+      [r.id, "01012345678 ".repeat(2100)],
+    );
+    expect((await send(r, version, rev)).outcome).toBe("sent");
+    const a = await one<Json>("select slots from public.research_archives where request_id = $1", [r.id]);
+    expect(a.slots).toEqual({});
+    expect(await count("public.research_reviews where request_id = $1", [r.id])).toBe(1);
+  });
+
+  it("마지막 안전망: 보관 표 검사에 걸려도(check_violation) 보내기는 성공하고 그 표만 비어 있다", async () => {
+    for (const table of NEW_TABLES) {
+      await db.exec(`alter table public.${table} add constraint tmp_block check (false) not valid`);
+      try {
+        const { r, version, rev } = await ready();
+        const sent = await send(r, version, rev);
+        expect(sent.outcome, table).toBe("sent");
+        expect(await count(`public.${table} where request_id = $1`, [r.id]), table).toBe(0);
+        const other = NEW_TABLES.find((name) => name !== table);
+        expect(await count(`public.${other} where request_id = $1`, [r.id]), `${table} 말고 ${other}`).toBe(1);
+        expect(await count("public.results where request_id = $1", [r.id]), table).toBe(1);
+        expect((await one<Json>("select status from public.requests where id = $1", [r.id])).status, table).toBe("done");
+      } finally {
+        await db.exec(`alter table public.${table} drop constraint tmp_block`);
+      }
+    }
+  });
+
+  it("혜택 확인 시각이 없으면 보낸 시각을 초 단위 UTC 모양으로 쓴다(메모리판과 같은 모양)", async () => {
+    const { r, version, rev } = await ready();
+    await db.query(
+      "update public.research_sessions set slots = jsonb_set(slots, '{benefits}', (slots->'benefits') - 'at') where request_id = $1",
+      [r.id],
+    );
+    expect((await send(r, version, rev)).outcome).toBe("sent");
+    const rv = await one<Json>("select benefit_links from public.research_reviews where request_id = $1", [r.id]);
+    expect(rv.benefit_links[0].confirmedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it("모델 앞뒤 공백은 스페이스만 뗀다(메모리판과 같다)", async () => {
+    const a = await ready();
+    const b = await ready();
+    for (const [x, value] of [[a, "  720N  "], [b, "\t720N"]] as const) {
+      await db.query(
+        `update public.research_sessions set slots = slots || jsonb_build_object('model', jsonb_build_object(
+           'value', $2::text, 'status', 'filled', 'by', 'volunteer')) where request_id = $1`,
+        [x.r.id, value],
+      );
+      expect((await send(x.r, x.version, x.rev)).outcome).toBe("sent");
+    }
+    expect((await one<Json>("select model from public.research_reviews where request_id = $1", [a.r.id])).model).toBe("720N");
+    expect((await one<Json>("select model from public.research_reviews where request_id = $1", [b.r.id])).model).toBe("\t720N");
+  });
+
+  it("두 표에 영구·시연 구분 안내(재사용 조회는 is_demo = false)가 표 설명으로 붙어 있다", async () => {
+    for (const name of NEW_TABLES) {
+      const row = await one<{ d: string | null }>("select obj_description(to_regclass($1), 'pg_class') as d", [`public.${name}`]);
+      expect(row.d, name).toMatch(/is_demo/);
+    }
+  });
+});
+
+describe("A1 보내기 회귀(보관 마이그레이션 적용 뒤에도 같다)", () => {
+  // tests/unit/sql/researchSql.test.ts의 보내기 시험은 마이그레이션 1~3에서만 돈다. research_send를 바꾼 4번째 마이그레이션 뒤에도 같은 가드가 걸리는지 본다.
+  it("필수 부족·리뷰 미확정·낡은 version·rev 불일치는 같은 결과 이름이고 아무것도 남지 않는다", async () => {
+    const r = await opened();
+    const miss = await send(r, 0, 0);
+    expect(miss).toMatchObject({ outcome: "missing_required" });
+    expect(miss.missing).toEqual(["purchase", "model", "pros", "altReason"]);
+    const { r: r2, version, rev } = await ready();
+    expect((await send(r2, version - 1, rev)).outcome).toBe("stale");
+    expect((await send(r2, version, rev + 1)).outcome).toBe("review_not_confirmed");
+    expect((await review(r2, version, "draft")).review.status).toBe("draft");
+    expect((await send(r2, version, rev)).outcome).toBe("review_not_confirmed");
+    expect(await count("public.research_archives where request_id = any($1::uuid[])", [[r.id, r2.id]])).toBe(0);
+    expect(await count("public.research_reviews where request_id = any($1::uuid[])", [[r.id, r2.id]])).toBe(0);
+  });
+
+  it("구매함인데 사진 행이 없으면(칸 표시만 있어도) 보낼 수 없다", async () => {
+    const { r, version, rev } = await ready();
+    await db.query("delete from public.research_photos where request_id = $1", [r.id]);
+    expect(await send(r, version, rev)).toMatchObject({ outcome: "missing_required", missing: ["photo"] });
+    expect(await count("public.research_archives where request_id = $1", [r.id])).toBe(0);
+  });
+
+  it("남의 요청·세션이 바뀐 요청은 not_yours·session_changed로 막힌다", async () => {
+    const { r, version, rev } = await ready();
+    expect((await send({ ...r, volunteerId: vol() }, version, rev)).outcome).toBe("not_yours");
+    expect((await send({ ...r, sessionId: randomUUID() }, version, rev)).outcome).toBe("session_changed");
+    expect(await count("public.research_archives where request_id = $1", [r.id])).toBe(0);
+    expect((await send(r, version, rev)).outcome).toBe("sent");
+  });
+
+  it("다른 탭이 먼저 보냈으면(결과가 이미 있으면) existing이다", async () => {
+    const { r, version, rev } = await ready();
+    expect((await send(r, version, rev)).outcome).toBe("sent");
+    expect((await send({ ...r, sessionId: randomUUID() }, version, rev)).outcome).toBe("existing");
+    expect((await send({ ...r, volunteerId: r.volunteerId }, version + 5, rev + 5)).outcome).toBe("existing");
   });
 });
 

@@ -2,6 +2,11 @@
 -- 이 파일 전체를 한 번에 실행한 뒤, `supabase migration repair --status reverted 20261117010000 --linked`도 실행해야 나중에 다시 적용할 수 있다.
 -- research_send·research_sweep은 마이그레이션 1(20261117000000)의 본문으로 되돌린다(보관 표 넣기·30일 삭제가 빠진다).
 -- research_archives·research_reviews 표와 그 안의 데이터(영구 보관 리뷰 포함)는 사라진다. 필요하면 먼저 내려받는다.
+-- 되돌리는 순서: 이 파일이 먼저, 그다음 20261117000000_research_conversation_down.sql. 뒤 파일부터 돌리면 이 표들이 고아로 남는다.
+-- begin~commit 한 트랜잭션이라 psql -f로 돌려도 중간에 실패하면 전부 취소된다(잠금은 3초 안에 못 잡으면 실패).
+
+begin;
+set local lock_timeout = '3s';
 
 create or replace function public.research_send(
   p_request_id uuid, p_volunteer_id text, p_session_id uuid,
@@ -104,3 +109,5 @@ drop function if exists public.research_url_decode(text);
 
 drop table if exists public.research_reviews;
 drop table if exists public.research_archives;
+
+commit;

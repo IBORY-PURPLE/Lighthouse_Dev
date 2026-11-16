@@ -51,6 +51,10 @@ create table public.research_reviews (
   sent_at timestamptz not null default now()
 );
 create index research_reviews_item_idx on public.research_reviews (item, brand);
+comment on table public.research_reviews is
+  '영구 보관. 재사용 조회는 반드시 is_demo = false로 거른다(시연·리허설 리뷰가 섞여 있다). 개인정보가 들어갔으면 service_role로 request_id 행을 지운다(TSD 8.3).';
+comment on table public.research_archives is
+  '보낸 날부터 30일(research_sweep이 지움). 시연 행(is_demo)이 섞여 있다. 자료로 쓸 때 is_demo = false로 거른다.';
 
 alter table public.research_archives enable row level security;
 alter table public.research_reviews enable row level security;
@@ -82,12 +86,15 @@ begin
 end;
 $$;
 
--- 주소를 따로 보지 않고 글자만 가린다: data URL은 빈 글, 이메일·전화번호는 [이메일]·[전화번호]로 바꾼다.
+-- 주소를 따로 보지 않고 글자만 가린다: data URL은 빈 글, 이메일·주민등록번호(하이픈형)·카드번호(4자리 4묶음)·전화번호는
+-- [이메일]·[주민번호]·[카드번호]·[전화번호]로 바꾼다. 집 주소나 말로 받아 적은 번호는 가리지 못한다(남는 위험, TSD 8.3).
 create or replace function public.research_scrub_plain(p_text text)
 returns text language sql immutable security invoker set search_path = '' as $$
-  select regexp_replace(regexp_replace(regexp_replace(p_text,
+  select regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(p_text,
     'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'gi'),
     '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[이메일]', 'g'),
+    '(?<![0-9])[0-9]{6}-[1-4][0-9]{6}(?![0-9])', '[주민번호]', 'g'),
+    '(?<![0-9])[0-9]{4}([- ]?)[0-9]{4}\1[0-9]{4}\1[0-9]{4}(?![0-9])', '[카드번호]', 'g'),
     '(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])', '[전화번호]', 'g')
 $$;
 
@@ -268,7 +275,7 @@ end;
 $$;
 
 -- 보내는 순간 두 표에 넣는다. research_send가 요청을 done으로 바꾸기 전에 부른다(그 UPDATE가 트리거로 세션을 지운다).
--- request_id가 같은 행이 있으면 건드리지 않는다. p_candidates는 보내는 결과(후보 1~3개): 2·3번째 이름이 같이 고민한 제품이다.
+-- 보관은 보내기를 막지 않는다(크기를 줄여 담고, 그래도 검사에 걸리면 그 표만 건너뛴다). request_id가 같은 행이 있으면 건드리지 않는다. p_candidates는 보내는 결과(후보 1~3개): 2·3번째 이름이 같이 고민한 제품이다.
 create or replace function public.research_archive_put(p_request_id uuid, p_candidates jsonb)
 returns void language plpgsql security invoker set search_path = '' as $$
 declare
@@ -280,6 +287,7 @@ declare
   v_draft text;
   v_alts jsonb;
   v_links jsonb;
+  v_slots jsonb;
 begin
   select s.* into v_s from public.research_sessions as s where s.request_id = p_request_id;
   if not found then return; end if;
@@ -323,27 +331,43 @@ begin
         order by m.seq desc limit 1
     ) as i on true
     -- 주소에 전화번호·이메일·data URL이 섞여 있으면(가리면 주소가 깨지므로) 그 링크는 영구 기록에 넣지 않는다.
-    where l.ord <= 10 and l.url ~ '^https?://' and public.research_scrub_text(l.url) = l.url;
+    where l.ord <= 4 and l.url ~ '^https?://' and public.research_scrub_text(l.url) = l.url;
+  -- 보관은 보내기를 막지 않는다: 영구 표의 크기 검사(8,000바이트)에 걸리지 않게 뒤에서부터 덜어 낸다. 개수 상한은 앱(maxLinks)과 같은 4개.
+  while jsonb_array_length(v_links) > 0 and octet_length(v_links::text) > 7500 loop
+    v_links := v_links - (jsonb_array_length(v_links) - 1);
+  end loop;
+  -- 칸은 가리면서 글자가 늘 수 있다(전화번호 11자 -> [전화번호]). 보관 표 검사(30,000바이트)를 넘으면 칸은 비워 둔다.
+  v_slots := public.research_strip_data(v_s.slots);
+  if octet_length(v_slots::text) > 30000 then v_slots := '{}'::jsonb; end if;
 
-  insert into public.research_archives (request_id, is_demo, request, purchase, verified, slots, messages, review)
-    values (p_request_id, v_r.is_demo,
-      jsonb_strip_nulls(jsonb_build_object('product', public.research_scrub_text(v_r.product),
-        'budget', public.research_scrub_text(v_r.budget), 'condition', public.research_scrub_text(v_r.condition),
-        'brand', public.research_scrub_text(v_r.brand), 'item', public.research_scrub_text(v_r.item),
-        'conditionKind', v_r.condition_kind)),
-      v_s.purchase, v_verified, public.research_strip_data(v_s.slots),
-      public.research_archive_messages(p_request_id),
-      jsonb_build_object('final', v_final, 'draft', v_draft, 'rev', coalesce((v_s.review->>'rev')::int, 0)))
-    on conflict (request_id) do nothing;
+  -- 마지막 안전망: 두 넣기는 각자 하위 트랜잭션이라 크기 검사(check_violation)에 걸려도 그 보관만 건너뛰고 보내기는 계속된다.
+  begin
+    insert into public.research_archives (request_id, is_demo, request, purchase, verified, slots, messages, review)
+      values (p_request_id, v_r.is_demo,
+        jsonb_strip_nulls(jsonb_build_object('product', public.research_scrub_text(v_r.product),
+          'budget', public.research_scrub_text(v_r.budget), 'condition', public.research_scrub_text(v_r.condition),
+          'brand', public.research_scrub_text(v_r.brand), 'item', public.research_scrub_text(v_r.item),
+          'conditionKind', v_r.condition_kind)),
+        v_s.purchase, v_verified, v_slots,
+        public.research_archive_messages(p_request_id),
+        jsonb_build_object('final', v_final, 'draft', v_draft, 'rev', coalesce((v_s.review->>'rev')::int, 0)))
+      on conflict (request_id) do nothing;
+  exception when check_violation then
+    raise warning 'research_archive_put: 대화 보관본을 건너뜀(%)', sqlerrm;
+  end;
 
   -- research_send가 빈 리뷰를 먼저 거르므로 v_final은 비어 있지 않다(방어용 조건).
   if v_final <> '' then
-    insert into public.research_reviews (request_id, is_demo, item, brand, product, model, purchase, verified,
-      review_text, alts, benefit_links)
-      values (p_request_id, v_r.is_demo, public.research_scrub_text(v_r.item), public.research_scrub_text(v_r.brand),
-        public.research_scrub_text(v_r.product), nullif(v_model, ''), v_s.purchase,
-        v_verified, v_final, v_alts, v_links)
-      on conflict (request_id) do nothing;
+    begin
+      insert into public.research_reviews (request_id, is_demo, item, brand, product, model, purchase, verified,
+        review_text, alts, benefit_links)
+        values (p_request_id, v_r.is_demo, public.research_scrub_text(v_r.item), public.research_scrub_text(v_r.brand),
+          public.research_scrub_text(v_r.product), nullif(v_model, ''), v_s.purchase,
+          v_verified, v_final, v_alts, v_links)
+        on conflict (request_id) do nothing;
+    exception when check_violation then
+      raise warning 'research_archive_put: 영구 리뷰를 건너뜀(%)', sqlerrm;
+    end;
   end if;
 end;
 $$;

@@ -1,3 +1,4 @@
+import { RESEARCH_LIMITS } from "./research";
 import type { ResearchMessage, ResearchSessionData } from "./researchSession";
 
 // 보낼 때 남기는 두 가지 기록의 순수 규칙(메모리 저장소가 쓴다). SQL(`research_body_text`, `research_archive_messages`,
@@ -10,7 +11,11 @@ export const ARCHIVE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 export const ARCHIVE_TEXT_MAX = 3000;
 export const ARCHIVE_MESSAGES_MAX_BYTES = 190_000;
 export const REVIEW_TEXT_MAX = 1000;
-export const BENEFIT_LINKS_MAX = 10;
+// 영구 리뷰의 혜택 링크 상한은 앱 상한(RESEARCH_LIMITS.maxLinks = 4)과 같다. SQL `research_archive_put`의 `l.ord <= 4`도 같은 값이다.
+export const BENEFIT_LINKS_MAX = RESEARCH_LIMITS.maxLinks;
+// 보관 표의 크기 검사(jsonb::text 바이트)에 걸리지 않게 줄이는 한도. SQL과 같다. 보관은 보내기를 막지 않는다.
+export const BENEFIT_LINKS_MAX_BYTES = 7500;
+export const ARCHIVE_SLOTS_MAX_BYTES = 30_000;
 
 export interface ArchiveMessage {
   seq: number;
@@ -65,6 +70,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const DATA_URL_VALUE = /^\s*data:/i;
 const DATA_URL_INLINE = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"')]+/gi;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// 주민등록번호는 하이픈형만, 카드번호는 4자리 4묶음(구분은 없거나 같은 문자 하나)만 가린다. 집 주소·말로 받아 적은 번호는 못 가린다(TSD 8.3).
+const RRN = /(?<![0-9])[0-9]{6}-[1-4][0-9]{6}(?![0-9])/g;
+const CARD = /(?<![0-9])[0-9]{4}([- ]?)[0-9]{4}\1[0-9]{4}\1[0-9]{4}(?![0-9])/g;
 const PHONE = /(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])/g;
 
 // 공백은 SQL과 같게 ASCII 공백류만 쓴다(\s는 유니코드 공백까지 잡아 SQL과 달라질 수 있다).
@@ -89,11 +97,16 @@ export function urlDecode(text: string): string {
 const STILL_ENCODED = /%(0[1-9A-Fa-f]|[1-7][0-9A-Fa-f])/;
 
 function scrubPlain(text: string): string {
-  return text.replace(DATA_URL_INLINE, "").replace(EMAIL, "[이메일]").replace(PHONE, "[전화번호]");
+  return text
+    .replace(DATA_URL_INLINE, "")
+    .replace(EMAIL, "[이메일]")
+    .replace(RRN, "[주민번호]")
+    .replace(CARD, "[카드번호]")
+    .replace(PHONE, "[전화번호]");
 }
 
 /**
- * 보관할 글에서 사진 데이터(data URL)는 지우고 이메일·전화번호는 [이메일]·[전화번호]로 바꾼다(SQL `research_scrub_text`).
+ * 보관할 글에서 사진 데이터(data URL)는 지우고 이메일·주민번호·카드번호·전화번호는 [이메일]·[주민번호]·[카드번호]·[전화번호]로 바꾼다(SQL `research_scrub_text`).
  * 1) 글 속 http(s) 주소(공백 전까지 전부)에 연락처·data URL이 섞여 있으면 가리면 깨지므로 주소 전체를 뺀다.
  *    %40처럼 인코딩된 것도 푼 뒤 보고, 20번을 풀어도 %XX가 남으면(여러 겹으로 숨김) 뺀다.
  * 2) http가 아닌 덩어리(공백 사이)도 %XX를 풀면 연락처·data URL이 나오면 그 덩어리를 뺀다.
@@ -201,6 +214,16 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
+/** SQL `octet_length(값::text)`와 같은 크기. jsonb 글자 모양은 ": "와 ", "로 구분한다. */
+export function jsonbBytes(value: unknown): number {
+  const text = (v: unknown): string => {
+    if (Array.isArray(v)) return `[${v.map(text).join(", ")}]`;
+    if (isRecord(v)) return `{${Object.entries(v).map(([k, e]) => `${JSON.stringify(k)}: ${text(e)}`).join(", ")}}`;
+    return JSON.stringify(v);
+  };
+  return byteLength(text(value));
+}
+
 /** 대화를 seq 순서로 글만 뽑는다. 메시지마다 3,000자, 합계 190KB 안(SQL과 같은 한도). */
 export function archiveMessages(messages: ResearchMessage[]): ArchiveMessage[] {
   const out: ArchiveMessage[] = [];
@@ -245,6 +268,11 @@ export interface ArchiveSource {
   candidates: unknown[];
 }
 
+function archiveSlots(slots: ResearchSessionData["slots"]): Record<string, unknown> {
+  const clean = stripData(structuredClone(slots)) as unknown as Record<string, unknown>;
+  return jsonbBytes(clean) > ARCHIVE_SLOTS_MAX_BYTES ? {} : clean;
+}
+
 function trimmed(text: string): string {
   return text.replace(/^\s+|\s+$/g, "");
 }
@@ -259,7 +287,11 @@ export function finalReview(reviewText: string | undefined, candidates: unknown[
   return trimmed(scrubText(cutChars(str(candidates[0].guide), REVIEW_TEXT_MAX)));
 }
 
-/** 보내는 순간 만들 두 기록. 리뷰 문단이 비어 있으면 review는 null이다(영구 표에 넣지 않는다). */
+/**
+ * 보내는 순간 만들 두 기록. 리뷰 문단이 비어 있으면 review는 null이다(영구 표에 넣지 않는다).
+ * 단 research_send가 빈 리뷰를 먼저 거르므로(review_not_confirmed) send 경로에서는 null이 나오지 않는다. null 분기는 방어용이다.
+ * 보관은 보내기를 막지 않는다: 혜택 링크는 4개·7,500바이트 안으로, 가린 칸이 30,000바이트를 넘으면 칸은 {}로 줄여 담는다.
+ */
 export function buildArchive(
   source: ArchiveSource,
   newId: () => string,
@@ -288,7 +320,7 @@ export function buildArchive(
     request,
     purchase: session.purchase,
     verified,
-    slots: stripData(structuredClone(session.slots)) as unknown as Record<string, unknown>,
+    slots: archiveSlots(session.slots),
     messages: archiveMessages(source.messages),
     review: { final, draft, rev: session.review.rev ?? 0 },
   };
@@ -300,9 +332,11 @@ export function buildArchive(
     .filter((name) => name !== "")
     .map((name) => cutChars(scrubText(name), 100));
   const firstName = isRecord(source.candidates[0]) ? str(source.candidates[0].name) : "";
-  const model = scrubText((session.slots.model?.value ?? "").trim() || firstName);
+  // SQL btrim과 같게 앞뒤 공백(스페이스)만 뗀다.
+  const model = scrubText((session.slots.model?.value ?? "").replace(/^ +| +$/g, "") || firstName);
 
-  const confirmedAt = cutChars(scrubText(session.slots.benefits?.at ?? createdAt), 40);
+  // 링크마다 확인한 시각은 따로 남지 않는다. 칸에 at이 없으면 보낸 시각이다(SQL과 같은 초 단위 UTC 모양).
+  const confirmedAt = cutChars(scrubText(session.slots.benefits?.at ?? createdAt.replace(/\.\d{3}Z$/, "Z")), 40);
   const benefitLinks: BenefitLink[] = [];
   const links = Array.isArray(session.slots.benefits?.links) ? session.slots.benefits.links : [];
   links.slice(0, BENEFIT_LINKS_MAX).forEach((url) => {
@@ -325,6 +359,8 @@ export function buildArchive(
       confirmedAt,
     });
   });
+
+  while (benefitLinks.length > 0 && jsonbBytes(benefitLinks) > BENEFIT_LINKS_MAX_BYTES) benefitLinks.pop();
 
   return {
     archive,

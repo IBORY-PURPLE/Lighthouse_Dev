@@ -5,12 +5,18 @@ import {
   archiveMessages,
   ARCHIVE_KEEP_MS,
   ARCHIVE_MESSAGES_MAX_BYTES,
+  ARCHIVE_SLOTS_MAX_BYTES,
+  BENEFIT_LINKS_MAX,
+  BENEFIT_LINKS_MAX_BYTES,
   bodyText,
+  buildArchive,
   finalReview,
+  jsonbBytes,
   scrubText,
   stripData,
 } from "@/lib/researchArchive";
-import type { ResearchMessage, SlotState } from "@/lib/researchSession";
+import { RESEARCH_LIMITS } from "@/lib/research";
+import type { ResearchMessage, ResearchSessionData, SlotState } from "@/lib/researchSession";
 
 // 보낼 때 남기는 두 기록(30일 대화 글, 영구 리뷰)의 순수 규칙과 메모리 저장소 시험. 블록 A1b, 이용자 결정 A45.
 // SQL 쪽은 tests/unit/sql/researchArchiveSql.test.ts. 두 구현은 같은 규칙이다.
@@ -138,6 +144,9 @@ describe("글만 뽑기(순수 함수)", () => {
     ["네 번 https://shop.example/?email=a%25252540b.com 끝", "네 번  끝"],
     [`서른 번 https://shop.example/?email=a${"%" + "25".repeat(29) + "40"}b.com 끝`, "서른 번  끝"],
     ["대문자 HTTPS://shop.example/?e=a%40b.com 끝", "대문자  끝"],
+    ["주민 900101-1234567 번호 / 900101-5234567 / 9001011234567", "주민 [주민번호] 번호 / 900101-5234567 / 9001011234567"],
+    ["카드 1234-5678-9012-3456 / 1234 5678 9012 3456 / 1234567890123456 끝", "카드 [카드번호] / [카드번호] / [카드번호] 끝"],
+    ["구분이 섞이면 그대로 1234-5678 9012-3456 끝", "구분이 섞이면 그대로 1234-5678 9012-3456 끝"],
     ["정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr 010-1234-5678", "정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr [전화번호]"],
     ];
     for (const [input, expected] of cases) expect(scrubText(input), input).toBe(expected);
@@ -237,7 +246,7 @@ describe("메모리 보내기 기록", () => {
     expect(rv.reviewText).toBe("문의 [전화번호] / [이메일]");
     expect(rv.model).toBe("720N [이메일]");
 
-    // 공백뿐인 리뷰: 후보 1 가이드를 쓰고, 둘 다 비면 리뷰 행만 건너뛴다.
+    // 공백뿐인 리뷰: 후보 1 가이드를 쓰고, 둘 다 비면 보내지 않는다(두 표 모두 비어 있다).
     const b = await ready();
     await research.setReview({ ...b.r.actor, baseVersion: b.version, text: "   ", status: "confirmed" });
     const bView = await research.open(b.r.id, b.r.volunteerId);
@@ -356,5 +365,57 @@ describe("메모리 보내기 기록", () => {
     expect(research.archiveSnapshot().archives).toEqual([]);
     expect(research.archiveSnapshot().reviews).toHaveLength(2);
     expect(ARCHIVE_KEEP_MS).toBe(30 * DAY);
+  });
+});
+
+describe("보관은 보내기를 막지 않는다(크기를 줄여 담는다)", () => {
+  const session = (slots: Record<string, unknown>) =>
+    ({ purchase: "research", slots, review: { text: "리뷰 문단", status: "confirmed", rev: 1 } }) as unknown as ResearchSessionData;
+  const source = (slots: Record<string, unknown>, messages: ResearchMessage[] = []) => ({
+    requestId: "r1", now: T0, isDemo: false,
+    request: { product: "소니 헤드셋", budget: "10만 원", condition: "새 제품", brand: "Sony", item: "헤드셋", conditionKind: "new" },
+    session: session(slots), messages, photoCount: 0, candidates: [CANDIDATES[0]],
+  });
+  const ids = () => { let n = 0; return () => `id-${++n}`; };
+  const card = (seq: number, url: string): ResearchMessage => ({
+    seq, role: "ai", tag: "search", slot: "benefits",
+    body: { kind: "benefits", items: [{ title: "제".repeat(60), kind: "종".repeat(40), condition: "조".repeat(80), compare: "", url }] },
+  });
+
+  it("혜택 링크 상한은 앱 상한과 같은 4개다", () => {
+    expect(BENEFIT_LINKS_MAX).toBe(RESEARCH_LIMITS.maxLinks);
+    const links = Array.from({ length: 7 }, (_, i) => `https://shop.example.com/e/${i}`);
+    const { review } = buildArchive(source({ benefits: slot("x", { status: "confirmed", links }) }), ids());
+    expect(review?.benefitLinks.map((l) => l.url)).toEqual(links.slice(0, 4));
+  });
+
+  it("링크 4개가 최대 길이(한글 주소 500자)여도 영구 표 한도(8,000바이트) 안으로 뒤에서부터 덜어 낸다", () => {
+    const urls = Array.from({ length: 4 }, (_, i) => `https://shop.example.com/${i}${"가".repeat(474)}`);
+    const messages = urls.map((u, i) => card(i + 1, u));
+    const { review } = buildArchive(source({ benefits: slot("x", { status: "confirmed", links: urls }) }, messages), ids());
+    const kept = review?.benefitLinks ?? [];
+    expect(kept.map((l) => l.url)).toEqual(urls.slice(0, 3));
+    expect(jsonbBytes(kept)).toBeLessThanOrEqual(BENEFIT_LINKS_MAX_BYTES);
+    expect(jsonbBytes(urls.map((url) => ({ title: "제".repeat(60), url, kind: "종".repeat(40), condition: "조".repeat(80), confirmedAt: "2026-11-17T01:00:00Z" })))).toBeGreaterThan(8000);
+  });
+
+  it("가린 칸이 30,000바이트를 넘으면 칸은 {}로 줄여 담고 나머지는 그대로 만든다", () => {
+    const grown = "01012345678 ".repeat(2100);
+    const { archive, review } = buildArchive(source({ model: slot(grown) }), ids());
+    expect(archive.slots).toEqual({});
+    expect(jsonbBytes(stripData({ model: slot(grown) }))).toBeGreaterThan(ARCHIVE_SLOTS_MAX_BYTES);
+    expect(review?.reviewText).toBe("리뷰 문단");
+    const small = buildArchive(source({ model: slot("720N") }), ids());
+    expect(small.archive.slots).toEqual({ model: { value: "720N", status: "filled", by: "volunteer" } });
+  });
+
+  it("혜택 확인 시각이 없으면 보낸 시각을 SQL과 같은 초 단위 UTC 모양으로 쓴다", () => {
+    const { review } = buildArchive(source({ benefits: slot("x", { status: "confirmed", links: [BENEFIT_URL] }) }), ids());
+    expect(review?.benefitLinks[0].confirmedAt).toBe("2026-11-17T01:00:00Z");
+  });
+
+  it("모델 앞뒤 공백은 SQL btrim처럼 스페이스만 뗀다", () => {
+    expect(buildArchive(source({ model: slot("  720N  ") }), ids()).review?.model).toBe("720N");
+    expect(buildArchive(source({ model: slot("\t720N") }), ids()).review?.model).toBe("\t720N");
   });
 });
