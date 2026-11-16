@@ -522,6 +522,13 @@ describe("PUT …/research/review", () => {
     expect((await confirm(o, EDITED)).status).toBe(200);
   });
 
+  it("필수 칸이 비었으면 API로도 검수를 마칠 수 없다(409 missing_required)", async () => {
+    const o = await opened();
+    const response = await confirm(o, EDITED, o.version);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "missing_required" });
+  });
+
   it("409 stale: baseVersion이 다르면 현재 version을 준다. 형식이 틀리면 400", async () => {
     const o = await opened();
     await fillBought(o);

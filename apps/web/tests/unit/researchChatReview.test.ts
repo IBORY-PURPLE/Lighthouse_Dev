@@ -116,6 +116,47 @@ describe("서버 틀 문단", () => {
     expect(checkReviewText(text, known, "edit")).toEqual([]);
   });
 
+  it("칸 값이 여러 문장이어도 틀 문단은 edit 검사를 통과한다(검수 마치기만 눌러도 422가 나지 않는다)", () => {
+    const multi = "첫째 좋아요. 둘째도 좋아요! 셋째는 어때요? 넷째도 있어요. 다섯째까지 있어요.";
+    const view = makeView({
+      slots: {
+        model: filled("LH-200. 새 제품이에요. 색은 검정이에요."),
+        pros: filled(multi),
+        photo: filled("1장"),
+        alts: filled("LH-300, LH-400"),
+        altReason: filled(multi),
+        benefits: filled(multi),
+      },
+    });
+    const text = buildTemplateReview(buildReviewMaterial(sourceOf(view)));
+    expect(checkReviewText(text, reviewKnownMaterial(sourceOf(view)), "edit")).toEqual([]);
+    expect(text).toContain("첫째 좋아요");
+    expect(text).not.toContain("둘째");
+    expect(text).not.toContain("(");
+  });
+
+  it("틀 문단이 7문장·1,000자를 넘으려 하면 선택 문장부터 뺀다", () => {
+    const long = "가".repeat(110);
+    const view = makeView({
+      slots: {
+        model: filled("L".repeat(95)),
+        pros: filled(long),
+        photo: filled("1장"),
+        alts: filled(`${"A".repeat(90)}, ${"B".repeat(90)}`),
+        altReason: filled(long),
+        benefits: filled(long),
+      },
+    });
+    const text = buildTemplateReview(buildReviewMaterial(sourceOf(view)));
+    expect(checkReviewText(text, reviewKnownMaterial(sourceOf(view)), "edit")).toEqual([]);
+    expect(text).toContain("최신 판매 정보는 쇼핑몰에서 직접 확인");
+  });
+
+  it("문장 수 이유에 지금 문장 수가 들어 있다", () => {
+    const reasons = checkReviewText("하나예요. 둘이에요.", [], "ai");
+    expect(reasons.join(" ")).toContain("지금 2개예요");
+  });
+
   it("리서치만이면 인증 표현이 없고 사지 않고 알아본 제품이라고 밝힌다", () => {
     const view = makeView({
       purchase: "research",
@@ -167,7 +208,7 @@ describe("서버 틀 문단", () => {
     // 확인한(링크가 칸에 있는) 항목만 든다.
     expect(confirmedBenefits(view)).toEqual([{ kind: "카드 혜택", condition: "특정 카드로 결제할 때" }]);
     const text = buildTemplateReview(buildReviewMaterial(sourceOf(view)));
-    expect(text).toContain("카드 혜택(특정 카드로 결제할 때)");
+    expect(text).toContain("카드 혜택, 조건은 특정 카드로 결제할 때");
     expect(text).not.toContain("쿠폰");
     const skipped = makeView({ slots: { ...makeView().slots, benefits: { value: "", status: "skipped", by: "volunteer" } } });
     expect(buildTemplateReview(buildReviewMaterial(sourceOf(skipped)))).toContain("없었어요");
@@ -207,6 +248,35 @@ describe("buildResultFromSession", () => {
     expect(candidates.slice(1).map((entry) => entry.name)).toEqual(["LH-300", "LH-400"]);
     expect(candidates[1].summary[0]).toEqual({ label: "구분", value: "같이 고민한 제품" });
     for (const candidate of candidates) expect(checkCandidate(candidate).ok, candidate.name).toBe(true);
+  });
+
+  it("구매했지만 사진 인증이 안 됐으면 '구매했지만 사진 인증 안 됨'이고, 리서치만이면 사진 줄이 없다", () => {
+    const pendingCheck = buildResultFromSession(
+      makeView({ pending: { mismatch: { slot: "photo" } }, review: { status: "confirmed", text: confirmed, rev: 1, confirmedVersion: 5 } }),
+    );
+    expect(pendingCheck[0].summary.find((entry) => entry.label === "구매 인증")?.value).toBe("구매했지만 사진 인증 안 됨");
+    const researchWithPhoto = buildResultFromSession(
+      makeView({ purchase: "research", review: { status: "confirmed", text: confirmed, rev: 1, confirmedVersion: 5 } }),
+    );
+    const labels = researchWithPhoto[0].summary.map((entry) => entry.label);
+    expect(researchWithPhoto[0].summary.find((entry) => entry.label === "구매 인증")?.value).toBe("리서치만");
+    expect(labels).not.toContain("사진");
+  });
+
+  it("참고 링크를 확인해 칸 값이 그 주소가 되면 '참고 글'에 같은 주소를 또 넣지 않는다", () => {
+    const url = "https://blog.example.com/review";
+    const candidates = buildResultFromSession(
+      makeView({
+        slots: {
+          model: filled("LH-200"), pros: filled("편해요"), photo: filled("1장"), altReason: filled("그냥요"),
+          refs: { value: url, status: "filled", by: "volunteer", links: [url] },
+        },
+        review: { status: "confirmed", text: confirmed, rev: 1, confirmedVersion: 5 },
+      }),
+    );
+    const labels = candidates[0].summary.map((entry) => entry.label);
+    expect(labels).not.toContain("참고 글");
+    expect(labels).toContain("참고 링크 1");
   });
 
   it("리서치만이면 구매 인증이 아니라 리서치만이고, 건너뛴 칸은 요약에 없다", () => {

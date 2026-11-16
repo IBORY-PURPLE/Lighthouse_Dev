@@ -2,7 +2,7 @@ import "server-only";
 import type { NextResponse } from "next/server";
 import { getRequestStore } from "./requestStore";
 import { guardResponse } from "./researchApi";
-import type { ResearchView } from "./researchSession";
+import { hasUnresolvedCheck, isPastQuestionSeven, requiredMissing, type ResearchView } from "./researchSession";
 import { getResearchStore, type GuardFail } from "./researchStore";
 
 // 사진·리뷰·보내기 라우트 공통 도우미(A4). 세션을 읽고 소유와 sessionId를 확인한다.
@@ -31,6 +31,17 @@ export async function loadSession(
     return { ok: false, outcome: "session_changed", response: guardResponse("session_changed") };
   }
   return { ok: true, view: opened.view };
+}
+
+/** 리뷰를 만들고 검수를 마칠 수 있나: 필수가 다 찼고 질문 7을 지났고 확인할 것이 없다. 아니면 409 이유. */
+export function notReady(view: ResearchView): { error: "missing_required"; missing: string[] } | { error: "not_ready" } | null {
+  const missing = requiredMissing(view);
+  // 구매함이면 칸 표시만이 아니라 실제 사진이 1장 이상 있어야 한다(저장소의 보내기 규칙과 같다).
+  if (view.purchase === "bought" && view.photos.length === 0 && !missing.includes("photo")) missing.push("photo");
+  if (missing.length > 0) return { error: "missing_required", missing };
+  // "질문 7을 지났다"는 A1·A2가 정한 뜻 그대로다: 물을 수 있고 아직 안 물은 칸이 없다(칸을 봉사자가 먼저 채워 물을 것이 없어도 지난 것이다).
+  if (!isPastQuestionSeven(view) || hasUnresolvedCheck(view.pending)) return { error: "not_ready" };
+  return null;
 }
 
 export interface RequestText {

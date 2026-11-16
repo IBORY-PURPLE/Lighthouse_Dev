@@ -475,7 +475,9 @@ export function createMemoryResearchStore(
       };
       if (overRequest) return capped("request");
       const taken =
-        input.kind === "search" ? takeDaily(units, 0, caps) : takeDaily(0, 1, caps);
+        input.kind === "search"
+          ? takeDaily(units, 0, caps)
+          : takeDaily(0, input.kind === "photo" ? 0 : 1, caps); // 사진 올리기는 AI를 부르지 않아 하루 AI 상한을 쓰지 않는다
       if (!taken) return capped("daily");
       if (input.kind === "turn") used.turns += 1;
       if (input.kind === "search") used.searches += units;

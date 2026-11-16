@@ -18,6 +18,7 @@ const AI_MAX = 700;
 const SENTENCES_MIN = 3;
 const SENTENCES_MAX = 7;
 const FACT_MAX = 120;
+// design.md 4.11은 15초·1,200토큰이지만, 한국어 문단 한 번이 느릴 때가 있어 25초·1,500토큰으로 둔다(요청 전체는 라우트의 50초 안).
 const REVIEW_TIMEOUT_MS = 25_000;
 
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -149,7 +150,9 @@ export function checkReviewText(text: string, material: readonly string[], mode:
   }
   // 문장 수와 목록·기호는 AI 문단과 봉사자가 고친 문단에 같이 건다(design.md 4.11 "같은 검사"). 길이만 모드별로 다르다.
   const count = sentencesOf(text).length;
-  if (count < SENTENCES_MIN || count > SENTENCES_MAX) reasons.push(`문장이 ${SENTENCES_MIN}~${SENTENCES_MAX}개가 아니에요.`);
+  if (count < SENTENCES_MIN || count > SENTENCES_MAX) {
+    reasons.push(`문장이 지금 ${count}개예요. ${SENTENCES_MIN}~${SENTENCES_MAX}개로 써 주세요.`);
+  }
   if (/[*#`_>|]|^\s*(?:[-•]|\d+[.)])\s/m.test(text)) reasons.push("목록이나 기호가 들어 있어요.");
   if (hasForbidden(text)) reasons.push(`가격·재고·할인으로 보이는 표현이 있어요: “${firstOffender(text)}”`);
   const unknown = unknownModelTokens(text, material);
@@ -163,36 +166,59 @@ export function checkReviewText(text: string, material: readonly string[], mode:
 
 // ---------- 서버 틀 문단 ----------
 
+/** 칸 값의 첫 문장(끝 문장부호 뺀 것). 틀 문단이 칸 값을 따옴표로 인용해도 문장 수가 불어나지 않게 한다. */
+function firstSentence(value: string): string {
+  return (sentencesOf(value)[0] ?? "").replace(/[.!?。]+$/, "").trim();
+}
+
 /**
  * AI 없이 서버가 칸 값만 이어 만드는 문단(AI 실패·상한·검사 실패 때). 새 정보를 더하지 않는다.
  * 조사를 붙이지 않는 문형이라 기종 이름이 영문이어도 어색하지 않다.
+ * 봉사자가 [검수 마치기]만 눌러도 PUT 검사(edit)를 통과해야 하므로, 칸 값은 첫 문장만 인용하고
+ * 3~7문장·1,000자를 넘으면 선택 문장(확인한 혜택, 혜택 경험, 사진, 같이 고민한 제품)을 뒤에서부터 뺀다.
  */
 export function buildTemplateReview(material: ReviewMaterial): string {
   const verified = material.구매 === "구매 인증됨";
-  const model = material.기종 || "이 제품";
-  const sentences: string[] = [];
-  if (verified) sentences.push(`리뷰 대상 기종은 ${model}, 봉사자가 직접 구매한 것을 사진으로 인증한 제품이에요.`);
-  else if (material.구매 === "구매했지만 사진 없음") sentences.push(`리뷰 대상 기종은 ${model}, 봉사자가 구매했다고 말한 제품이에요.`);
-  else sentences.push(`리뷰 대상 기종은 ${model}, 봉사자가 사지 않고 알아본 제품이에요.`);
-  if (material.장점) sentences.push(`봉사자가 말한 장점은 “${material.장점}”라고 해요.`);
-  if (material.같이고민한제품.length > 0) {
-    const list = material.같이고민한제품.join(", ");
-    sentences.push(
-      material.고른이유
-        ? `같이 고민한 제품은 ${list}, 고른 이유는 “${material.고른이유}”라고 말했어요.`
-        : `같이 고민한 제품은 ${list} 등이에요.`,
-    );
-  } else if (material.고른이유) {
-    sentences.push(`이 기종을 고른 이유는 “${material.고른이유}”라고 말했어요.`);
+  const model = firstSentence(material.기종) || "이 제품";
+  const pros = firstSentence(material.장점);
+  const reason = firstSentence(material.고른이유);
+  const experience = firstSentence(material.혜택경험);
+  const alts = material.같이고민한제품.map(firstSentence).filter(Boolean);
+  const parts: { text: string; optional: boolean }[] = [];
+  const add = (text: string, optional = true) => parts.push({ text, optional });
+  if (verified) add(`리뷰 대상 기종은 ${model}, 봉사자가 직접 구매한 것을 사진으로 인증한 제품이에요.`, false);
+  else if (material.구매 === "구매했지만 사진 없음") add(`리뷰 대상 기종은 ${model}, 봉사자가 구매했다고 말한 제품이에요.`, false);
+  else add(`리뷰 대상 기종은 ${model}, 봉사자가 사지 않고 알아본 제품이에요.`, false);
+  if (pros) add(`봉사자가 말한 장점은 “${pros}”라고 해요.`, false);
+  if (alts.length > 0) {
+    const list = alts.join(", ");
+    add(reason ? `같이 고민한 제품은 ${list}, 고른 이유는 “${reason}”라고 말했어요.` : `같이 고민한 제품은 ${list} 등이에요.`);
+  } else if (reason) {
+    add(`이 기종을 고른 이유는 “${reason}”라고 말했어요.`);
   }
-  if (verified && material.사진장수 > 0) sentences.push(`구매 인증 사진은 ${material.사진장수}장 올라와 있어요.`);
-  if (material.혜택경험) sentences.push(`받은 혜택에 대해서는 “${material.혜택경험}”라고 말했어요.`);
-  if (material.확인한혜택.length > 0) {
-    const list = material.확인한혜택.map((entry) => (entry.condition ? `${entry.kind}(${entry.condition})` : entry.kind)).join(", ");
-    sentences.push(`봉사자가 직접 확인한 혜택 안내로는 ${list} 등이 있어요.`);
+  if (verified && material.사진장수 > 0) add(`구매 인증 사진은 ${material.사진장수}장 올라와 있어요.`);
+  if (experience) add(`받은 혜택에 대해서는 “${experience}”라고 말했어요.`);
+  const benefits = material.확인한혜택
+    .map((entry) => {
+      const kind = firstSentence(entry.kind);
+      const condition = firstSentence(entry.condition);
+      return condition ? `${kind}, 조건은 ${condition}` : kind;
+    })
+    .filter(Boolean);
+  if (benefits.length > 0) add(`봉사자가 직접 확인한 혜택 안내로는 ${benefits.join("; ")} 등이 있어요.`);
+  add("이 글은 봉사자가 모은 내용을 정리한 것이라서, 최신 판매 정보는 쇼핑몰에서 직접 확인해 주세요.", false);
+
+  const join = () => parts.map((part) => part.text).join(" ");
+  const fits = () => {
+    const text = join();
+    return sentencesOf(text).length <= SENTENCES_MAX && charCount(text) <= REVIEW_EDIT_MAX;
+  };
+  while (!fits()) {
+    const index = parts.map((part) => part.optional).lastIndexOf(true);
+    if (index < 0) break;
+    parts.splice(index, 1);
   }
-  sentences.push("이 글은 봉사자가 모은 내용을 정리한 것이라서, 최신 판매 정보는 쇼핑몰에서 직접 확인해 주세요.");
-  return sentences.join(" ");
+  return join();
 }
 
 // ---------- AI ----------
@@ -206,7 +232,7 @@ const REVIEW = [
   "- 가격, 재고, 할인 금액·퍼센트를 쓰지 않는다. 혜택은 종류와 조건만 말하고 금액은 말하지 않는다.",
   "- 구매가 '구매 인증됨'이면 직접 구매해 쓴 봉사자의 경험이고 사진으로 인증했다고 밝힌다. '리서치만'이면 직접 써 보지 않고 알아본 내용이라고 밝힌다.",
   "- 같이 고민한 제품과 고른 이유가 있으면 한 문장으로 말한다. 혜택 경험이 있으면 말한다.",
-  "- 마지막 문장에서 최신 판매 정보는 쇼핑몰에서 직접 확인하라고 안내한다(가격·재고 숫자는 쓰지 않는다).",
+  '- 마지막 문장은 "최신 판매 정보는 쇼핑몰에서 직접 확인해 주세요"처럼 쓰고, 가격·재고라는 낱말은 쓰지 않는다.',
 ].join("\n");
 
 export const reviewInstructions = (): string => `${COMMON}\n\n${REVIEW}`;

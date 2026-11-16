@@ -134,18 +134,24 @@ export function buildResultFromSession(view: SessionResultView): SentCandidate[]
     .split(/[,，]/)
     .map((entry) => clip(oneLine(entry), RESULT_LIMITS.nameMax))
     .filter(Boolean);
-  const photoCount = view.photos.length;
+  // 구매했어요일 때만 사진 줄을 넣는다(리서치만으로 바꿔도 사진 행이 남아 있을 수 있다).
+  const refLinks = checkedLinks(view, "refs", "참고 링크");
+  const refs = slotValue(view, "refs");
+  const refsText = (view.slots.refs?.links ?? []).some((url) => url === refs) ? "" : refs;
+  const photoCount = view.purchase === "bought" ? view.photos.length : 0;
+  const badge = purchaseBadge(view);
   const summary = [
     item("구분", "추천 기종"),
-    item("구매 인증", purchaseBadge(view) === "verified" ? "구매 인증됨" : "리서치만"),
+    item("구매 인증", badge === "verified" ? "구매 인증됨" : badge === "bought_no_photo" ? "구매했지만 사진 인증 안 됨" : "리서치만"),
     item("장점", slotValue(view, "pros")),
     item("사진", photoCount === 0 ? "" : `${photoCount}장`),
     item("같이 고민한 제품", alts.join(", ")),
     item("고민한 이유", slotValue(view, "altReason")),
     item("혜택", slotValue(view, "benefits")),
     ...checkedLinks(view, "benefits", "혜택 링크"),
-    item("참고 글", slotValue(view, "refs")),
-    ...checkedLinks(view, "refs", "참고 링크"),
+    // 링크를 확인하면 칸 값이 그 주소가 되므로, 같은 주소를 "참고 링크"에서 또 보여 주지 않게 뺀다.
+    item("참고 글", refsText),
+    ...refLinks,
   ].filter((entry): entry is Item => entry !== null);
 
   const candidates: SentCandidate[] = [

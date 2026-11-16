@@ -237,6 +237,16 @@ describe("메모리 상한과 사용량", () => {
     expect(await research.begin({ ...r.actor, kind: "search", cacheKey: "big", units: 3, caps })).toEqual({ outcome: "capped", cap: "daily" });
   });
 
+  it("사진 올리기는 하루 AI 상한을 쓰지 않는다", async () => {
+    const r = await opened(newVol());
+    await research.apply({ ...r.actor, clientTurnId: "p", baseVersion: 0, patch: { purchase: "bought" }, messages: [], next: [] });
+    const caps = { turns: 40, searches: 12, photoUploads: 6, reviews: 3, dailySearches: 60, dailyAi: 1 };
+    expect(await research.begin({ ...r.actor, kind: "turn", clientTurnId: "a", caps })).toMatchObject({ ai: "ok" });
+    expect(await research.begin({ ...r.actor, kind: "turn", clientTurnId: "b", caps })).toMatchObject({ ai: "capped", cap: "daily" });
+    expect(await research.begin({ ...r.actor, kind: "photo", caps })).toMatchObject({ outcome: "ok" });
+    expect(await research.begin({ ...r.actor, kind: "photo", caps })).toMatchObject({ outcome: "ok" });
+  });
+
   it("하루 상한은 서울 날짜에서 센다", async () => {
     const r = await opened(newVol());
     const caps = { turns: 40, searches: 12, photoUploads: 6, reviews: 3, dailySearches: 3, dailyAi: 2 };
