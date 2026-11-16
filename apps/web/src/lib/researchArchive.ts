@@ -69,8 +69,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const DATA_URL_VALUE = /^\s*data:/i;
 const DATA_URL_INLINE = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"')]+/gi;
-// base64 data URL은 공백·줄바꿈으로 끊겨 조각이 이어질 수 있어 이어진 base64 글자까지 지운다. 공백 없이 200자 넘게 이어진 덩어리도 지운다(공백은 SQL과 같게 ASCII 공백류만).
-const DATA_URL_BASE64 = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*;base64,[A-Za-z0-9+/=]*([ \t\n\r\f\v]+[A-Za-z0-9+/=]+)*/gi;
+// base64 data URL은 공백·줄바꿈으로 끊겨 조각이 이어질 수 있어 16자 이상 이어진 base64 글자 덩어리까지 지운다(짧은 영문 단어는 지우지 않는다). 공백 없이 200자 넘게 이어진 덩어리도 지운다(공백은 SQL과 같게 ASCII 공백류만).
+const DATA_URL_BASE64 = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*;base64,[A-Za-z0-9+/=]*([ \t\n\r\f\v]+[A-Za-z0-9+/=]{16,})*/gi;
 const BASE64_LUMP = /[A-Za-z0-9+/=]{200,}/g;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 // 주민등록번호는 하이픈형만, 카드번호는 4자리 4묶음(구분은 없거나 하이픈·공백)만 가린다. 집 주소·말로 받아 적은 번호는 못 가린다(TSD 8.3).

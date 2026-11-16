@@ -91,7 +91,7 @@ $$;
 create or replace function public.research_scrub_plain(p_text text)
 returns text language sql immutable security invoker set search_path = '' as $$
   select regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(p_text,
-    'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*;base64,[A-Za-z0-9+/=]*([ \t\n\r\f\v]+[A-Za-z0-9+/=]+)*', '', 'gi'), 'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'gi'), '[A-Za-z0-9+/=]{200,}', '', 'g'),
+    'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*;base64,[A-Za-z0-9+/=]*([ \t\n\r\f\v]+[A-Za-z0-9+/=]{16,})*', '', 'gi'), 'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'gi'), '[A-Za-z0-9+/=]{200,}', '', 'g'),
     '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[이메일]', 'g'),
     '(?<![0-9])[0-9]{6}-[1-4][0-9]{6}(?![0-9])', '[주민번호]', 'g'),
     '(?<![0-9])[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}(?![0-9])', '[카드번호]', 'g'),
