@@ -80,6 +80,8 @@ async function claimFirst(cookie: string) {
 
 describe("POST /api/volunteer/requests/{id}/result", () => {
   beforeEach(() => {
+    // 입장 코드가 아니라 lh_vol 서명 비밀이다.
+    vi.stubEnv("DEMO_ACCESS_CODE", "test-signing-secret");
     vi.stubEnv("STORE_MODE", "memory");
     vi.stubEnv("VERCEL", "");
     resetRequestStoresForTest();

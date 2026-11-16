@@ -121,6 +121,8 @@ const chatReply = (json: unknown) => ({ choices: [{ message: { content: typeof j
 
 describe("POST /api/volunteer/research", () => {
   beforeEach(() => {
+    // 입장 코드가 아니라 lh_vol 서명 비밀이다.
+    vi.stubEnv("DEMO_ACCESS_CODE", "test-signing-secret");
     vi.stubEnv("STORE_MODE", "memory");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");

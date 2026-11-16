@@ -97,6 +97,8 @@ async function fillDemo(cookie: string) {
 
 describe("봉사자 서버 함수", () => {
   beforeEach(() => {
+    // 입장 코드가 아니라 lh_vol 서명 비밀이다.
+    vi.stubEnv("DEMO_ACCESS_CODE", "test-signing-secret");
     vi.stubEnv("STORE_MODE", "memory");
     vi.stubEnv("VERCEL", "");
     resetRequestStoresForTest();
@@ -159,6 +161,22 @@ describe("봉사자 서버 함수", () => {
       }
     });
 
+    it("서명 비밀(DEMO_ACCESS_CODE)이 없으면 503 not_configured이고 쿠키가 없다", async () => {
+      vi.stubEnv("DEMO_ACCESS_CODE", "");
+      const response = await enter(enterRequest(undefined));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ ok: false, error: "not_configured" });
+      expect(response.headers.getSetCookie()).toEqual([]);
+    });
+
+    it("서명 비밀이 바뀌면 이전 기기 쿠키는 무효가 되고 새로 입장해야 한다", async () => {
+      const cookie = await signIn();
+      expect(await (await get(me, "/api/volunteer/me", cookie)).json()).toEqual({ entered: true });
+      vi.stubEnv("DEMO_ACCESS_CODE", "another-secret");
+      expect(await (await get(me, "/api/volunteer/me", cookie)).json()).toEqual({ entered: false });
+      expect((await get(queue, "/api/volunteer/queue", cookie)).status).toBe(401);
+    });
+
     it("로그에는 상태 코드와 시간만 남는다", async () => {
       const info = vi.mocked(console.info);
       await enter(enterRequest(undefined));
@@ -184,8 +202,8 @@ describe("봉사자 서버 함수", () => {
       for (const forged of [
         `${VOLUNTEER_COOKIE}=v1.abc.def`,
         `${VOLUNTEER_COOKIE}=v2.abc`,
-        `${VOLUNTEER_COOKIE}=v2.${"!".repeat(43)}`,
-        `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}`,
+        `${VOLUNTEER_COOKIE}=v1.${"!".repeat(43)}.${"B".repeat(43)}`,
+        `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}.${"B".repeat(43)}`,
       ]) {
         expect(await (await get(me, "/api/volunteer/me", forged)).json()).toEqual({ entered: false });
       }
@@ -200,7 +218,7 @@ describe("봉사자 서버 함수", () => {
 
   describe("lh_vol이 없거나 틀리면 401 unauthorized", () => {
     it("모든 봉사자용 서버 함수", async () => {
-      const forged = `${VOLUNTEER_COOKIE}=v2.${"!".repeat(43)}`;
+      const forged = `${VOLUNTEER_COOKIE}=v1.${"A".repeat(43)}.${"B".repeat(43)}`;
       for (const cookie of [undefined, forged]) {
         const responses = [
           await get(queue, "/api/volunteer/queue", cookie),

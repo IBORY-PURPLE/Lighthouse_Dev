@@ -36,6 +36,8 @@ export default defineConfig({
           LLM_MODE: "mock",
           STORE_MODE: "memory",
           EXTRACT_MODE: "mock",
+          // 입장 코드가 아니라 봉사자 기기 쿠키(lh_vol) 서명 비밀이다.
+          DEMO_ACCESS_CODE: "e2e-signing-secret",
         },
       },
 });
