@@ -222,8 +222,18 @@ export function isShortAnswer(text: string, slot: SlotKey): boolean {
 }
 
 /** 주소나 도메인 모양(링크는 참고 글 링크 카드로만 받는다). AI가 만든 글과 칸 값에서 걸러낸다(design.md 9절). */
-const LINK_LIKE = /https?:\/\/|www\.|(?<![A-Za-z0-9])[a-z0-9-]+\.(?:com|net|org|kr|io|co|me|app|dev|shop|store|link)(?![a-z0-9])/i;
+const LINK_LIKE = /https?:\/\/|www\.|(?<![A-Za-z0-9-])[a-z0-9-]{2,}\.[a-z]{2,24}(?![a-z0-9-])/i;
 export const hasLinkLike = (value: string): boolean => LINK_LIKE.test(value.normalize("NFKC"));
+
+/** 봉사자가 이번 말에서 그 칸의 주제를 꺼냈는가(design.md 4.2: 봉사자가 먼저 꺼낸 주제만 순서를 앞지른다). */
+const TOPIC_WORDS: Partial<Record<SlotKey, RegExp>> = {
+  pros: /장점|좋았|좋아요|좋은|가볍|가벼|편하|편해|착용감|음질|소리|배터리|노이즈|디자인/,
+  alts: /비교|고민|다른\s?(?:제품|모델|기종)|대신|말고|보다/,
+  altReason: /이유|때문|골랐|고른|선택|그래서/,
+  benefits: /할인|혜택|쿠폰|포인트|적립|사은품|카드|프로모션|이벤트/,
+  refs: /블로그|후기|리뷰|영상|유튜브|링크|커뮤니티|카페|참고|검색|글/,
+};
+export const topicRaised = (slot: SlotKey, text: string): boolean => TOPIC_WORDS[slot]?.test(text) ?? false;
 
 const SKIP_WORD = /건너\s?뛰|패스|스킵/;
 
@@ -494,7 +504,7 @@ interface NextOptions {
   /** 다음 질문을 붙이지 않는다(확인·링크 확인을 기다림). */
   hold: boolean;
   /** AI가 고른 다음 칸. 검사를 통과한 것만 넣는다. */
-  aiNext: { slot: SlotKey; text: string | null } | null;
+  aiNext: { slot: SlotKey; text: string | null; /** 봉사자가 이번 말에서 그 칸의 주제를 꺼냈다. */ topical?: boolean } | null;
   /** 직전 칸을 한 번 더 묻는다. */
   reask: { slot: SlotKey; text: string | null } | null;
 }
@@ -563,8 +573,9 @@ export function buildCandidates(post: Post, subject: string, options: NextOption
   list.push(purchaseCandidate);
   // AI가 고른 칸(봉사자가 이번 말에서 꺼낸 주제)은 순서상 앞선 필수 칸(특히 구매함의 사진)이 아직 안 물렸으면 그 뒤에 둔다.
   // 질문 번호 순서가 기본이다(design.md 4.2). 앞선 필수 칸이 없으면 AI 칸이 먼저다.
+  // 순서상 다음 칸이면 AI의 질문 글을 쓰고, 그보다 뒤 칸이면 봉사자가 그 주제를 꺼냈을 때만 앞지른다.
   const aiSlot = options.aiNext?.slot ?? null;
-  if (aiSlot && isAskable(post, aiSlot) && !post.counters.asked[aiSlot]) {
+  if (aiSlot && isAskable(post, aiSlot) && !post.counters.asked[aiSlot] && (firstRound[0] === aiSlot || options.aiNext?.topical)) {
     const required = requiredSlots(post.purchase);
     const aiIndex = order.indexOf(aiSlot);
     const blockers = firstRound.filter((slot) => order.indexOf(slot) < aiIndex && required.includes(slot));
@@ -778,7 +789,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
         }
         if (!turn.dropped && turn.next) {
           if (turn.next.action === "ask_slot" && turn.next.slot && turn.next.slot !== "photo") {
-            aiNext = { slot: turn.next.slot, text: turn.next.text };
+            aiNext = { slot: turn.next.slot, text: turn.next.text, topical: topicRaised(turn.next.slot, input.text) };
           }
         }
       }
@@ -971,6 +982,11 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
   if (Object.keys(slotsPatch).length > 0) patch.slots = slotsPatch;
   if (Object.keys(pendingPatch).length > 0) patch.pending = pendingPatch;
+
+  // 글 턴의 ai 표시는 봉사자 메시지에도 남긴다: 같은 clientTurnId 재전송이 저장된 메시지에서 첫 응답과 같은 표시를 읽도록.
+  // (칸 채움·재질문처럼 AI 글이 없는 턴이나 CAP·fallback 안내가 한 번만 나오는 뒤 턴에서도 표시가 사라지지 않는다.)
+  const first = messages[0];
+  if (input.type === "text" && label !== "none" && first?.role === "volunteer") messages[0] = { ...first, ai: label };
 
   const base = {
     purchase: session.purchase,

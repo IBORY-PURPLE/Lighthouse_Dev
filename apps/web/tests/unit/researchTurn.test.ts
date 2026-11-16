@@ -791,6 +791,22 @@ describe("A2 독립 리뷰 지적 반영", () => {
     }
   });
 
+  it("봉사자가 그 주제를 꺼내지 않았으면 AI가 고른 뒤 칸이 순서를 앞지르지 못한다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    const result = await h.step(say("WH-CH520이고 가벼워서 샀고 무게가 맘에 들어요"), {
+      intent: "reply",
+      fills: [
+        fill("model", "WH-CH520", "WH-CH520이고"),
+        fill("pros", "가벼워요", "가벼워서"),
+        fill("altReason", "무게가 맘에 들어요", "무게가 맘에 들어요"),
+      ],
+      next: { action: "ask_slot", slot: "refs", text: "참고한 글이 있나요?" },
+    });
+    // 참고 글 얘기는 없었으므로 질문 번호 순서(대안)가 이어진다.
+    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "alts", ai: "none" });
+  });
+
   describe("AI 출력 검사의 틈", () => {
     const input = {
       text: "가벼워요 그리고 소니랑 보스를 봤어요",
@@ -818,6 +834,20 @@ describe("A2 독립 리뷰 지적 반영", () => {
     it("알아볼 수 있는 필드가 없는 JSON은 AI 실패(대체 동작)로 본다", () => {
       expect(validateAiTurn({ answer: "sorry" }, input, CONTEXT)).toBeNull();
       expect(validateAiTurn({ intent: "reply", fills: [] }, input, CONTEXT)).not.toBeNull();
+    });
+    it("흔하지 않은 최상위 도메인(.ai·.xyz)도 주소로 본다", () => {
+      const turn = validateAiTurn(
+        { intent: "reply", fills: [], next: { action: "ask_slot", slot: "pros", text: "example.xyz 에서 확인해 주세요." } },
+        input,
+        CONTEXT,
+      );
+      expect(turn?.next?.text).toBeNull();
+      expect(turn?.dropped).toBe(true);
+      const ai = validateAiTurn({ intent: "reply", fills: [{ slot: "pros", value: "example.ai 가벼워요", evidence: "가벼워요" }] }, input, CONTEXT);
+      expect(ai?.fills).toEqual([]);
+      // 소수점이 든 말은 주소가 아니다.
+      const ok = validateAiTurn({ intent: "reply", fills: [{ slot: "pros", value: "무게가 1.5배 가벼워요", evidence: "가벼워요" }] }, input, CONTEXT);
+      expect(ok?.fills).toHaveLength(1);
     });
     it("주소·도메인이 든 글은 다음 질문·찾는 방법·다른 칸 값에서 버린다", () => {
       const turn = validateAiTurn(
