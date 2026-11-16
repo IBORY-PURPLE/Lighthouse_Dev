@@ -5,6 +5,8 @@ import { installFakeSpeech, say } from "./helpers/fakeSpeech";
 // 이용자 화면(/)은 apps/user-voice-ui의 음성 대화 화면이다(PR 합병). 가짜 음성 인식과 가짜 AI(LLM_MODE=mock) 기준이다.
 // 원본 화면에는 텍스트 답변 입력이 없어(음성 인식만) 가짜 음성 인식으로 답한다.
 // 실제 음성 인식, 소리 내어 읽어 주기, VoiceOver 낭독, 실제 OpenAI 응답은 사람이 판정한다.
+// 파일 이름이 a-로 시작하는 까닭: 봉사자 대기열은 오래 기다린 순으로 20건(QUEUE_LIMIT)만 보인다.
+// 다른 시험 파일이 접수 요청을 쌓기 전에 돌아야 새 카드가 목록에 보인다(Playwright는 파일 이름순으로 돈다).
 
 const BUDGET = "10만 원 이하";
 
