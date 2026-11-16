@@ -3,9 +3,11 @@ import {
   guideSource,
   isVerified,
   missingRequiredCards,
+  siteNameOf,
   type LinkRef,
   type ResearchState,
 } from "./research";
+import { purchaseBadge, type ResearchView } from "./researchSession";
 import { candidateSearchUrl } from "./shopLinks";
 import type { SentCandidate } from "./volunteerView";
 
@@ -102,4 +104,66 @@ export function buildResultBody(state: ResearchState): ResultBody | null {
     });
   }
   return { candidates };
+}
+
+// ---- 대화형 세션 → 결과(design.md 4.11) -------------------------------------------------
+
+type SessionResultView = Pick<ResearchView, "purchase" | "slots" | "pending" | "photos" | "review">;
+
+function slotValue(view: SessionResultView, key: keyof ResearchView["slots"]): string {
+  const slot = view.slots[key];
+  return slot && slot.status !== "skipped" ? oneLine(slot.value) : "";
+}
+
+/** [확인했어요]를 누른 주소(slot.links)만 링크 줄로 만든다. 제목은 주소의 도메인 이름이다. */
+function checkedLinks(view: SessionResultView, key: "benefits" | "refs", prefix: string): Item[] {
+  const links = (view.slots[key]?.links ?? []).map((url) => ({ title: siteNameOf(url), url }));
+  return withLinks(prefix, links);
+}
+
+/**
+ * 대화형 세션(검수를 마친 리뷰) → 결과 후보. 스키마는 그대로다(resultInput.ts 한도 안).
+ * 후보 1 = 기종: guide는 리뷰 최종 문단(1,000자 이하), summary는 기존 항목(최대 12개), 링크는 [확인했어요]한 주소만.
+ * 후보 2~3 = 같이 고민한 제품(이름과 고른 이유만). 기종이 비었으면 빈 목록(저장소가 missing_required로 막는다).
+ */
+export function buildResultFromSession(view: SessionResultView): SentCandidate[] {
+  const name = clip(slotValue(view, "model"), RESULT_LIMITS.nameMax);
+  if (name === "") return [];
+
+  const alts = slotValue(view, "alts")
+    .split(/[,，]/)
+    .map((entry) => clip(oneLine(entry), RESULT_LIMITS.nameMax))
+    .filter(Boolean);
+  const photoCount = view.photos.length;
+  const summary = [
+    item("구분", "추천 기종"),
+    item("구매 인증", purchaseBadge(view) === "verified" ? "구매 인증됨" : "리서치만"),
+    item("장점", slotValue(view, "pros")),
+    item("사진", photoCount === 0 ? "" : `${photoCount}장`),
+    item("같이 고민한 제품", alts.join(", ")),
+    item("고민한 이유", slotValue(view, "altReason")),
+    item("혜택", slotValue(view, "benefits")),
+    ...checkedLinks(view, "benefits", "혜택 링크"),
+    item("참고 글", slotValue(view, "refs")),
+    ...checkedLinks(view, "refs", "참고 링크"),
+  ].filter((entry): entry is Item => entry !== null);
+
+  const candidates: SentCandidate[] = [
+    {
+      name,
+      url: candidateSearchUrl(name),
+      guide: clip(oneLine(view.review.text ?? ""), RESULT_LIMITS.guideMax),
+      summary: summary.slice(0, RESULT_LIMITS.summaryMax),
+    },
+  ];
+  const reason = item("고민한 이유", slotValue(view, "altReason"));
+  for (const alt of alts.slice(0, RESULT_LIMITS.maxCandidates - 1)) {
+    candidates.push({
+      name: alt,
+      url: candidateSearchUrl(alt),
+      guide: "",
+      summary: [{ label: "구분", value: "같이 고민한 제품" }, ...(reason ? [reason] : [])],
+    });
+  }
+  return candidates;
 }
