@@ -442,6 +442,72 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(page.getByText(/내 담당이 아니에요/)).toBeVisible({ timeout: 15_000 });
   });
 
+  test("한 탭의 혜택 검색이 늦는 사이 다른 탭이 검색을 끝내면, 늦은 탭도 서버 캐시 응답 뒤에 카드를 읽어 와 보인다", async ({ page }) => {
+    test.setTimeout(90_000);
+    // 첫 탭의 혜택 검색 호출을 붙들어 둔다. 그 사이 두 번째 탭이 열리며 같은 검색을 먼저 끝낸다. 붙든 호출을 놓으면 서버는 캐시로(메시지 없이 마지막 번호만) 답한다.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = 0;
+    await page.route("**/research/search", async (route) => {
+      const kind = (route.request().postDataJSON() as { kind?: string } | null)?.kind;
+      if (kind === "benefits") {
+        held += 1;
+        await gate;
+      }
+      await route.continue();
+    });
+    await begin(page);
+    await sendText(page, "소니 헤드셋 샀어요. 카드 할인 받고 무료 배송이었어요");
+    await expect.poll(() => held, { timeout: 15_000 }).toBe(1);
+
+    const second = await page.context().newPage();
+    await second.goto(page.url());
+    await expect(second.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+
+    expect(await page.getByRole("list", { name: "찾은 혜택" }).count()).toBe(0);
+    release();
+    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("사진을 올린 뒤 다시 읽기 직전에 다른 탭이 요청을 내려놓으면, 옛 대화에 머물지 않고 화면을 바꾼다", async ({ page }) => {
+    test.setTimeout(90_000);
+    await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+    await answerPros(page);
+    const second = await page.context().newPage();
+    await second.goto(page.url());
+    await expect(second.getByTestId("research-stage")).toBeVisible();
+
+    // 사진 올리기 응답을 받은 뒤 화면이 서버 상태를 다시 읽기(GET) 직전에 두 번째 탭이 요청을 내려놓게 한다. 그러면 그 GET은 서버가 409 not_in_progress로 답한다.
+    let armed = false;
+    let released = false;
+    await page.route("**/research/photos", async (route) => {
+      const response = await route.fetch();
+      armed = true;
+      await route.fulfill({ response });
+    });
+    await page.route(
+      (url) => /\/research$/.test(url.pathname),
+      async (route) => {
+        if (armed && !released && route.request().method() === "GET") {
+          released = true;
+          await second.getByRole("button", { name: "요청 내려놓기" }).click();
+          await second.getByRole("button", { name: "돌려놓기" }).click();
+          await expect(second.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+        }
+        await route.continue();
+      },
+    );
+    await page.getByRole("button", { name: "사진 올리기" }).click();
+    const dialog = page.getByRole("dialog", { name: "사진 올리기" });
+    await dialog.locator("input[type=file]").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: PNG_1X1 });
+    await expect(page.getByText(/내 담당이 아니에요/)).toBeVisible({ timeout: 15_000 });
+    expect(released).toBe(true);
+  });
+
   test("혜택 검색이 실패해도 안내하고 질문 7이 제자리에 나오며 다음 턴이 막히지 않는다", async ({ page }) => {
     test.setTimeout(120_000);
     // 서버의 한도(CAP) 응답은 환경 변수로 0에 맞출 수 없어(양의 정수만 받는다) 혜택 검색 호출만 네트워크 단계에서 끊는다.

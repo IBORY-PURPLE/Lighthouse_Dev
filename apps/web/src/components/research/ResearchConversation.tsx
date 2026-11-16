@@ -209,6 +209,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       toList();
       return null;
     }
+    if (result.kind === "failed") leftProgressRef.current(result);
     if (result.kind !== "ok") return null;
     putView(result.data);
     return result.data;
@@ -480,10 +481,22 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       }
       if (outcome.kind === "ok") {
         const done = outcome.data;
+        let missed = false;
         updateView((prev) => {
           const messages = mergeMessages(prev.messages, done.messages);
-          return { ...prev, messages, lastSeq: maxSeq(messages, done.lastSeq) };
+          // 서버가 캐시로 답하면 messages가 비고 lastSeq만 온다(다른 탭이 이미 검색을 끝냄). 이 화면에 없는 번호가 있으면 lastSeq를 올리지 않고 아래에서 읽어 온다.
+          missed = done.lastSeq > maxSeq(messages, prev.lastSeq);
+          return { ...prev, messages, lastSeq: missed ? maxSeq(messages, prev.lastSeq) : maxSeq(messages, done.lastSeq) };
         });
+        if (missed) {
+          const got = await fetchResearch(requestId, viewRef.current?.lastSeq);
+          if (!alive.current) return;
+          if (got.kind === "failed" && leftProgress(got)) return;
+          if (got.kind === "ok") {
+            const incoming = got.data;
+            updateView((prev) => mergeView(prev, incoming));
+          }
+        }
       } else if (outcome.kind === "failed") {
         if (kind === "benefits") benefitsAsked.current = false;
         if (!leftProgress(outcome)) warn(failureText("search", outcome.status, outcome.error, outcome.body, COPY.searchFailed));
