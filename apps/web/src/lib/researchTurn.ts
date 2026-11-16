@@ -1,5 +1,5 @@
 import { answerTurn, type ResearchContext, type Upstream } from "./researchAi";
-import { cleanText, hasForbidden, tokensCovered, unknownModelTokens } from "./researchCheck";
+import { cleanText, hasForbidden, nameGrounded, tokensCovered, unknownModelTokens } from "./researchCheck";
 import {
   applyPatch,
   firstValidNext,
@@ -26,6 +26,7 @@ import {
   CONFIRM_QUICK,
   FALLBACK_NOTICE,
   LINK_CHECKED,
+  LINK_FULL,
   LINK_NOTE,
   NO_CONFIRM,
   PENDING_NOTICE,
@@ -58,6 +59,8 @@ export const TEXT_MAX = 1000;
 const SLOT_VALUE_LIMIT = 120;
 const EDIT_MAX = 200;
 const URL_MAX = 500;
+/** 한 세션에서 확인을 기다리는 링크 카드 수(pending 8,000바이트 안에 든다). */
+const SHOWN_LINKS_MAX = 5;
 const BODY_BYTES_MAX = 8000;
 /** 혜택 링크를 [확인했어요]로 남기는 수. 리뷰·결과에는 이 가운데 2개까지 들어간다. */
 const BENEFIT_LINKS_MAX = 4;
@@ -247,6 +250,14 @@ export type Intent = "reply" | "ask_back" | "show_review" | "skip" | "other";
 const INTENTS: readonly Intent[] = ["reply", "ask_back", "show_review", "skip", "other"];
 const FILL_SLOTS: readonly SlotKey[] = SLOT_KEYS.filter((key) => key !== "photo");
 const MAX_FILLS = 4;
+const NAME_SLOTS: readonly SlotKey[] = ["model", "alts"];
+
+/** 기종·대안 칸 값의 이름(대안은 쉼표로 나뉜 이름마다)이 봉사자 말과 요청 글에 모두 근거하나(researchCheck.nameGrounded). */
+function fillNamesGrounded(slot: string, value: string, said: string, context: ResearchContext): boolean {
+  const material = [said, context.product, context.brand ?? "", context.item ?? ""];
+  const names = slot === "alts" ? value.split(/[,，]/).map((name) => name.trim()).filter(Boolean) : [value];
+  return names.length > 0 && names.every((name) => nameGrounded(name, material));
+}
 
 export interface Guide {
   queries: string[];
@@ -352,7 +363,9 @@ export function validateAiTurn(raw: Record<string, unknown> | null, input: Valid
       !evidenceMatches(evidence, input.text) ||
       // 값도 봉사자 말이나 evidence에 근거해야 한다: 핵심 낱말의 절반 이상이 거기 있어야 하고, 아니면 그 fill만 버린다.
       !tokensCovered(value, [input.text, evidence]) ||
-      unknownModelTokens(value, input.material).length > 0
+      unknownModelTokens(value, input.material).length > 0 ||
+      // 기종·대안 칸의 이름은 모든 낱말이 봉사자 말이나 요청 글에 있어야 한다(없는 변형명 WH-CH720N Magic 방지).
+      (NAME_SLOTS.includes(slot as SlotKey) && !fillNamesGrounded(slot, value, input.text, context))
     ) {
       dropped = true;
       continue;
@@ -687,6 +700,17 @@ function linkLabel(url: string): string {
 }
 
 const URL_IN_TEXT = /https:\/\/[^\s<>"'，。]+/i;
+/** 문장 끝에 붙은 구두점·닫는 괄호·따옴표는 주소가 아니다(짝이 맞는 괄호 ')'는 주소의 일부로 둔다). */
+const URL_TRAILING = /[.,;:!?'"’”」』。，、！？\]}>]$/u;
+export function urlInText(text: string): string | null {
+  let url = URL_IN_TEXT.exec(text)?.[0] ?? "";
+  for (;;) {
+    if (URL_TRAILING.test(url)) url = url.slice(0, -1);
+    else if (url.endsWith(")") && url.split(")").length > url.split("(").length) url = url.slice(0, -1);
+    else break;
+  }
+  return url === "" || url === "https://" ? null : url;
+}
 
 /** 한 턴을 계획한다. 저장소에 넘길 patch·messages·후보 목록을 만든다. 상태를 바꾸지 않는다. */
 export function planTurn(args: PlanArgs): TurnPlan {
@@ -762,7 +786,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
       // 주소가 든 말: 참고 글(refs)에 해당하면 AI가 칸을 채우지 못하게 하고, 아래 3)에서 "직접 확인 필요" 링크 카드로 받는다.
       // (서버는 외부 주소를 열지 않으므로 봉사자가 확인하기 전에는 값으로 넣지 않는다. design.md 4.6, 4.10)
-      const url = URL_IN_TEXT.exec(input.text)?.[0] ?? null;
+      const url = urlInText(input.text);
       const linkCard =
         url !== null &&
         isHttps(url) &&
@@ -819,15 +843,20 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
       // 3) 참고 글에 링크를 붙여 넣음: AI 검색 없이 "직접 확인 필요" 링크 카드
       if (linkCard && url && slotsPatch.refs === undefined) {
-        messages.push({
-          role: "ai",
-          tag: "search",
-          slot: "refs",
-          body: { kind: "link", url, note: LINK_NOTE },
-          ai: "none",
-        });
+        // 화면에 남은 카드는 모두 확인할 수 있어야 하므로, 보인 링크 목록이 차면 새 카드를 만들지 않는다(앞 카드를 조용히 빼지 않는다).
         const known = refsLinks(session.pending).filter((entry) => entry.url !== url);
-        pendingPatch.shownLinks = [...known, { url, slot: "refs" }].slice(-5);
+        if (known.length >= SHOWN_LINKS_MAX) {
+          messages.push(aiNotice(LINK_FULL));
+        } else {
+          messages.push({
+            role: "ai",
+            tag: "search",
+            slot: "refs",
+            body: { kind: "link", url, note: LINK_NOTE },
+            ai: "none",
+          });
+          pendingPatch.shownLinks = [...known, { url, slot: "refs" }];
+        }
         hold = true;
         break;
       }
@@ -981,8 +1010,13 @@ export function planTurn(args: PlanArgs): TurnPlan {
           messages.push(aiNotice(BENEFIT_LINK_CHECKED));
         }
         if (toRefs) {
-          // 칸 값은 200자 이하라서 200자를 넘는 주소는 줄여 적는다. 전체 주소는 links에만 둔다.
-          slotsPatch.refs = { value: [...input.url].length <= SLOT_VALUE_MAX ? input.url : linkLabel(input.url), links: [input.url], status: "confirmed", by: "volunteer" };
+          // 이미 확인한 링크는 남기고 이번 링크를 더한다(카드를 여러 개 확인해도 앞 확인이 사라지지 않는다).
+          const before = session.slots.refs?.links ?? [];
+          const links = before.includes(input.url) ? [...before] : [...before, input.url];
+          // 칸 값은 200자 이하라서 길면 호스트·경로 표시로 줄여 적는다. 전체 주소는 links에만 둔다.
+          const whole = links.join(", ");
+          const value = [...whole].length <= SLOT_VALUE_MAX ? whole : [...links.map(linkLabel).join(", ")].slice(0, SLOT_VALUE_MAX).join("");
+          slotsPatch.refs = { value, links, status: "confirmed", by: "volunteer" };
           messages.push(aiNotice(LINK_CHECKED));
         } else {
           hold = true;

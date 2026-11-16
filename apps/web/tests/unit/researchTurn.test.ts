@@ -10,6 +10,7 @@ import {
   isQuestionLike,
   parseTurnBody,
   planTurn,
+  urlInText,
   validateAiTurn,
   type AiMode,
   type TurnInput,
@@ -686,6 +687,53 @@ describe("건너뛰기·칩·고치기·링크", () => {
     expect(checked.chosen).toBe("propose_review");
   });
 
+  it("문장 끝 마침표·쉼표·닫는 괄호·따옴표는 주소에 넣지 않는다", () => {
+    expect(urlInText("이 글 봤어요 https://example.com/review.")).toBe("https://example.com/review");
+    expect(urlInText("https://example.com/review, 좋아요")).toBe("https://example.com/review");
+    expect(urlInText("(https://example.com/review)")).toBe("https://example.com/review");
+    expect(urlInText('"https://example.com/review".')).toBe("https://example.com/review");
+    expect(urlInText("https://example.com/review?id=3!!")).toBe("https://example.com/review?id=3");
+    expect(urlInText("https://example.com/a。")).toBe("https://example.com/a");
+    // 짝이 맞는 괄호는 주소의 일부다.
+    expect(urlInText("https://ko.wikipedia.org/wiki/Foo_(bar)")).toBe("https://ko.wikipedia.org/wiki/Foo_(bar)");
+    expect(urlInText("https://ko.wikipedia.org/wiki/Foo_(bar).")).toBe("https://ko.wikipedia.org/wiki/Foo_(bar)");
+    expect(urlInText("주소 없어요")).toBeNull();
+    expect(urlInText("https://.")).toBeNull();
+  });
+
+  it("끝에 마침표가 붙은 주소도 그 주소로 링크 카드를 만든다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    await h.step(say("WH-CH520"), replyAi(fill("model", "WH-CH520")));
+    await h.step(say("가벼워 보여요"), replyAi(fill("pros", "가벼워 보여요")));
+    await h.step({ type: "skip", slot: "alts" });
+    await h.step(say("무게가 맘에 들어요"), replyAi(fill("altReason", "무게가 맘에 들어요")));
+    await h.step({ type: "skip", slot: "benefits" });
+    const card = await h.step(say("이 글 봤어요 https://blog.example.com/review."), replyAi());
+    const link = card.messages.find((message) => message.body.kind === "link")!;
+    expect(link.body).toMatchObject({ kind: "link", url: "https://blog.example.com/review" });
+  });
+
+  it("링크 카드는 5개까지만 만들고, 6번째 주소는 카드 없이 알려서 화면에 남은 첫 카드를 계속 확인할 수 있다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    await h.step(say("WH-CH520"), replyAi(fill("model", "WH-CH520")));
+    await h.step(say("가벼워 보여요"), replyAi(fill("pros", "가벼워 보여요")));
+    await h.step({ type: "skip", slot: "alts" });
+    await h.step(say("무게가 맘에 들어요"), replyAi(fill("altReason", "무게가 맘에 들어요")));
+    await h.step({ type: "skip", slot: "benefits" });
+    const urls = [1, 2, 3, 4, 5, 6].map((n) => `https://blog.example.com/post/${n}`);
+    for (const url of urls.slice(0, 5)) {
+      const card = await h.step(say(`이 글 봤어요 ${url}`), replyAi());
+      expect(card.messages.some((message) => message.body.kind === "link")).toBe(true);
+    }
+    const sixth = await h.step(say(`이 글도 봤어요 ${urls[5]}`), replyAi());
+    expect(sixth.messages.some((message) => message.body.kind === "link")).toBe(false);
+    expect(sixth.messages.map(bodyText)).toContain(text.LINK_FULL);
+    const first = await h.step({ type: "link_check", url: urls[0] });
+    expect(first.view.slots.refs).toMatchObject({ value: urls[0], links: [urls[0]], status: "confirmed" });
+  });
+
   it("AI가 참고 글 칸을 주소로 채우려 해도 값으로 넣지 않고 링크 카드로 받는다", async () => {
     const h = await harness();
     await h.step({ type: "quick", replyId: "purchase.research" });
@@ -742,6 +790,31 @@ describe("A2 독립 리뷰 지적 반영", () => {
     expect(checked.view.slots.refs?.status).toBe("confirmed");
     expect((checked.view.slots.refs?.value ?? "").length).toBeLessThanOrEqual(200);
     expect(checked.view.slots.refs?.value).toContain("blog.example.com");
+  });
+
+  it("재현: 봉사자 말에 없는 변형명(WH-CH720N Magic)은 기종 칸에 저장하지 않는다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.bought" });
+    const result = await h.step(say("WH-CH720N 샀어요"), replyAi(fill("model", "WH-CH720N Magic", "WH-CH720N")));
+    expect(result.view.slots.model).toBeUndefined();
+    const ok = await h.step(say("WH-CH720N 샀어요"), replyAi(fill("model", "WH-CH720N", "WH-CH720N")));
+    expect(ok.view.slots.model?.value).toBe("WH-CH720N");
+  });
+
+  it("재현: 링크 카드 둘을 차례로 확인해도 두 주소가 모두 refs.links에 남는다", async () => {
+    const h = await researchUntilRefs();
+    const a = "https://blog.example.com/post/1";
+    const b = "https://blog.example.com/post/2";
+    await h.step(say(`이 글 봤어요 ${a}`), fallback);
+    await h.step(say(`이 글도 봤어요 ${b}`), fallback);
+    const first = await h.step({ type: "link_check", url: a });
+    expect(first.view.slots.refs?.links).toEqual([a]);
+    const second = await h.step({ type: "link_check", url: b });
+    expect(second.view.slots.refs?.links).toEqual([a, b]);
+    expect(second.view.slots.refs?.value).toBe(`${a}, ${b}`);
+    // 같은 카드를 다시 확인해도 중복으로 쌓이지 않는다.
+    const again = await h.step({ type: "link_check", url: a });
+    expect(again.view.slots.refs?.links).toEqual([a, b]);
   });
 
   it("대안 이름 둘을 이으면 200자를 넘는 경우 새 이름을 넣지 않는다(칸 한도)", async () => {

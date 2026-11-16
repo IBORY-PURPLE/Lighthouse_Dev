@@ -517,30 +517,67 @@ describe("tokensCovered: 값의 핵심 낱말이 자료에 있나", () => {
   });
 });
 
-describe("nameGrounded / cleanItems(material): 후보 이름은 인용·요청 글에 근거해야 한다", () => {
+describe("nameGrounded / cleanItems(sources): 후보 이름은 그 후보가 인용한 출처 하나에 근거해야 한다", () => {
   const url = "https://shop.example/a";
-  const material = ["소니 헤드폰 찾아요", "Sony", "헤드폰", "Sony WH-CH720N 무선 노이즈캔슬링 헤드폰", "https://shop.example/a"];
-  it("기종 토큰이 인용에 있으면 통과, 없으면(지어낸 모델) 버린다", () => {
+  const material = ["Sony WH-CH720N 무선 노이즈캔슬링 헤드폰", "https://shop.example/a"];
+  it("기종 토큰이 출처에 있으면 통과, 없으면(지어낸 모델) 버린다", () => {
     expect(nameGrounded("Sony WH-CH720N", material)).toBe(true);
     expect(nameGrounded("소니 WH-CH720N", material)).toBe(true);
     expect(nameGrounded("소니 WH-1000XM9", material)).toBe(false);
   });
-  it("기종 토큰이 없는 이름은 낱말 절반 이상이 자료에 있어야 한다", () => {
+  it("기종 토큰이 없는 이름도 모든 낱말이 출처에 있어야 한다", () => {
     expect(nameGrounded("소니 헤드폰", material)).toBe(true);
+    expect(nameGrounded("소니 스피커", material)).toBe(false);
     expect(nameGrounded("프리미엄 스튜디오 모니터", material)).toBe(false);
   });
-  it("cleanItems는 material이 있을 때만 이름을 대조한다", () => {
+  it("이름의 브랜드가 출처에 없으면 기종 토큰이 맞아도 버린다(소니·Sony는 같은 말)", () => {
+    const bose = ["보스 QC45 노이즈캔슬링 헤드폰", "https://shop.example/bose-qc45"];
+    expect(nameGrounded("소니 QC45", bose)).toBe(false);
+    expect(nameGrounded("Sony QC45", bose)).toBe(false);
+    expect(nameGrounded("보스 QC45", bose)).toBe(true);
+    expect(nameGrounded("Bose QC45", bose)).toBe(true);
+  });
+  it("재현: 출처 'Sony WH-CH720N'에 한글 변형 '소니 WH-CH720N 울트라'는 거부, 모든 낱말이 있으면 통과", () => {
+    const sony = ["Sony WH-CH720N", "https://shop.example/sony-wh-ch720n"];
+    expect(nameGrounded("소니 WH-CH720N 울트라", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N 프리미엄 한정판", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N", sony)).toBe(true);
+    expect(nameGrounded("sony wh-ch720n", sony)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N 울트라", ["소니 WH-CH720N 울트라 헤드폰"])).toBe(true);
+    // 조사가 붙은 한글 낱말은 한글 낱말 안에 들어 있으면 된다.
+    expect(nameGrounded("소니 헤드폰", ["소니는 헤드폰을 팝니다"])).toBe(true);
+    // 영문·숫자 낱말은 부분 일치가 아니라 낱말이 같아야 한다.
+    expect(nameGrounded("Sony Pro", ["Sony product page"])).toBe(false);
+    expect(nameGrounded("  ", sony)).toBe(false);
+  });
+  it("출처에 없는 영문·숫자 낱말이 붙은 변형명은 버린다(WH-CH720N Magic)", () => {
+    const sony = ["Sony WH-CH720N", "https://shop.example/sony-wh-ch720n"];
+    expect(nameGrounded("Sony WH-CH720N Magic", sony)).toBe(false);
+    expect(nameGrounded("Sony WH-CH720N 2세대 Pro", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N Plus", sony)).toBe(false);
+    expect(nameGrounded("Sony WH-CH720N", sony)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N 헤드폰", sony)).toBe(false);
+  });
+  it("cleanItems는 sources가 있을 때만 이름을 대조하고, 후보마다 자기 출처 글로만 대조한다", () => {
+    const other = "https://shop.example/a?x=1";
     const raw = [
       { name: "Sony WH-CH720N", url },
-      { name: "Bose QC-Ultra9", url: "https://shop.example/a?x=1" },
+      { name: "Bose QC-Ultra9", url: other },
     ];
-    expect(cleanItems(raw, allowed(url, "https://shop.example/a?x=1")).map((item) => item.name)).toEqual([
-      "Sony WH-CH720N",
-      "Bose QC-Ultra9",
-    ]);
+    expect(cleanItems(raw, allowed(url, other)).map((item) => item.name)).toEqual(["Sony WH-CH720N", "Bose QC-Ultra9"]);
+    const sources = new Map([[urlKey(url)!, material], [urlKey(other)!, ["Sony WH-CH720N 리뷰"]]]);
+    expect(cleanItems(raw, allowed(url, other), undefined, sources).map((item) => item.name)).toEqual(["Sony WH-CH720N"]);
+  });
+  it("재현: 요청 '소니', 검색 자료 '보스 QC45' 페이지, AI 후보 '소니 QC45'+보스 URL → 거부", () => {
+    const bose = "https://shop.example/bose-qc45";
+    const sources = new Map([[urlKey(bose)!, ["보스 QC45 노이즈캔슬링 헤드폰", bose]]]);
+    expect(cleanItems([{ name: "소니 QC45", url: bose }], allowed(bose), undefined, sources)).toEqual([]);
     expect(
-      cleanItems(raw, allowed(url, "https://shop.example/a?x=1"), undefined, material).map((item) => item.name),
-    ).toEqual(["Sony WH-CH720N"]);
+      cleanItems([{ name: "보스 QC45", url: bose }], allowed(bose), undefined, sources).map((item) => item.name),
+    ).toEqual(["보스 QC45"]);
+  });
+  it("후보의 출처 글이 없으면(인용 제목·주소 없음) 버린다", () => {
+    expect(cleanItems([{ name: "Sony WH-CH720N", url }], allowed(url), undefined, new Map())).toEqual([]);
   });
 });
 

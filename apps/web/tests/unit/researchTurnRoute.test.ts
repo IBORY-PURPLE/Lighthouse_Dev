@@ -663,6 +663,29 @@ describe("POST …/research/search (model)", () => {
     expect(data.messages[0].body.chips.map((chip: { value: string }) => chip.value)).toEqual(["소니 WH-CH720N"]);
   });
 
+  it("재현: 요청 '소니', 검색 자료는 보스 QC45 페이지 → AI가 '소니 QC45'를 보스 주소에 붙여도 칩에서 버린다", async () => {
+    vi.stubEnv("LLM_MODE", "");
+    const bose = "https://shop.example/bose-qc45";
+    responsesCreate.mockResolvedValueOnce({
+      output: [
+        { type: "web_search_call", action: { type: "search", sources: [{ url: bose }] } },
+        {
+          type: "message",
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({ items: [{ name: "소니 QC45", note: "가벼워요", url: bose }] }),
+              annotations: [{ type: "url_citation", url: bose, title: "보스 QC45 노이즈캔슬링 헤드폰" }],
+            },
+          ],
+        },
+      ],
+    });
+    const o = await opened();
+    const data = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" })).json();
+    expect(data.messages[0].body.chips?.map((chip: { value: string }) => chip.value) ?? []).not.toContain("소니 QC45");
+  });
+
   it("검색이 처리 중이면 202", async () => {
     const o = await opened();
     await getResearchStore().begin({ requestId: o.id, volunteerId: volunteerOf(o.cookie), sessionId: o.sessionId, kind: "search", cacheKey: "model", units: 1 });
