@@ -15,13 +15,15 @@
     "test:unit": "vitest run",
     "check": "npm run lint && npm run typecheck && npm run test:unit",
     "test:e2e": "playwright test --project=e2e",
-    "test:chatbot": "vitest run --config vitest.chatbot.config.mts",
+    "test:chatbot": "vitest run --config vitest.chatbot.config.mts tests/chatbot/questions.test.ts",
+    "test:research-ai": "vitest run --config vitest.chatbot.config.mts tests/chatbot/research-ai.test.ts",
     "test:public": "playwright test --project=public"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.119.0",
     "groq-sdk": "^1.6.0",
     "next": "^16.4.5",
+    "openai": "^7.53.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "server-only": "^0.0.1"
