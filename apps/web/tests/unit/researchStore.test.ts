@@ -261,7 +261,7 @@ describe("메모리 상한과 사용량", () => {
     const again = await research.open(r.id, r.volunteerId);
     expect(again.outcome === "ok" && again.view.sessionId).not.toBe(r.sessionId);
     expect(again.outcome === "ok" && again.view).toMatchObject({ purchase: "unset", lastSeq: 0 });
-    const actor = { ...r.actor, sessionId: again.outcome === "ok" ? again.view.sessionId : null };
+    const actor = { ...r.actor, sessionId: again.outcome === "ok" ? again.view.sessionId : "" };
     expect(await research.begin({ ...actor, kind: "turn", clientTurnId: "b", caps })).toMatchObject({ ai: "capped", cap: "request" });
     // 옛 세션 id로는 쓸 수 없다.
     expect((await research.begin({ ...r.actor, kind: "turn", clientTurnId: "c", caps })).outcome).toBe("session_changed");
@@ -405,7 +405,7 @@ describe("메모리 내려놓기·6시간 반환", () => {
     await requests.release(r.id, r.volunteerId);
     await requests.claim(r.id, r.volunteerId);
     const again = await research.open(r.id, r.volunteerId);
-    const actor = { ...r.actor, sessionId: again.outcome === "ok" ? again.view.sessionId : null };
+    const actor = { ...r.actor, sessionId: again.outcome === "ok" ? again.view.sessionId : "" };
     expect(await research.begin({ ...actor, kind: "turn", clientTurnId: "b", caps })).toMatchObject({ ai: "capped" });
   });
 });
