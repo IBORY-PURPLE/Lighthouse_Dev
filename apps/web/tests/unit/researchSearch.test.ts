@@ -292,6 +292,9 @@ describe("cleanBenefitItems: 혜택 항목 검사", () => {
       "오 원 할인 쿠폰",
       "육 프로 즉시 할인",
       "이 프로 혜택",
+      "포인트 500 적립",
+      "포인트 약 5천 적립",
+      "포인트 오백 적립",
     ];
     // 갈래마다 3개까지만 남기므로, 버려져야 할 항목은 3개 넘게 한 번에 넣어도 하나도 남지 않아야 한다.
     const bad = badTexts.map((text, index) => base({ title: text, url: url(`h${index}`) }));

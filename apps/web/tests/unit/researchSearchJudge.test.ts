@@ -31,7 +31,7 @@ describe("benefitTextViolations: 혜택 글 전용 의심", () => {
   });
 
   it("한글 수사 + 프로·퍼센트·포인트·P(오 프로 혜택, 오 포인트 적립)를 잡는다", () => {
-    for (const text of ["오 프로 혜택", "오 포인트 적립", "이십 프로 적립", "십 퍼센트 청구 할인", "하나 포인트 적립", "오P 적립"]) {
+    for (const text of ["오 프로 혜택", "오 포인트 적립", "이십 프로 적립", "십 퍼센트 청구 할인", "하나 포인트 적립", "오P 적립", "포인트 500 적립", "포인트 약 5천", "포인트 오백 적립"]) {
       expect(benefitTextViolations("title", text).length, text).toBeGreaterThan(0);
     }
   });
