@@ -37,9 +37,9 @@ type ModelBody = Extract<ResearchResponse, { items: unknown }>;
 
 /**
  * 기종 후보 메시지: 칩(이름, 주소)과 쇼핑몰 바로가기. 이름은 pending.shownModels로 따로 저장한다.
- * 후보 이름은 웹 검색에서 온 값이라, 기존 카드형(researchCheck.cleanItems)과 같이 "출처 주소가 검색 결과(인용·소스)에 있는 후보"와
- * 이름의 금지 표현만 거른다. 칩에는 "AI 제안 · 확인이 필요해요" 표시가 붙고, 고른 이름은 봉사자 확정으로 칸에 들어간다.
- * 이름과 인용 내용의 대조(design.md 4.8 unknownModelTokens, 자료 = 인용)는 제품 목록 질문(블록 A3)에서 더한다.
+ * 후보 이름은 웹 검색에서 온 값이라, researchAi가 "출처 주소가 검색 결과(인용·소스)에 있는 후보"와 이름의 금지 표현을 거르고,
+ * 이름이 인용 제목·출처 주소나 요청 글에 근거하는지도 대조한다(researchCheck.nameGrounded). 칩에는 "AI 제안 · 확인이 필요해요" 표시가 붙고,
+ * 고른 이름은 봉사자 확정으로 칸에 들어간다. 같은 대조를 대안 후보(alts)에 쓰는 것은 제품 목록 질문(블록 A3)에서 더한다.
  */
 function modelMessage(body: ModelBody, subject: string, notice: string | null): NextMessage {
   const count = body.items.length;

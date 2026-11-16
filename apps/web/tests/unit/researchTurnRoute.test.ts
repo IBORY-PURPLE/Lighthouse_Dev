@@ -329,7 +329,7 @@ describe("POST …/research/turn", () => {
   it("202: 같은 clientTurnId가 처리 중이면 기다리게 한다", async () => {
     const o = await opened();
     const store = getResearchStore();
-    const pending = body(o, { type: "quick", replyId: "purchase.bought" });
+    const pending = body(o, { type: "text", text: "WH-CH720N 샀어요" });
     await store.begin({ requestId: o.id, volunteerId: volunteerOf(o.cookie), sessionId: o.sessionId, kind: "turn", clientTurnId: pending.clientTurnId, baseVersion: 0 });
     const response = await post(o.id, o.cookie, pending);
     expect(response.status).toBe(202);
@@ -340,11 +340,24 @@ describe("POST …/research/turn", () => {
     const actual = await vi.importActual<typeof import("@/lib/researchStore")>("@/lib/researchStore");
     const real = actual.getResearchStore();
     const spy = vi.spyOn(real, "apply").mockResolvedValueOnce({ outcome: "bad_patch" } as never);
-    const first = body(o, { type: "quick", replyId: "purchase.bought" });
+    const first = body(o, { type: "text", text: "WH-CH720N 샀어요" });
     const failed = await post(o.id, o.cookie, first);
     expect(failed.status).toBe(500);
     expect(spy).toHaveBeenCalledTimes(2);
     expect(spy.mock.calls[1]?.[0]).toMatchObject({ baseVersion: -1, clientTurnId: first.clientTurnId });
+    const again = await post(o.id, o.cookie, first);
+    expect(again.status).toBe(200);
+    expect((await again.json()).session.purchase).toBe("bought");
+  });
+
+  it("AI를 부르지 않는 입력은 apply가 bad_patch여도 자리를 남기지 않아 다시 보내면 처리된다", async () => {
+    const o = await opened();
+    const actual = await vi.importActual<typeof import("@/lib/researchStore")>("@/lib/researchStore");
+    const real = actual.getResearchStore();
+    const spy = vi.spyOn(real, "apply").mockResolvedValueOnce({ outcome: "bad_patch" } as never);
+    const first = body(o, { type: "quick", replyId: "purchase.bought" });
+    expect((await post(o.id, o.cookie, first)).status).toBe(500);
+    expect(spy).toHaveBeenCalledTimes(1);
     const again = await post(o.id, o.cookie, first);
     expect(again.status).toBe(200);
     expect((await again.json()).session.purchase).toBe("bought");
@@ -355,20 +368,63 @@ describe("POST …/research/turn", () => {
     const actual = await vi.importActual<typeof import("@/lib/researchStore")>("@/lib/researchStore");
     const real = actual.getResearchStore();
     vi.spyOn(real, "apply").mockRejectedValueOnce(new Error("db down"));
-    const first = body(o, { type: "quick", replyId: "purchase.bought" });
+    const first = body(o, { type: "text", text: "WH-CH720N 샀어요" });
     expect((await post(o.id, o.cookie, first)).status).toBeGreaterThanOrEqual(500);
     expect((await post(o.id, o.cookie, first)).status).toBe(200);
+  });
+
+  it("AI를 부르지 않는 입력(빠른 답·칩·건너뛰기·고치기·링크 확인)은 하루 AI 호출량을 쓰지 않는다", async () => {
+    vi.stubEnv("RESEARCH_DAILY_AI_CAP", "1");
+    const o = await opened();
+    let version = 0;
+    const send = async (input: unknown) => {
+      const data = await (await post(o.id, o.cookie, body({ ...o, version }, input))).json();
+      version = data.version;
+      return data;
+    };
+    expect((await send({ type: "quick", replyId: "purchase.bought" })).ai).toBe("none");
+    expect((await send({ type: "chip", slot: "model", value: "소니 WH-CH720N" })).ai).toBe("none");
+    expect((await send({ type: "edit", slot: "pros", text: "가벼워요" })).ai).toBe("none");
+    expect((await send({ type: "skip", slot: "altReason" })).ai).toBe("none");
+    expect((await send({ type: "link_check", url: "https://example.com/review" })).ai).toBe("none");
+    // 상한 1회는 그대로 남아 있어 첫 글 턴이 AI를 쓴다.
+    expect((await send({ type: "text", text: "가벼워요" })).ai).toBe("ok");
+    expect((await send({ type: "text", text: "또 가벼워요" })).ai).toBe("capped");
+  });
+
+  it("같은 AI 비호출 턴이 동시에 두 번 와도 한 번만 반영되고 둘 다 같은 응답을 받는다", async () => {
+    const o = await opened();
+    const same = body(o, { type: "quick", replyId: "purchase.bought" });
+    const [one, two] = await Promise.all([post(o.id, o.cookie, same), post(o.id, o.cookie, same)]);
+    expect([one.status, two.status]).toEqual([200, 200]);
+    expect((await one.json()).messages).toEqual((await two.json()).messages);
+    const view = await (await get(o.id, o.cookie)).json();
+    expect(view.messages.filter((message: { role: string }) => message.role === "volunteer")).toHaveLength(1);
+  });
+
+  it("AI를 부르지 않는 입력도 기준 version이 어긋나면 409 stale, 없는 세션이면 409 session_changed", async () => {
+    const o = await opened();
+    const stale = await post(o.id, o.cookie, body({ ...o, version: 9 }, { type: "skip", slot: "pros" }));
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: "stale", version: 0 });
+    const other = await post(o.id, o.cookie, { ...body(o, { type: "skip", slot: "pros" }), sessionId: randomUUID() });
+    expect(other.status).toBe(409);
+    expect(await other.json()).toMatchObject({ error: "session_changed" });
   });
 
   it("요청당 AI 상한: 한도를 넘으면 AI 없이 CAP 문구와 기본 질문으로 이어 간다", async () => {
     vi.stubEnv("RESEARCH_DAILY_AI_CAP", "1");
     const o = await opened();
-    // 첫 턴이 하루 AI 호출 1회를 쓴다(빠른 답도 한 턴으로 센다).
-    const first = await (await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }))).json();
+    // 빠른 답·칩 같은 AI를 부르지 않는 턴은 하루 AI 호출을 쓰지 않는다. 글 턴 하나가 1회를 쓴다.
+    const quick = await (await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }))).json();
+    const chip = await (await post(o.id, o.cookie, body({ ...o, version: quick.version }, { type: "chip", slot: "model", value: "소니 WH-CH720N" }))).json();
+    expect(chip.ai).toBe("none");
+    const first = await (await post(o.id, o.cookie, body({ ...o, version: chip.version }, { type: "text", text: "가벼워요" }))).json();
+    expect(first.ai).toBe("ok");
     const capped = await (await post(o.id, o.cookie, body({ ...o, version: first.version }, { type: "text", text: "LH-200" }))).json();
     expect(capped.ai).toBe("capped");
     expect(capped.messages.map((message: { body: { text?: string } }) => message.body.text)).toContain(CAP_DAILY);
-    expect(capped.session.slots.model).toBeUndefined();
+    expect(capped.session.slots).toEqual(first.session.slots);
     expect(turnLogs().at(-1)).toMatch(/kind=turn ai=capped cap=daily in=0 out=0 ws=0$/);
   });
 
@@ -564,7 +620,7 @@ describe("POST …/research/search (model)", () => {
             {
               type: "output_text",
               text: JSON.stringify({ items: [{ name: "Sony WH-CH720N", note: "가벼운 무선 헤드셋", url: longUrl }] }),
-              annotations: [{ type: "url_citation", url: longUrl }],
+              annotations: [{ type: "url_citation", url: longUrl, title: "Sony WH-CH720N 무선 노이즈캔슬링 헤드폰" }],
             },
           ],
         },
@@ -576,6 +632,39 @@ describe("POST …/research/search (model)", () => {
     const data = await response.json();
     expect(Buffer.byteLength(JSON.stringify(data.messages[0].body), "utf8")).toBeLessThanOrEqual(8000);
     expect(data.messages[0].body.chips).toEqual([{ label: "Sony WH-CH720N", value: "Sony WH-CH720N", url: null }]);
+  });
+
+  it("후보 이름이 인용 제목·출처 주소·요청 글에 없으면 칩에서 버린다", async () => {
+    vi.stubEnv("LLM_MODE", "");
+    const cited = "https://www.sony.co.kr/headphones/wh-ch720n";
+    const invented = "https://shop.example/invented";
+    responsesCreate.mockResolvedValueOnce({
+      output: [
+        { type: "web_search_call", action: { type: "search", sources: [{ url: cited }, { url: invented }] } },
+        {
+          type: "message",
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({
+                items: [
+                  { name: "소니 WH-CH720N", note: "가벼운 무선 헤드셋", url: cited },
+                  { name: "소니 WH-1000XM9", note: "상위 모델", url: invented },
+                ],
+              }),
+              annotations: [
+                { type: "url_citation", url: cited, title: "Sony WH-CH720N 무선 헤드폰" },
+                { type: "url_citation", url: invented, title: "헤드폰 구매 가이드" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const o = await opened();
+    const data = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" })).json();
+    expect(data.messages[0]).toMatchObject({ ai: "ok" });
+    expect(data.messages[0].body.chips.map((chip: { value: string }) => chip.value)).toEqual(["소니 WH-CH720N"]);
   });
 
   it("검색이 처리 중이면 202", async () => {

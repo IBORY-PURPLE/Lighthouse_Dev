@@ -1,5 +1,5 @@
 import { answerTurn, type ResearchContext, type Upstream } from "./researchAi";
-import { cleanText, hasForbidden, unknownModelTokens } from "./researchCheck";
+import { cleanText, hasForbidden, tokensCovered, unknownModelTokens } from "./researchCheck";
 import {
   applyPatch,
   firstValidNext,
@@ -346,6 +346,8 @@ export function validateAiTurn(raw: Record<string, unknown> | null, input: Valid
       (slot !== "refs" && hasLinkLike(value)) ||
       charCount(evidence) > 80 ||
       !evidenceMatches(evidence, input.text) ||
+      // 값도 봉사자 말이나 evidence에 근거해야 한다: 핵심 낱말의 절반 이상이 거기 있어야 하고, 아니면 그 fill만 버린다.
+      !tokensCovered(value, [input.text, evidence]) ||
       unknownModelTokens(value, input.material).length > 0
     ) {
       dropped = true;

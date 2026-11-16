@@ -835,6 +835,28 @@ describe("A2 독립 리뷰 지적 반영", () => {
       expect(validateAiTurn({ answer: "sorry" }, input, CONTEXT)).toBeNull();
       expect(validateAiTurn({ intent: "reply", fills: [] }, input, CONTEXT)).not.toBeNull();
     });
+    it("값은 봉사자 말이나 evidence에 근거해야 한다: 핵심 낱말이 없으면 그 fill만 버린다", () => {
+      const grounded = validateAiTurn(
+        {
+          intent: "reply",
+          fills: [
+            { slot: "pros", value: "가벼움", evidence: "가벼워요" },
+            { slot: "altReason", value: "노이즈캔슬링이 가장 강력해서", evidence: "가벼워요" },
+          ],
+        },
+        input,
+        CONTEXT,
+      );
+      // 말하지 않은 값은 evidence가 맞아도 버린다.
+      expect(grounded?.fills).toEqual([{ slot: "pros", value: "가벼움" }]);
+      expect(grounded?.dropped).toBe(true);
+      const fromEvidence = validateAiTurn(
+        { intent: "reply", fills: [{ slot: "altReason", value: "소니랑 보스를 봤어요", evidence: "소니랑 보스를 봤어요" }] },
+        input,
+        CONTEXT,
+      );
+      expect(fromEvidence?.fills).toHaveLength(1);
+    });
     it("흔하지 않은 최상위 도메인(.ai·.xyz)도 주소로 본다", () => {
       const turn = validateAiTurn(
         { intent: "reply", fills: [], next: { action: "ask_slot", slot: "pros", text: "example.xyz 에서 확인해 주세요." } },
@@ -846,7 +868,11 @@ describe("A2 독립 리뷰 지적 반영", () => {
       const ai = validateAiTurn({ intent: "reply", fills: [{ slot: "pros", value: "example.ai 가벼워요", evidence: "가벼워요" }] }, input, CONTEXT);
       expect(ai?.fills).toEqual([]);
       // 소수점이 든 말은 주소가 아니다.
-      const ok = validateAiTurn({ intent: "reply", fills: [{ slot: "pros", value: "무게가 1.5배 가벼워요", evidence: "가벼워요" }] }, input, CONTEXT);
+      const ok = validateAiTurn(
+        { intent: "reply", fills: [{ slot: "pros", value: "무게가 1.5배 가벼워요", evidence: "가벼워요" }] },
+        { ...input, text: "무게가 1.5배 가벼워요" },
+        CONTEXT,
+      );
       expect(ok?.fills).toHaveLength(1);
     });
     it("주소·도메인이 든 글은 다음 질문·찾는 방법·다른 칸 값에서 버린다", () => {

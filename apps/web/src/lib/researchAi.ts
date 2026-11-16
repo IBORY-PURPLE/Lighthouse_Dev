@@ -107,13 +107,25 @@ export function parseJsonObject(text: string): Record<string, unknown> | null {
 
 // ---- 호출 3종 --------------------------------------------------------------------
 
-/** search: Responses API + web_search. 글과, 검색 결과(소스 목록·인용)에 나온 주소(비교 키 → 검색 결과의 주소)를 돌려준다. */
+/** 주소를 사람이 읽는 글로 푼다(경로에 든 기종 이름을 이름 대조에 쓰려고). 풀 수 없으면 그대로. */
+function readableUrl(value: string): string {
+  try {
+    return decodeURIComponent(value.trim());
+  } catch {
+    return value.trim();
+  }
+}
+
+/**
+ * search: Responses API + web_search. 글과, 검색 결과(소스 목록·인용)에 나온 주소(비교 키 → 검색 결과의 주소)를 돌려준다.
+ * cited는 후보 이름을 대조할 자료다: 인용(url_citation)의 제목과 소스·인용 주소의 글. 모델이 쓴 본문은 넣지 않는다(지어낸 이름이 스스로 근거가 되지 않게).
+ */
 async function callSearch(
   card: SearchCard,
   material: Record<string, unknown>,
   signal: AbortSignal | undefined,
   tally?: Tally,
-): Promise<{ text: string; urls: AllowedUrls }> {
+): Promise<{ text: string; urls: AllowedUrls; cited: string[] }> {
   const response = await newClient(SEARCH_TIMEOUT_MS).responses.create(
     {
       model: LLM_MODEL,
@@ -141,6 +153,7 @@ async function callSearch(
     if (key && typeof value === "string" && !urls.has(key)) urls.set(key, value.trim());
   };
   const texts: string[] = [];
+  const cited: string[] = [];
   if (tally) {
     tally.in += response.usage?.input_tokens ?? 0;
     tally.out += response.usage?.output_tokens ?? 0;
@@ -148,19 +161,25 @@ async function callSearch(
   for (const output of response.output ?? []) {
     if (output.type === "web_search_call" && tally) tally.ws += 1;
     if (output.type === "web_search_call" && output.action?.type === "search") {
-      for (const source of output.action.sources ?? []) addUrl(source.url);
+      for (const source of output.action.sources ?? []) {
+        addUrl(source.url);
+        if (typeof source.url === "string") cited.push(readableUrl(source.url));
+      }
     } else if (output.type === "message") {
       for (const content of output.content) {
         if (content.type !== "output_text") continue;
         texts.push(content.text);
         for (const note of content.annotations ?? []) {
-          if (note.type === "url_citation") addUrl(note.url);
+          if (note.type !== "url_citation") continue;
+          addUrl(note.url);
+          if (typeof note.url === "string") cited.push(readableUrl(note.url));
+          if (typeof note.title === "string" && note.title.trim() !== "") cited.push(note.title);
         }
       }
     }
   }
   const text = texts.join("\n") || (typeof response.output_text === "string" ? response.output_text : "");
-  return { text, urls };
+  return { text, urls, cited };
 }
 
 /** ask: Chat Completions JSON 모드(기존 요약 호출과 같은 방식). */
@@ -266,9 +285,10 @@ async function liveResponse(
 
   switch (request.kind) {
     case "model": {
-      const { text, urls } = await callSearch("model", base, signal, tally);
+      const { text, urls, cited } = await callSearch("model", base, signal, tally);
       const raw = parseJsonObject(text)?.items;
-      const items = tallied(tally, raw, cleanItems(raw, urls));
+      // 후보 이름은 인용 제목·출처 주소나 요청 글에 나온 것만 남긴다(design.md 4.8). 대안 후보(alts)는 A3가 같은 인자를 넘겨 쓴다.
+      const items = tallied(tally, raw, cleanItems(raw, urls, undefined, [...known, ...cited]));
       return items.length ? { kind: "model", ai: "ok", items } : null;
     }
     case "alts": {

@@ -8,6 +8,8 @@ import {
   dropForbiddenSentences,
   hasForbidden,
   modelTokens,
+  nameGrounded,
+  tokensCovered,
   unknownModelTokens,
   urlKey,
 } from "@/lib/researchCheck";
@@ -491,5 +493,51 @@ describe("F3: 자료에 없는 기종 이름이 든 문장은 버린다", () => 
     expect(cleanQuestion("소니 WH-CH720N의 장점을 알려 주세요.", "기본 질문", ["소니 WH-CH720N"], material)).toBe(
       "소니 WH-CH720N의 장점을 알려 주세요.",
     );
+  });
+});
+
+describe("tokensCovered: 값의 핵심 낱말이 자료에 있나", () => {
+  it("낱말 절반 이상이 자료에 있으면 통과, 아니면 실패", () => {
+    expect(tokensCovered("배터리가 오래감", ["배터리가 오래가요"])).toBe(true);
+    expect(tokensCovered("오래 써도 귀가 안 아픔", ["리뷰에서 오래 써도 귀가 안 아프다고 해서 골랐어요", "귀가 안 아프다고"])).toBe(true);
+    // 봉사자가 말하지 않은 내용을 AI가 덧붙인 값
+    expect(tokensCovered("노이즈캔슬링이 가장 강력함", ["가벼워요", "가벼워요"])).toBe(false);
+    expect(tokensCovered("무게가 1.5배 가벼워요", ["가벼워요"])).toBe(false);
+  });
+  it("정규화(전각·대소문자·공백·기호) 뒤에 비교한다", () => {
+    expect(tokensCovered("WH-CH720N", ["wh ch720n 쓰고 있어요"])).toBe(true);
+    expect(tokensCovered("ＷＨ-ＣＨ７２０Ｎ", ["WH CH720N"])).toBe(true);
+  });
+  it("낱말이 하나도 없으면 값 전체가 들어 있어야 한다, 빈 값은 실패", () => {
+    expect(tokensCovered("좋", ["좋아요"])).toBe(true);
+    expect(tokensCovered("싫", ["좋아요"])).toBe(false);
+    expect(tokensCovered("   ", ["좋아요"])).toBe(false);
+  });
+});
+
+describe("nameGrounded / cleanItems(material): 후보 이름은 인용·요청 글에 근거해야 한다", () => {
+  const url = "https://shop.example/a";
+  const material = ["소니 헤드폰 찾아요", "Sony", "헤드폰", "Sony WH-CH720N 무선 노이즈캔슬링 헤드폰", "https://shop.example/a"];
+  it("기종 토큰이 인용에 있으면 통과, 없으면(지어낸 모델) 버린다", () => {
+    expect(nameGrounded("Sony WH-CH720N", material)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N", material)).toBe(true);
+    expect(nameGrounded("소니 WH-1000XM9", material)).toBe(false);
+  });
+  it("기종 토큰이 없는 이름은 낱말 절반 이상이 자료에 있어야 한다", () => {
+    expect(nameGrounded("소니 헤드폰", material)).toBe(true);
+    expect(nameGrounded("프리미엄 스튜디오 모니터", material)).toBe(false);
+  });
+  it("cleanItems는 material이 있을 때만 이름을 대조한다", () => {
+    const raw = [
+      { name: "Sony WH-CH720N", url },
+      { name: "Bose QC-Ultra9", url: "https://shop.example/a?x=1" },
+    ];
+    expect(cleanItems(raw, allowed(url, "https://shop.example/a?x=1")).map((item) => item.name)).toEqual([
+      "Sony WH-CH720N",
+      "Bose QC-Ultra9",
+    ]);
+    expect(
+      cleanItems(raw, allowed(url, "https://shop.example/a?x=1"), undefined, material).map((item) => item.name),
+    ).toEqual(["Sony WH-CH720N"]);
   });
 });
