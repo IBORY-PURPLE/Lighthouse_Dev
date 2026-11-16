@@ -58,7 +58,7 @@ describe("volunteerClient", () => {
     expect(await releaseRequest("r1")).toEqual({ kind: "not_yours" });
   });
 
-  it("보내기: 201·200 sent, 400 invalid_url, 403·404 내 담당 아님, 401, 그 밖은 failed", async () => {
+  it("보내기: 201·200 sent, 400(invalid_url·too_long·invalid_request) invalid, 403·404 내 담당 아님, 401, 그 밖은 failed", async () => {
     const candidates = [{ name: "N", url: "https://a.example", guide: "", summary: [] }];
     respond(201, { requestId: "r1", status: "done", sentAt: "2026-11-12T00:00:00.000Z" });
     expect(await sendResult("r1", candidates)).toEqual({ kind: "sent", sentAt: "2026-11-12T00:00:00.000Z" });
@@ -70,9 +70,11 @@ describe("volunteerClient", () => {
     respond(200, { requestId: "r1", status: "done", sentAt: "2026-11-12T00:00:00.000Z" });
     expect((await sendResult("r1", candidates)).kind).toBe("sent");
     respond(400, { ok: false, error: "invalid_url" });
-    expect(await sendResult("r1", candidates)).toEqual({ kind: "invalid_url" });
+    expect(await sendResult("r1", candidates)).toEqual({ kind: "invalid" });
     respond(400, { ok: false, error: "too_long" });
-    expect(await sendResult("r1", candidates)).toMatchObject({ kind: "failed" });
+    expect(await sendResult("r1", candidates)).toEqual({ kind: "invalid" });
+    respond(400, { ok: false, error: "invalid_request" });
+    expect(await sendResult("r1", candidates)).toEqual({ kind: "invalid" });
     respond(403, { ok: false, error: "not_yours" });
     expect(await sendResult("r1", candidates)).toEqual({ kind: "not_yours" });
     respond(404, { ok: false, error: "not_found" });

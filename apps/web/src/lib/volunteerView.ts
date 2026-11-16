@@ -156,7 +156,7 @@ export const VOLUNTEER_MESSAGES = {
   releasedToQueue: "요청을 대기열로 돌려놓았어요",
   notYours: "이 요청은 내 담당이 아니에요",
   notFound: "요청을 찾지 못했어요",
-  candidatesFailed: "후보를 불러오지 못했습니다. 다시 불러와 주세요.",
+  notYoursAnymore: "이 요청은 더 이상 내 담당이 아니에요",
   invalidCode: "입장 코드가 올바르지 않습니다",
   invalidNickname: "별명은 1~12자로 넣어 주세요",
   enterTooMany: "시도가 너무 많습니다. 10분 뒤 다시 해 주세요.",
