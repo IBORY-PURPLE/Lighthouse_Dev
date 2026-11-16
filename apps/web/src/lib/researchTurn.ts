@@ -1,5 +1,5 @@
 import { answerTurn, type ResearchContext, type Upstream } from "./researchAi";
-import { cleanText, hasForbidden, tokensCovered, unknownModelTokens } from "./researchCheck";
+import { cleanText, hasForbidden, nameGrounded, tokensCovered, unknownModelTokens } from "./researchCheck";
 import {
   applyPatch,
   firstValidNext,
@@ -246,6 +246,14 @@ export type Intent = "reply" | "ask_back" | "show_review" | "skip" | "other";
 const INTENTS: readonly Intent[] = ["reply", "ask_back", "show_review", "skip", "other"];
 const FILL_SLOTS: readonly SlotKey[] = SLOT_KEYS.filter((key) => key !== "photo");
 const MAX_FILLS = 4;
+const NAME_SLOTS: readonly SlotKey[] = ["model", "alts"];
+
+/** 기종·대안 칸 값의 이름(대안은 쉼표로 나뉜 이름마다)이 봉사자 말과 요청 글에 모두 근거하나(researchCheck.nameGrounded). */
+function fillNamesGrounded(slot: string, value: string, said: string, context: ResearchContext): boolean {
+  const material = [said, context.product, context.brand ?? "", context.item ?? ""];
+  const names = slot === "alts" ? value.split(/[,，]/).map((name) => name.trim()).filter(Boolean) : [value];
+  return names.length > 0 && names.every((name) => nameGrounded(name, material));
+}
 
 export interface Guide {
   queries: string[];
@@ -351,7 +359,9 @@ export function validateAiTurn(raw: Record<string, unknown> | null, input: Valid
       !evidenceMatches(evidence, input.text) ||
       // 값도 봉사자 말이나 evidence에 근거해야 한다: 핵심 낱말의 절반 이상이 거기 있어야 하고, 아니면 그 fill만 버린다.
       !tokensCovered(value, [input.text, evidence]) ||
-      unknownModelTokens(value, input.material).length > 0
+      unknownModelTokens(value, input.material).length > 0 ||
+      // 기종·대안 칸의 이름은 모든 낱말이 봉사자 말이나 요청 글에 있어야 한다(없는 변형명 WH-CH720N Magic 방지).
+      (NAME_SLOTS.includes(slot as SlotKey) && !fillNamesGrounded(slot, value, input.text, context))
     ) {
       dropped = true;
       continue;
@@ -974,8 +984,13 @@ export function planTurn(args: PlanArgs): TurnPlan {
         messages.push(aiNotice("확인할 링크를 찾지 못했어요."));
         hold = true;
       } else {
-        // 칸 값은 200자 이하라서 200자를 넘는 주소는 줄여 적는다. 전체 주소는 links에만 둔다.
-        slotsPatch.refs = { value: [...input.url].length <= SLOT_VALUE_MAX ? input.url : linkLabel(input.url), links: [input.url], status: "confirmed", by: "volunteer" };
+        // 이미 확인한 링크는 남기고 이번 링크를 더한다(카드를 여러 개 확인해도 앞 확인이 사라지지 않는다).
+        const before = session.slots.refs?.links ?? [];
+        const links = before.includes(input.url) ? [...before] : [...before, input.url];
+        // 칸 값은 200자 이하라서 길면 호스트·경로 표시로 줄여 적는다. 전체 주소는 links에만 둔다.
+        const whole = links.join(", ");
+        const value = [...whole].length <= SLOT_VALUE_MAX ? whole : [...links.map(linkLabel).join(", ")].slice(0, SLOT_VALUE_MAX).join("");
+        slotsPatch.refs = { value, links, status: "confirmed", by: "volunteer" };
         messages.push(aiNotice(LINK_CHECKED));
       }
       break;

@@ -792,6 +792,31 @@ describe("A2 독립 리뷰 지적 반영", () => {
     expect(checked.view.slots.refs?.value).toContain("blog.example.com");
   });
 
+  it("재현: 봉사자 말에 없는 변형명(WH-CH720N Magic)은 기종 칸에 저장하지 않는다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.bought" });
+    const result = await h.step(say("WH-CH720N 샀어요"), replyAi(fill("model", "WH-CH720N Magic", "WH-CH720N")));
+    expect(result.view.slots.model).toBeUndefined();
+    const ok = await h.step(say("WH-CH720N 샀어요"), replyAi(fill("model", "WH-CH720N", "WH-CH720N")));
+    expect(ok.view.slots.model?.value).toBe("WH-CH720N");
+  });
+
+  it("재현: 링크 카드 둘을 차례로 확인해도 두 주소가 모두 refs.links에 남는다", async () => {
+    const h = await researchUntilRefs();
+    const a = "https://blog.example.com/post/1";
+    const b = "https://blog.example.com/post/2";
+    await h.step(say(`이 글 봤어요 ${a}`), fallback);
+    await h.step(say(`이 글도 봤어요 ${b}`), fallback);
+    const first = await h.step({ type: "link_check", url: a });
+    expect(first.view.slots.refs?.links).toEqual([a]);
+    const second = await h.step({ type: "link_check", url: b });
+    expect(second.view.slots.refs?.links).toEqual([a, b]);
+    expect(second.view.slots.refs?.value).toBe(`${a}, ${b}`);
+    // 같은 카드를 다시 확인해도 중복으로 쌓이지 않는다.
+    const again = await h.step({ type: "link_check", url: a });
+    expect(again.view.slots.refs?.links).toEqual([a, b]);
+  });
+
   it("대안 이름 둘을 이으면 200자를 넘는 경우 새 이름을 넣지 않는다(칸 한도)", async () => {
     const h = await harness();
     await h.step({ type: "quick", replyId: "purchase.research" });

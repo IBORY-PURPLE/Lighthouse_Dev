@@ -523,8 +523,9 @@ describe("nameGrounded / cleanItems(sources): 후보 이름은 그 후보가 인
     expect(nameGrounded("소니 WH-CH720N", material)).toBe(true);
     expect(nameGrounded("소니 WH-1000XM9", material)).toBe(false);
   });
-  it("기종 토큰이 없는 이름은 낱말 절반 이상이 출처에 있어야 한다", () => {
+  it("기종 토큰이 없는 이름도 모든 낱말이 출처에 있어야 한다", () => {
     expect(nameGrounded("소니 헤드폰", material)).toBe(true);
+    expect(nameGrounded("소니 스피커", material)).toBe(false);
     expect(nameGrounded("프리미엄 스튜디오 모니터", material)).toBe(false);
   });
   it("이름의 브랜드가 출처에 없으면 기종 토큰이 맞아도 버린다(소니·Sony는 같은 말)", () => {
@@ -534,13 +535,26 @@ describe("nameGrounded / cleanItems(sources): 후보 이름은 그 후보가 인
     expect(nameGrounded("보스 QC45", bose)).toBe(true);
     expect(nameGrounded("Bose QC45", bose)).toBe(true);
   });
-  it("출처에 없는 영문·숫자 낱말이 붙은 변형명은 버린다(WH-CH720N Magic), 한글 일반어는 절반까지 봐 준다", () => {
+  it("재현: 출처 'Sony WH-CH720N'에 한글 변형 '소니 WH-CH720N 울트라'는 거부, 모든 낱말이 있으면 통과", () => {
+    const sony = ["Sony WH-CH720N", "https://shop.example/sony-wh-ch720n"];
+    expect(nameGrounded("소니 WH-CH720N 울트라", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N 프리미엄 한정판", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N", sony)).toBe(true);
+    expect(nameGrounded("sony wh-ch720n", sony)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N 울트라", ["소니 WH-CH720N 울트라 헤드폰"])).toBe(true);
+    // 조사가 붙은 한글 낱말은 한글 낱말 안에 들어 있으면 된다.
+    expect(nameGrounded("소니 헤드폰", ["소니는 헤드폰을 팝니다"])).toBe(true);
+    // 영문·숫자 낱말은 부분 일치가 아니라 낱말이 같아야 한다.
+    expect(nameGrounded("Sony Pro", ["Sony product page"])).toBe(false);
+    expect(nameGrounded("  ", sony)).toBe(false);
+  });
+  it("출처에 없는 영문·숫자 낱말이 붙은 변형명은 버린다(WH-CH720N Magic)", () => {
     const sony = ["Sony WH-CH720N", "https://shop.example/sony-wh-ch720n"];
     expect(nameGrounded("Sony WH-CH720N Magic", sony)).toBe(false);
     expect(nameGrounded("Sony WH-CH720N 2세대 Pro", sony)).toBe(false);
     expect(nameGrounded("소니 WH-CH720N Plus", sony)).toBe(false);
     expect(nameGrounded("Sony WH-CH720N", sony)).toBe(true);
-    expect(nameGrounded("소니 WH-CH720N 헤드폰", sony)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N 헤드폰", sony)).toBe(false);
   });
   it("cleanItems는 sources가 있을 때만 이름을 대조하고, 후보마다 자기 출처 글로만 대조한다", () => {
     const other = "https://shop.example/a?x=1";

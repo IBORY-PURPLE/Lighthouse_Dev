@@ -159,38 +159,40 @@ const BRAND_GROUPS: readonly (readonly string[])[] = [
   ["panasonic", "파나소닉"],
 ];
 
-/** 이름에 든 브랜드(별칭 포함) 가운데 자료에 없는 것이 있나. 요청 글에만 있는 브랜드로 다른 회사 페이지 제품을 포장하는 것을 막는다. */
-function brandMissing(name: string, parts: readonly string[]): boolean {
-  const lowerName = name.normalize("NFKC").toLowerCase();
-  const lowerParts = parts.map((part) => part.normalize("NFKC").toLowerCase());
-  return BRAND_GROUPS.some((group) => {
-    const inName = group.some((word) => (word.length <= 3 && /^[a-z]+$/.test(word) ? new RegExp(`(?<![a-z])${word}(?![a-z])`).test(lowerName) : lowerName.includes(word)));
-    if (!inName) return false;
-    return !lowerParts.some((part) => group.some((word) => part.includes(word)));
-  });
+/** 브랜드 별칭을 모두 첫 표기(sony)로 바꾼다. 짧은 영문 별칭은 낱말 경계에서만 바꾼다. */
+function canonicalBrands(text: string): string {
+  let out = text.normalize("NFKC").toLowerCase();
+  for (const [canon, ...aliases] of BRAND_GROUPS) {
+    for (const word of [canon, ...aliases]) {
+      out = /^[a-z]+$/.test(word) ? out.replace(new RegExp(`(?<![a-z])${word}(?![a-z])`, "g"), canon) : out.split(word).join(canon);
+    }
+  }
+  return out;
 }
 
-/** 이름의 영문·숫자 낱말(브랜드 별칭 제외)은 모두 자료에 있어야 한다. 출처에 없는 변형명(WH-CH720N Magic)의 덧붙은 낱말을 막는다. */
-function latinTokensCovered(name: string, material: readonly string[]): boolean {
-  const parts = material.map(squash).filter((part) => part !== "");
-  const brandWords = new Set(BRAND_GROUPS.flat());
-  return coreTokens(name)
-    .filter((token) => /[a-z0-9]/.test(token) && !brandWords.has(token))
-    .every((token) => tokenFound(token, parts));
+/** 글자 종류가 바뀌는 곳에서 끊은 낱말: 영문·숫자 덩어리(wh, ch720n)와 한글 덩어리. 그 밖의 글자는 구분자다. */
+const wordRuns = (text: string): string[] => canonicalBrands(text).match(/[a-z0-9]+|[가-힣]+/g) ?? [];
+
+/**
+ * 이름 근거 규칙(단순·엄격): 이름의 모든 낱말이 자료에 있어야 한다. 브랜드 한영 표기는 같은 말로 본다(소니=Sony).
+ * 영문·숫자 낱말은 자료의 낱말과 똑같아야 하고, 한글 낱말은 자료의 한글 낱말 안에 들어 있으면 된다(조사가 붙은 소니는 → 소니).
+ * 하나라도 없으면 거부한다. 낱말이 하나도 없는 이름은 거부한다.
+ */
+function allWordsGrounded(name: string, material: readonly string[]): boolean {
+  const words = wordRuns(name);
+  if (words.length === 0) return false;
+  const have = material.flatMap(wordRuns);
+  const latin = new Set(have.filter((word) => /[a-z0-9]/.test(word)));
+  const hangul = have.filter((word) => /[가-힣]/.test(word));
+  return words.every((word) => (/[a-z0-9]/.test(word) ? latin.has(word) : hangul.some((part) => part.includes(word))));
 }
 
 /**
- * 검색 후보 이름이 자료에 근거하나. 자료는 그 후보가 인용한 출처 하나의 제목·주소 글이다(다른 출처나 요청 글로 모자란 낱말을 채우지 않는다).
- * 기종 모양 토큰(WH-CH720N)은 모두 자료에 있어야 하고, 이름에 든 브랜드도 자료에 있어야 하며(소니·Sony는 같은 말),
- * 그 밖의 낱말은 절반 이상이 자료에 있어야 한다. 모델이 지어낸 이름이나 인용에 없는 제품은 false.
+ * 기종·대안 이름이 자료에 근거하나. 검색 후보는 자료가 그 후보가 인용한 출처 하나의 제목·주소 글이고(다른 출처나 요청 글로 모자란 낱말을 채우지 않는다),
+ * 턴의 기종 채움은 봉사자 말과 요청 글이다. 같은 함수를 쓴다. 이름의 모든 낱말(브랜드 포함)이 자료에 있어야 하고 하나라도 없으면 false.
  */
 export function nameGrounded(name: string, material: readonly string[]): boolean {
-  return (
-    unknownModelTokens(name, material).length === 0 &&
-    !brandMissing(name, material) &&
-    latinTokensCovered(name, material) &&
-    tokensCovered(name, material)
-  );
+  return unknownModelTokens(name, material).length === 0 && allWordsGrounded(name, material);
 }
 
 const hasUnknownModel = (text: string, material: readonly string[] | undefined) =>
