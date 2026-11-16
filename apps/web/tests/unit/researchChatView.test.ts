@@ -1,22 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeQuick,
   altNames,
+  arrangeMessages,
   badgeOf,
   benefitsOf,
   chipsOf,
   currentSlot,
+  failureText,
   imageSearchUrl,
+  missingText,
   panelSlots,
   planFold,
   productsOf,
   questionNumber,
   quickOf,
+  reasonsOf,
   requiredProgress,
   requiredSlots,
+  shortcutsOf,
   slotTag,
   thinkingPhase,
 } from "@/lib/researchChatView";
-import { mergeMessages, type ChatMessage } from "@/lib/researchClient";
+import { mergeMessages, normalizeView, type ChatMessage } from "@/lib/researchClient";
 
 const question = (seq: number, slot: string): ChatMessage => ({ seq, role: "ai", tag: "question", slot, body: { text: "?" } });
 const volunteer = (seq: number): ChatMessage => ({ seq, role: "volunteer", body: { text: "답" } });
@@ -116,5 +122,75 @@ describe("리서치 챗 화면 규칙", () => {
     expect(thinkingPhase(3_999)).toBe(0);
     expect(thinkingPhase(4_000)).toBe(1);
     expect(thinkingPhase(10_000)).toBe(2);
+  });
+});
+
+describe("서버 응답에 맞춘 읽기", () => {
+  const ai = (seq: number, tag: string, slot: string): ChatMessage => ({ seq, role: "ai", tag, slot, body: { kind: "text", text: "x" } });
+
+  it("쇼핑몰 바로가기는 https 주소만 읽는다", () => {
+    expect(
+      shortcutsOf({
+        shortcuts: [
+          { label: "쿠팡에서 찾기", url: "https://www.coupang.com/np/search?q=a" },
+          { label: "나쁜 주소", url: "javascript:alert(1)" },
+          { label: "", url: "https://example.com" },
+        ],
+      }),
+    ).toEqual([{ label: "쿠팡에서 찾기", url: "https://www.coupang.com/np/search?q=a" }]);
+    expect(shortcutsOf({})).toEqual([]);
+  });
+
+  it("질문 7은 혜택 카드 아래로 옮기고, 혜택 검색 중에는 그리지 않는다", () => {
+    const messages = [ai(1, "question", "benefits"), ai(2, "question", "refs"), ai(3, "search", "benefits"), ai(4, "search", "benefits")];
+    expect(arrangeMessages(messages, false).map((message) => message.seq)).toEqual([1, 3, 4, 2]);
+    // 검색 중이고 카드가 아직 없으면 질문 7을 숨긴다.
+    const early = [ai(1, "question", "benefits"), ai(2, "question", "refs")];
+    expect(arrangeMessages(early, true).map((message) => message.seq)).toEqual([1]);
+    // 검색이 끝났는데 카드가 끝내 없으면(실패) 제자리에 보인다.
+    expect(arrangeMessages(early, false).map((message) => message.seq)).toEqual([1, 2]);
+    // 질문 7이 없으면 그대로.
+    expect(arrangeMessages([ai(1, "question", "model")], true)).toHaveLength(1);
+  });
+
+  it("보낸 뒤에 오는 빈 대화 응답도 화면이 쓸 수 있게 채운다", () => {
+    const view = normalizeView({ stage: "sent", messages: [], slots: {}, photos: [], extras: [], pending: {} });
+    expect(view).toMatchObject({ stage: "sent", sessionId: "", version: 0, purchase: "unset", review: {}, verified: false });
+  });
+
+  it("서버 오류 이유를 글로 바꾼다(빠진 칸, 막힌 이유, 모르는 이유는 기본 글)", () => {
+    expect(missingText(["purchase", "model", "photo", "other"])).toBe("구매 여부, 기종, 구매 인증 사진");
+    expect(failureText("send", 409, "missing_required", { missing: ["model", "pros"] }, "x")).toContain("기종, 장점");
+    expect(failureText("review", 409, "not_ready", {}, "x")).toContain("질문 7");
+    expect(failureText("photo", 429, "photo_cap", {}, "x")).toContain("사진 횟수");
+    expect(failureText("turn", 429, "rate_limited", {}, "x")).toContain("요청이 많아요");
+    expect(failureText("photo", 413, "image_too_large", {}, "x")).toContain("너무 커요");
+    expect(failureText("turn", 500, "internal_error", {}, "기본 글")).toBe("기본 글");
+    expect(reasonsOf({ reasons: ["가", 3, "", "나"] })).toEqual(["가", "나"]);
+  });
+});
+
+describe("지금 눌러 답할 수 있는 빠른 답(activeQuick)", () => {
+  const skip = { quick: [{ id: "skip.refs", label: "건너뛰기" }] };
+  const msg = (seq: number, role: ChatMessage["role"], tag: string | null, body: Record<string, unknown> = {}): ChatMessage => ({
+    seq,
+    role,
+    tag,
+    slot: tag === "question" ? "refs" : null,
+    body,
+  });
+
+  it("안내·칸 채움·검색 말풍선과 봉사자 말을 지나 가장 가까운 질문의 빠른 답을 찾는다", () => {
+    const messages = [msg(1, "ai", "question", skip), msg(2, "volunteer", null, { text: "확인했어요" }), msg(3, "ai", "notice", { text: "확인했어요" })];
+    expect(activeQuick(messages).map((reply) => reply.id)).toEqual(["skip.refs"]);
+  });
+
+  it("빠른 답이 없는 질문에서 멈추고(위 질문의 빠른 답을 되살리지 않는다), 안내 말풍선의 확인 버튼은 그대로 쓴다", () => {
+    const older = msg(1, "ai", "question", skip);
+    const plain = msg(2, "ai", "question", { text: "?" });
+    expect(activeQuick([older, plain])).toEqual([]);
+    const confirm = msg(3, "ai", "notice", { quick: [{ id: "confirm.yes", label: "넣기" }, { id: "confirm.no", label: "아니요" }] });
+    expect(activeQuick([older, plain, confirm]).map((reply) => reply.id)).toEqual(["confirm.yes", "confirm.no"]);
+    expect(activeQuick([])).toEqual([]);
   });
 });

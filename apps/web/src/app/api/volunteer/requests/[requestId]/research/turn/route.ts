@@ -12,7 +12,7 @@ import {
   type AiLabel,
 } from "@/lib/researchApi";
 import { runTurn, parseTurnBody, type TurnInput } from "@/lib/researchTurn";
-import { capsFromEnv, type ResearchMessage } from "@/lib/researchSession";
+import { capsFromEnv } from "@/lib/researchSession";
 import { getResearchStore, type ResearchStore, type TurnResponse } from "@/lib/researchStore";
 import { StoreUnavailableError } from "@/lib/requestStore";
 import { fail, isUuid, runVolunteerRoute, succeed } from "@/lib/volunteerApi";
@@ -72,7 +72,7 @@ async function localTurn(
     switch (seen.outcome) {
       case "duplicate": {
         const label = labelFromMessages(seen.response.messages);
-        return { response: succeed(turnBody(seen.response, label)), label };
+        return { response: succeed(turnBody(seen.response, label, input)), label };
       }
       case "stale":
         return {
@@ -116,7 +116,7 @@ async function localTurn(
       // 새로 반영된 턴만 센다(저장 응답 재전송은 세지 않는다). 세는 것이 반영 뒤라 동시에 온 요청은 한도를 조금 넘을 수 있다.
       if (applied.outcome === "ok") checkTurnLimit(actor.volunteerId);
       const label = applied.outcome === "ok" ? run.plan.label : labelFromMessages(applied.response.messages);
-      return { response: succeed(turnBody(applied.response, label)), label };
+      return { response: succeed(turnBody(applied.response, label, input)), label };
     }
     case "stale":
       return { response: failWith(409, "stale", { version: applied.version }), label: null };

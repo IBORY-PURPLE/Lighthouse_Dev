@@ -1,6 +1,6 @@
 // 봉사자 리서치 챗(대화형) 화면이 서버 함수를 부르는 브라우저 쪽 도우미와 응답 타입.
-// 타입은 design.md 3.2 응답 모양 기준이다. 서버 트랙의 `researchSession.ts` 타입과는 통합 단계에서 맞춘다(여기서 서버 코드를 가져오지 않는다).
-// 메시지 body의 세부 모양(kind·quick·chips 등)은 서버와 맞출 약속이고, 읽는 쪽은 `researchChatView.ts`에 모았다.
+// 타입은 서버 라우트(`researchApi.ts`의 researchPayload·sessionSnapshot, 각 route.ts)가 실제로 주는 모양이다. 여기서 서버 코드를 가져오지 않는다.
+// 메시지 body의 세부 모양(kind·quick·chips·shortcuts 등)은 읽는 쪽 `researchChatView.ts`에 모았다.
 
 export const SLOT_KEYS = ["model", "pros", "photo", "alts", "altReason", "benefits", "refs"] as const;
 export type SlotKey = (typeof SLOT_KEYS)[number];
@@ -133,9 +133,32 @@ function base(requestId: string): string {
   return `/api/volunteer/requests/${encodeURIComponent(requestId)}/research`;
 }
 
-export function fetchResearch(requestId: string, after?: number): Promise<Outcome<ResearchView>> {
+/**
+ * GET 응답을 화면이 안전하게 쓰는 모양으로 채운다.
+ * 보낸 뒤에는 대화가 지워져 `{stage:"sent", sentAt, messages:[], slots:{}, photos:[], extras:[], pending:{}}`만 오므로
+ * sessionId·version·purchase·review 같은 값이 없을 수 있다.
+ */
+export function normalizeView(raw: Partial<ResearchView>): ResearchView {
+  return {
+    sessionId: typeof raw.sessionId === "string" ? raw.sessionId : "",
+    version: typeof raw.version === "number" ? raw.version : 0,
+    lastSeq: typeof raw.lastSeq === "number" ? raw.lastSeq : 0,
+    stage: raw.stage ?? "chat",
+    purchase: raw.purchase ?? "unset",
+    verified: raw.verified === true,
+    slots: raw.slots ?? {},
+    extras: raw.extras ?? [],
+    pending: raw.pending ?? {},
+    review: raw.review ?? {},
+    messages: raw.messages ?? [],
+    photos: raw.photos ?? [],
+  };
+}
+
+export async function fetchResearch(requestId: string, after?: number): Promise<Outcome<ResearchView>> {
   const query = after && after > 0 ? `?after=${after}` : "";
-  return call<ResearchView>(`${base(requestId)}${query}`);
+  const outcome = await call<Partial<ResearchView>>(`${base(requestId)}${query}`);
+  return outcome.kind === "ok" ? { ...outcome, data: normalizeView(outcome.data) } : outcome;
 }
 
 export function postTurn(
@@ -163,14 +186,17 @@ export function deletePhoto(requestId: string, photoId: string): Promise<Outcome
   return call(`${base(requestId)}/photos/${encodeURIComponent(photoId)}`, { method: "DELETE" });
 }
 
-export function postReview(requestId: string, body: { sessionId: string }): Promise<Outcome<{ review: ReviewState }>> {
+export function postReview(
+  requestId: string,
+  body: { sessionId: string },
+): Promise<Outcome<{ review: ReviewState; version: number; ai: AiState }>> {
   return call(`${base(requestId)}/review`, json("POST", body));
 }
 
 export function putReview(
   requestId: string,
   body: { sessionId: string; baseVersion: number; text: string },
-): Promise<Outcome<{ review: ReviewState }>> {
+): Promise<Outcome<{ review: ReviewState; version: number }>> {
   return call(`${base(requestId)}/review`, json("PUT", body));
 }
 

@@ -17,10 +17,13 @@ import { SlotPanel } from "./SlotPanel";
 import { SentView } from "@/components/SentView";
 import { shrinkPhoto } from "@/lib/researchPhoto";
 import {
+  activeQuick,
+  arrangeMessages,
   badgeOf,
   currentSlot,
+  failureText,
   planFold,
-  quickOf,
+  reasonsOf,
   requiredProgress,
   requiredSlots,
   type QuickReply,
@@ -50,6 +53,7 @@ import {
 } from "@/lib/researchClient";
 import { searchQueryOf } from "@/lib/shopLinks";
 import {
+  clearLegacyDrafts,
   fetchRequest,
   releaseRequest,
   saveFlash,
@@ -68,12 +72,7 @@ const POLL_MAX = 45;
 const COPY = {
   turnFailed: "보내지 못했어요. 쓴 글은 그대로 두었어요. 다시 보내 주세요.",
   stale: "다른 곳에서 내용이 바뀌어 다시 불러왔어요. 쓴 글은 그대로 두었어요.",
-  tooMany: "요청이 많아요. 잠시 뒤에 다시 해 주세요.",
   searchFailed: "찾지 못했어요. 쇼핑몰에서 직접 찾아도 돼요.",
-  photoBig: "사진이 너무 커요. 다른 사진을 골라 주세요.",
-  photoFormat: "이 사진 형식은 받을 수 없어요. JPEG나 PNG 사진을 골라 주세요.",
-  photoFull: "사진은 3장까지 올릴 수 있어요.",
-  photoNotNeeded: "리서치만 고르셨어요. 사진은 필요 없어요.",
   photoRead: "사진을 읽지 못했어요. 다른 사진을 골라 주세요.",
   photoFailed: "사진을 올리지 못했어요. 다시 해 주세요.",
   photoDone: "사진을 올렸어요.",
@@ -155,9 +154,14 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const turnBusy = useRef(false);
   const searching = useRef(false);
   const focusSend = useRef(false);
+  /** 맨 아래를 보던 중인가. 스크롤을 직접 올리면 false가 되고, 새 말풍선이 붙어 맨 아래로 가면 true가 된다. */
+  const stick = useRef(true);
+  const ignoreScrollUntil = useRef(0);
 
   useEffect(() => {
     alive.current = true;
+    // 옛 카드형 화면이 이 기기에 남긴 진행 상태(사진 썸네일 포함)는 더 읽지 않는다. 저장 공간을 비운다.
+    clearLegacyDrafts();
     return () => {
       alive.current = false;
     };
@@ -303,6 +307,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     if (!el) return;
     // 먼 거리는 바로 이동한다(긴 부드러운 스크롤은 읽는 흐름을 끊는다). 움직임 줄이기에서는 항상 바로 이동한다.
     const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
+    stick.current = true;
+    ignoreScrollUntil.current = Date.now() + 900;
     el.scrollTo({ top: el.scrollHeight, behavior: reducedMotion() || distance > 600 ? "auto" : "smooth" });
   }, [messageCount, optimistic.length, thinking, reviewStatus, editing, uploadingThumb, reviewReasons.length]);
 
@@ -311,7 +317,12 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     const dock = dockRef.current;
     const stage = stageRef.current;
     if (!dock || !stage) return;
-    const measure = () => stage.style.setProperty("--vc-dock-h", `${dock.offsetHeight}px`);
+    const measure = () => {
+      stage.style.setProperty("--vc-dock-h", `${dock.offsetHeight}px`);
+      // 빠른 답 줄이 생기거나 사라져 입력 묶음 높이가 바뀌면, 맨 아래를 보던 중이었을 때 다시 맨 아래로 맞춘다(마지막 말풍선이 가려지지 않게).
+      const el = scrollRef.current;
+      if (el && stick.current) el.scrollTop = el.scrollHeight;
+    };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(dock);
@@ -406,7 +417,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
           return { ...prev, messages, lastSeq: maxSeq(messages, done.lastSeq) };
         });
       } else if (outcome.kind === "failed") {
-        warn(outcome.status === 429 ? COPY.tooMany : COPY.searchFailed);
+        warn(failureText("search", outcome.status, outcome.error, outcome.body, COPY.searchFailed));
       }
       restoreFocus();
     },
@@ -470,15 +481,20 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         warn(COPY.stale);
       } else if (outcome.kind === "failed" && (outcome.status === 403 || outcome.status === 404)) {
         setLoad({ kind: "denied" });
-      } else if (outcome.kind === "failed" && outcome.status === 429) {
-        warn(COPY.tooMany);
+      } else if (outcome.kind === "failed" && outcome.error === "not_in_progress") {
+        // 6시간 활동이 없어 대기열로 돌아갔거나 다른 곳에서 보냈다. 요청 상태를 다시 읽어 화면을 바꾼다.
+        void finishSent();
       } else {
-        warn(COPY.turnFailed);
+        warn(
+          outcome.kind === "failed"
+            ? failureText("turn", outcome.status, outcome.error, outcome.body, COPY.turnFailed)
+            : COPY.turnFailed,
+        );
       }
       restoreFocus();
       return false;
     },
-    [requestId, say, warn, applyTurn, runSearch, reload, restoreFocus, toList],
+    [requestId, say, warn, applyTurn, runSearch, reload, restoreFocus, toList, finishSent],
   );
 
   const submitDraft = useCallback(() => {
@@ -538,12 +554,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         } else {
           setUploadingThumb(null);
           if (outcome.kind === "failed") {
-            if (outcome.status === 413) warn(COPY.photoBig);
-            else if (outcome.status === 415) warn(COPY.photoFormat);
-            else if (outcome.error === "photos_full") warn(COPY.photoFull);
-            else if (outcome.error === "photo_not_needed") warn(COPY.photoNotNeeded);
-            else if (outcome.status === 429) warn(COPY.tooMany);
-            else warn(COPY.photoFailed);
+            warn(failureText("photo", outcome.status, outcome.error, outcome.body, COPY.photoFailed));
           } else warn(COPY.photoFailed);
         }
       }
@@ -586,7 +597,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     if (outcome.kind === "ok") {
       setView((prev) => (prev ? { ...prev, stage: "review", review: outcome.data.review } : prev));
     } else if (outcome.kind === "failed" && outcome.status === 409) {
-      warn(COPY.reviewNotReady);
+      warn(failureText("review", outcome.status, outcome.error, outcome.body, COPY.reviewNotReady));
       await reload();
     } else {
       warn(COPY.reviewFailed);
@@ -625,14 +636,14 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         return;
       }
       if (outcome.kind === "failed" && outcome.status === 422) {
-        const reasons = Array.isArray(outcome.body.reasons)
-          ? (outcome.body.reasons as unknown[]).filter((reason): reason is string => typeof reason === "string")
-          : [];
+        const reasons = reasonsOf(outcome.body);
         setReviewReasons(reasons.length > 0 ? reasons : ["문단을 다시 확인해 주세요."]);
       } else if (isStaleFailure(outcome)) {
         await reload();
         setEditing(false);
         warn(COPY.stale);
+      } else if (outcome.kind === "failed" && outcome.status === 409) {
+        warn(failureText("review", outcome.status, outcome.error, outcome.body, COPY.reviewNotReady));
       } else {
         warn(COPY.reviewFailed);
       }
@@ -659,8 +670,13 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       await finishSent();
       return;
     }
-    if (outcome.kind === "failed" && outcome.status === 409) {
-      warn(COPY.sendBlocked);
+    if (outcome.kind === "failed" && isStaleFailure(outcome)) {
+      await reload();
+      warn(COPY.stale);
+    } else if (outcome.kind === "failed" && outcome.error === "not_in_progress") {
+      void finishSent();
+    } else if (outcome.kind === "failed" && outcome.status === 409) {
+      warn(failureText("send", outcome.status, outcome.error, outcome.body, COPY.sendBlocked));
       await reload();
     } else if (outcome.kind === "failed" && (outcome.status === 403 || outcome.status === 404)) {
       setLoad({ kind: "denied" });
@@ -716,9 +732,13 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     };
   }, [view, localChecked]);
 
+  // 질문 7은 혜택 카드 뒤에 그린다(검색 중에는 보류). 화면이 보이는 순서가 이 목록이다.
+  const searchingBenefits = thinking?.kind === "benefits" || view?.pending.search?.kind === "benefits";
+  const shown = useMemo(() => (view ? arrangeMessages(view.messages, searchingBenefits) : []), [view, searchingBenefits]);
+
   const fold = useMemo(
-    () => (view ? planFold(view.messages, view.verified) : { foldedUpTo: 0, foldedCount: 0, summary: "" }),
-    [view],
+    () => (view ? planFold(shown, view.verified) : { foldedUpTo: 0, foldedCount: 0, summary: "" }),
+    [view, shown],
   );
 
   // ----- 그리기 -----
@@ -770,9 +790,9 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const subject = searchQueryOf(request);
   const badge = badgeOf(view);
   const progress = requiredProgress(view);
-  const slot = currentSlot(view.messages);
-  const last = view.messages[view.messages.length - 1];
-  const lastQuick = last && last.role === "ai" ? quickOf(last.body) : [];
+  const slot = currentSlot(shown);
+  const last = shown[shown.length - 1];
+  const lastQuick = last ? activeQuick(shown) : [];
   const reviewShown = Boolean(view.review.text) && (view.review.status === "draft" || view.review.status === "confirmed");
   // 리뷰 카드가 나오면 리뷰 제안의 빠른 답은 끝난 것이다.
   const idle = !thinking && optimistic.length === 0 && !editing && !reviewShown;
@@ -824,10 +844,18 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
             </div>
           )}
           {!hero && <CurrentQuestionLine slot={slot} required={slot ? requiredSlots(view.purchase).includes(slot) : false} />}
-          <div ref={scrollRef} className="vc-scroll">
+          <div
+            ref={scrollRef}
+            className="vc-scroll"
+            onScroll={(event) => {
+              if (Date.now() < ignoreScrollUntil.current) return;
+              const el = event.currentTarget;
+              stick.current = el.scrollHeight - el.clientHeight - el.scrollTop < 48;
+            }}
+          >
             {!hero && (
               <ChatLog
-                messages={view.messages}
+                messages={shown}
                 photos={view.photos}
                 slots={slotsForLog}
                 fold={fold}

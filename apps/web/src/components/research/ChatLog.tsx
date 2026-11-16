@@ -19,6 +19,7 @@ import {
   linkOf,
   photoIdOf,
   productsOf,
+  shortcutsOf,
   tagLabel,
   textOf,
   type BenefitItem,
@@ -89,6 +90,7 @@ export function ChatLog({
     const benefits = benefitsOf(body);
     const link = linkOf(body);
     const guide = guideOf(body);
+    const shortcuts = shortcutsOf(body);
     const slotDone = (slot: string | null | undefined) => (slot ? Boolean(slots[slot as keyof SlotMap]) : false);
     return (
       <MessageBubble
@@ -131,6 +133,16 @@ export function ChatLog({
           <LinkCard url={link.url} note={link.note} checked={checked.has(link.url)} onCheck={() => actions.checkLink(link.url)} />
         )}
         {guide && <GuideCard queries={guide.queries} checks={guide.checks} steps={guide.steps} />}
+        {shortcuts.length > 0 && (
+          <div className="vc-shortcuts" role="group" aria-label="쇼핑몰에서 직접 찾기">
+            {shortcuts.map((item) => (
+              <a key={item.url} className="vc-btn vc-btn--small" href={item.url} target="_blank" rel="noopener noreferrer">
+                {item.label}
+                <span className="vol-sr"> 새 탭</span>
+              </a>
+            ))}
+          </div>
+        )}
       </MessageBubble>
     );
   };

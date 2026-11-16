@@ -13,7 +13,7 @@ import { judge, type Violation } from "../helpers/researchJudge";
 import { judgeBenefits, judgeProducts } from "../helpers/researchSearchJudge";
 import cases from "./research-cases.json";
 
-// 리서치 AI(POST /api/volunteer/research의 서버 함수)를 실제 OpenAI로 부르는 고정 사례 시험이다.
+// 리서치 AI(answerResearch 서버 함수)를 실제 OpenAI로 부르는 고정 사례 시험이다.
 // 실행: apps/web 에서 `npm run test:research-ai` (= vitest run --config vitest.chatbot.config.mts tests/chatbot/research-ai.test.ts).
 // 키가 보이지 않으면 호출 시험을 건너뛴다. 건너뛴 것은 통과가 아니다. 평소 `npm run check`와 e2e에서는 돌지 않는다.
 // 카드형 12개(검색 종류 5번, 그 밖 7번)와 대화형 4개(제품 목록 2번, 혜택 2번 = 검색 호출 최대 14번)라 돈이 든다. 진단 시험(web_search 직접 호출)은 검색 1번 + 사진 1번을 더 쓰므로

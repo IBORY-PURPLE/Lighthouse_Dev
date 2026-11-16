@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { RESEARCH_LIMITS, subjectOf } from "@/lib/research";
 import { failWith, guardResponse, logTail, readJsonBody, sessionSnapshot } from "@/lib/researchApi";
-import { decodedBytes, matchesImageSignature } from "@/lib/researchRequest";
+import { decodedBytes, matchesImageSignature } from "@/lib/researchImage";
 import { requestText } from "@/lib/researchReviewApi";
 import { capsFromEnv, hasUnresolvedCheck, type NextMessage, type ResearchMessage } from "@/lib/researchSession";
 import { getResearchStore } from "@/lib/researchStore";

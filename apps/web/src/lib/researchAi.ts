@@ -6,7 +6,6 @@ import {
   benefitShortcuts,
   defaultQuestion,
   draftSummaryText,
-  emptyResearchState,
   refShortcuts,
   RESEARCH_COPY,
   RESEARCH_LIMITS,
@@ -517,7 +516,7 @@ export function fallbackResponse(request: ResearchRequestBody, context: Research
         kind: "summary",
         ai: "fallback",
         text: draftSummaryText(
-          { ...emptyResearchState(), model: request.model, pros: request.pros, alts: request.alts, altReason: request.altReason, benefits: request.benefits, refs: request.refs },
+          { model: request.model, pros: request.pros, alts: request.alts, altReason: request.altReason, benefits: request.benefits, refs: request.refs },
           RESEARCH_LIMITS.summaryAiMax,
         ),
       };

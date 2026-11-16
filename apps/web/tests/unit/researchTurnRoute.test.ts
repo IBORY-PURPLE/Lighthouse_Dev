@@ -5,7 +5,6 @@ import { POST as enter } from "@/app/api/volunteer/enter/route";
 import { POST as reset } from "@/app/api/volunteer/demo/reset/route";
 import { GET as queue } from "@/app/api/volunteer/queue/route";
 import { POST as claim } from "@/app/api/volunteer/requests/[requestId]/claim/route";
-import { POST as result } from "@/app/api/volunteer/requests/[requestId]/result/route";
 import { GET as getResearch } from "@/app/api/volunteer/requests/[requestId]/research/route";
 import { POST as search, maxDuration as searchMaxDuration } from "@/app/api/volunteer/requests/[requestId]/research/search/route";
 import { POST as turn, maxDuration as turnMaxDuration } from "@/app/api/volunteer/requests/[requestId]/research/turn/route";
@@ -201,13 +200,10 @@ describe("GET /api/volunteer/requests/{id}/research", () => {
 
   it("보낸 뒤에는 대화가 지워지므로 stage·sentAt과 빈 messages·slots·photos를 준다", async () => {
     const o = await opened();
-    const sent = await result(
-      req(`${o.id}/result`, "POST", o.cookie, {
-        candidates: [{ name: "소니 WH-CH720N", url: "https://search.11st.co.kr/pc/total-search?kwd=sony", guide: "찾는 순서", summary: [{ label: "옵션", value: "블랙" }] }],
-      }),
-      ctx(o.id),
-    );
-    expect(sent.status).toBe(201);
+    const sent = await getRequestStore().complete(o.id, volunteerOf(o.cookie), [
+      { name: "소니 WH-CH720N", url: "https://search.11st.co.kr/pc/total-search?kwd=sony", guide: "찾는 순서", summary: [{ label: "옵션", value: "블랙" }] },
+    ]);
+    expect(sent.outcome).toBe("completed");
     const view = await (await get(o.id, o.cookie)).json();
     expect(view).toMatchObject({ stage: "sent" });
     expect(typeof view.sentAt).toBe("string");

@@ -314,3 +314,93 @@ export function thinkingPhase(elapsedMs: number): 0 | 1 | 2 {
 /** 검수 글자 수 한도(서버 PUT과 같은 50~1000). */
 export const REVIEW_MIN = 50;
 export const REVIEW_MAX = 1000;
+
+// ----- 서버 응답에 맞춘 읽기(서버 코드가 기준이다: researchTurn·researchSearch·researchApi) -----
+
+/** 말풍선 아래 쇼핑몰·검색 바로가기(서버가 `shortcuts: [{label, url}]`로 준다). https 주소만 쓴다. */
+export function shortcutsOf(body: Record<string, unknown>): { label: string; url: string }[] {
+  return list(body.shortcuts).flatMap((entry) => {
+    const item = record(entry);
+    const label = str(item.label);
+    const url = str(item.url);
+    return label && isHttpsUrl(url) ? [{ label, url }] : [];
+  });
+}
+
+const isBenefitsSearch = (message: ChatMessage) => message.role === "ai" && message.tag === "search" && message.slot === "benefits";
+const isRefsQuestion = (message: ChatMessage) => message.role === "ai" && message.tag === "question" && message.slot === "refs";
+
+/**
+ * 질문 7(참고 글) 말풍선은 혜택 카드 뒤에 그린다(contract-ui.md "질문 7 말풍선 그리기 순서").
+ * 혜택 칸을 채운 턴 응답에는 질문 7이 이미 들어 있어 메시지 번호는 질문 7이 혜택 카드보다 앞이다.
+ * - 혜택 검색이 진행 중이면(searching) 질문 7을 아직 그리지 않는다. 검색이 실패해 카드가 끝내 안 와도 진행이 끝나면 제자리에 보인다.
+ * - 혜택 카드가 뒤에 있으면 질문 7을 마지막 혜택 카드 아래로 옮긴다.
+ */
+export function arrangeMessages(messages: readonly ChatMessage[], searchingBenefits: boolean): ChatMessage[] {
+  const refsIndex = messages.findIndex(isRefsQuestion);
+  if (refsIndex === -1) return [...messages];
+  const refs = messages[refsIndex];
+  let lastCard = -1;
+  messages.forEach((message, index) => {
+    if (index > refsIndex && isBenefitsSearch(message)) lastCard = index;
+  });
+  if (lastCard === -1) return searchingBenefits ? messages.filter((message) => message !== refs) : [...messages];
+  return [...messages.slice(0, refsIndex), ...messages.slice(refsIndex + 1, lastCard + 1), refs, ...messages.slice(lastCard + 1)];
+}
+
+const SLOT_MISSING_NAME: Record<SlotKey, string> = { ...SLOT_LABEL, photo: "구매 인증 사진" };
+
+/** 서버가 `missing`으로 주는 빠진 필수 칸(purchase 포함)을 글로. */
+export function missingText(missing: unknown): string {
+  const names = list(missing).flatMap((entry) => {
+    if (entry === "purchase") return ["구매 여부"];
+    return isSlotKey(entry) ? [SLOT_MISSING_NAME[entry]] : [];
+  });
+  return names.join(", ");
+}
+
+/** 서버 오류 이유(error, body)를 봉사자에게 보일 글로. 모르는 이유는 fallback. */
+export function failureText(
+  context: "turn" | "search" | "photo" | "review" | "send",
+  status: number,
+  error: string,
+  body: Record<string, unknown>,
+  fallback: string,
+): string {
+  if (status === 429) return error === "photo_cap" ? "이 요청에서 올릴 수 있는 사진 횟수를 다 썼어요." : "요청이 많아요. 잠시 뒤에 다시 해 주세요.";
+  if (status === 413 || error === "too_large" || error === "image_too_large" || error === "thumb_too_large") {
+    return "사진이 너무 커요. 다른 사진을 골라 주세요.";
+  }
+  if (status === 415 || error === "bad_image_format") return "이 사진 형식은 받을 수 없어요. JPEG나 PNG 사진을 골라 주세요.";
+  if (error === "photos_full") return "사진은 3장까지 올릴 수 있어요.";
+  if (error === "photo_not_needed") return "리서치만 고르셨어요. 사진은 필요 없어요.";
+  if (error === "missing_required") {
+    const names = missingText(body.missing);
+    return `필수 칸이 비어 있어요${names ? `: ${names}` : ""}. 채운 뒤에 ${context === "send" ? "보내 주세요" : "다시 눌러 주세요"}.`;
+  }
+  if (error === "not_ready") return "질문 7(참고 글)까지 답하거나 건너뛰고, 확인할 내용을 마친 뒤에 만들 수 있어요.";
+  if (error === "review_not_confirmed") return "검수를 마친 글이 아니에요. [검수 마치기]를 먼저 눌러 주세요.";
+  return fallback;
+}
+
+/** 서버가 422 review_blocked로 주는 막힌 이유 목록. */
+export function reasonsOf(body: Record<string, unknown>): string[] {
+  return list(body.reasons).filter((reason): reason is string => typeof reason === "string" && reason !== "");
+}
+
+/**
+ * 지금 눌러 답할 수 있는 빠른 답. 맨 뒤에서부터 거슬러 올라가며 AI 말풍선의 `quick`을 찾는다.
+ * - 꼬리표가 notice·fill·search인 말풍선(확인 안내, 칸 채움, 검색 결과)과 봉사자 말은 지나친다.
+ * - 칸 질문(question)이나 리뷰 제안(review)에서 멈춘다. 그 질문에 `quick`이 없으면 빠른 답도 없다.
+ * 그래서 [확인했어요]를 누른 뒤에도(안내 말풍선이 뒤에 붙어도) 질문 7의 [건너뛰기]가 남는다.
+ */
+export function activeQuick(messages: readonly ChatMessage[]): QuickReply[] {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "ai") continue;
+    const quick = quickOf(message.body);
+    if (quick.length > 0) return quick;
+    if (message.tag === "question" || message.tag === "review") return [];
+  }
+  return [];
+}
