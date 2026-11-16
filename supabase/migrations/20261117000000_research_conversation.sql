@@ -250,39 +250,46 @@ end;
 $$;
 
 -- 세션 한 장의 읽기 모양. p_after가 null이면 메시지 전부(500개까지), 있으면 그보다 큰 seq 50개까지.
+-- 한 문장으로 읽어 한 스냅숏이다. p_volunteer_id가 있으면 같은 문장 안에서 "이 봉사자의 in_progress 요청이고
+-- 세션도 이 봉사자 것"일 때만 돌려준다(폴링이 소유 확인과 읽기 사이의 경합으로 남의 대화를 읽지 않게).
+-- 없거나 조건이 안 맞으면 null.
 create or replace function public.research_view(
-  p_request_id uuid, p_after int default null, p_with_thumbs boolean default false
+  p_request_id uuid, p_after int default null, p_with_thumbs boolean default false,
+  p_volunteer_id text default null
 ) returns jsonb language plpgsql security invoker set search_path = '' as $$
 declare
-  v_s public.research_sessions%rowtype;
-  v_msgs jsonb;
-  v_photos jsonb;
+  v_out jsonb;
 begin
-  select s.* into v_s from public.research_sessions as s where s.request_id = p_request_id;
-  if not found then return null; end if;
-  select coalesce(jsonb_agg(jsonb_build_object(
-      'seq', m.seq, 'role', m.role, 'tag', m.tag, 'slot', m.slot, 'body', m.body,
-      'turnId', m.turn_id, 'ai', m.ai, 'createdAt', m.created_at) order by m.seq), '[]'::jsonb)
-    into v_msgs
-    from (
-      select x.* from public.research_messages as x
-      where x.request_id = p_request_id and (p_after is null or x.seq > p_after)
-      order by x.seq
-      limit case when p_after is null then 500 else 50 end
-    ) as m;
-  select coalesce(jsonb_agg(
-      jsonb_build_object('id', p.id, 'description', p.description, 'seenModel', p.seen_model,
-        'shot', p.shot, 'createdAt', p.created_at)
-        || case when p_with_thumbs then jsonb_build_object('thumb', p.thumb) else '{}'::jsonb end
-      order by p.created_at, p.id), '[]'::jsonb)
-    into v_photos
-    from public.research_photos as p where p.request_id = p_request_id;
-  return jsonb_build_object(
-    'sessionId', v_s.session_id, 'volunteerId', v_s.volunteer_id, 'purchase', v_s.purchase,
-    'slots', v_s.slots, 'extras', v_s.extras, 'counters', v_s.counters, 'pending', v_s.pending,
-    'review', v_s.review, 'version', v_s.version, 'lastSeq', v_s.next_seq - 1,
-    'createdAt', v_s.created_at, 'updatedAt', v_s.updated_at,
-    'photos', v_photos, 'messages', v_msgs);
+  select jsonb_build_object(
+      'sessionId', s.session_id, 'volunteerId', s.volunteer_id, 'purchase', s.purchase,
+      'slots', s.slots, 'extras', s.extras, 'counters', s.counters, 'pending', s.pending,
+      'review', s.review, 'version', s.version, 'lastSeq', s.next_seq - 1,
+      'createdAt', s.created_at, 'updatedAt', s.updated_at,
+      'photos', coalesce((
+        select jsonb_agg(
+            jsonb_build_object('id', p.id, 'description', p.description, 'seenModel', p.seen_model,
+              'shot', p.shot, 'createdAt', p.created_at)
+              || case when p_with_thumbs then jsonb_build_object('thumb', p.thumb) else '{}'::jsonb end
+            order by p.created_at, p.id)
+        from public.research_photos as p where p.request_id = s.request_id), '[]'::jsonb),
+      'messages', coalesce((
+        select jsonb_agg(jsonb_build_object(
+            'seq', m.seq, 'role', m.role, 'tag', m.tag, 'slot', m.slot, 'body', m.body,
+            'turnId', m.turn_id, 'ai', m.ai, 'createdAt', m.created_at) order by m.seq)
+        from (
+          select x.* from public.research_messages as x
+          where x.request_id = s.request_id and (p_after is null or x.seq > p_after)
+          order by x.seq
+          limit case when p_after is null then 500 else 50 end
+        ) as m), '[]'::jsonb))
+    into v_out
+    from public.research_sessions as s
+    where s.request_id = p_request_id
+      and (p_volunteer_id is null or (
+        s.volunteer_id = p_volunteer_id
+        and exists (select 1 from public.requests as r
+          where r.id = s.request_id and r.status = 'in_progress' and r.volunteer_id = p_volunteer_id)));
+  return v_out;
 end;
 $$;
 
@@ -352,19 +359,19 @@ declare
   v_status text;
   v_volunteer text;
   v_guard text;
+  v_view jsonb;
 begin
   if p_after is not null then
-    -- 읽기: 잠그지 않고 소유를 확인한다.
+    -- 읽기: 잠그지 않는다. 소유 확인과 읽기를 한 문장(research_view)에서 해서, 그 사이에 요청이 넘어가도
+    -- 남의 대화를 돌려주지 않는다. null이면 이유만 따로 알아본다(데이터는 돌려주지 않음).
+    v_view := public.research_view(p_request_id, p_after, false, p_volunteer_id);
+    if v_view is not null then return jsonb_build_object('outcome', 'ok', 'view', v_view); end if;
     select r.status, r.volunteer_id into v_status, v_volunteer
       from public.requests as r where r.id = p_request_id;
     if not found then return jsonb_build_object('outcome', 'not_found'); end if;
     if v_status <> 'in_progress' then return jsonb_build_object('outcome', 'not_in_progress'); end if;
     if v_volunteer is distinct from p_volunteer_id then return jsonb_build_object('outcome', 'not_yours'); end if;
-    if not exists (select 1 from public.research_sessions as s
-        where s.request_id = p_request_id and s.volunteer_id = p_volunteer_id) then
-      return jsonb_build_object('outcome', 'session_changed');
-    end if;
-    return jsonb_build_object('outcome', 'ok', 'view', public.research_view(p_request_id, p_after, false));
+    return jsonb_build_object('outcome', 'session_changed');
   end if;
 
   select r.status into v_status from public.requests as r where r.id = p_request_id for share;

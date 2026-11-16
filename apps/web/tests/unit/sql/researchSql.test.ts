@@ -238,6 +238,22 @@ describe("열기·읽기", () => {
     expect(again.view.sessionId).toBe(first.view.sessionId);
   });
 
+  it("읽기는 소유 확인과 같은 문장에서 한다: 다른 봉사자의 세션은 null이다", async () => {
+    const r = await opened();
+    await apply(r, "a", 0, null, [msg("내 대화")], []);
+    const mine = await call("public.research_view($1::uuid, 0, false, $2)", [r.id, r.volunteerId]);
+    expect(mine.messages.length).toBe(1);
+    await db.query("select public.release_request($1, $2)", [r.id, r.volunteerId]);
+    const other = vol();
+    await db.query("select public.claim_request($1, $2)", [r.id, other]);
+    await open(r.id, other);
+    expect(await call("public.research_view($1::uuid, 0, false, $2)", [r.id, r.volunteerId])).toBeNull();
+    expect((await call("public.research_view($1::uuid, 0, false, $2)", [r.id, other])).messages).toEqual([]);
+    const polled = await open(r.id, r.volunteerId, 0);
+    expect(polled.outcome).toBe("not_yours");
+    expect(polled.view).toBeUndefined();
+  });
+
   it("p_after가 있으면 읽기만 한다(세션을 만들지 않는다)", async () => {
     const c = await claimed();
     expect((await open(c.id, c.volunteerId, 0)).outcome).toBe("session_changed");

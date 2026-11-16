@@ -423,7 +423,8 @@ export function createMemoryStore(
       for (const row of state.rows.values()) {
         if (row.status !== "in_progress") continue;
         const activity = Math.max(row.claimedAt ?? 0, activityOf?.(row.id) ?? 0);
-        if (current - activity < idleMs) continue;
+        // SQL research_sweep과 같다: 활동 뒤 idle을 "넘으면" 돌린다(정확히 같으면 아직).
+        if (current - activity <= idleMs) continue;
         row.status = "waiting";
         row.volunteerId = null;
         row.claimedAt = null;
