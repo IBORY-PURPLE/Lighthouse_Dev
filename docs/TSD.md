@@ -336,7 +336,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 | `research_photos` | 구매 인증 사진 JPEG 썸네일(≤60,000자), 설명·표기 기종·촬영 종류는 null 허용 | 세션과 함께 |
 | `research_usage` | 요청당 AI 턴·웹 검색·사진·리뷰 횟수 | 요청이 지워질 때만(세션이 지워져도 남음) |
 | `ai_usage_daily` | 서울 날짜별 웹 검색·AI 호출 횟수 | 없음(날짜당 한 줄) |
-| `research_archives`(마이그레이션 `20261117010000_research_archive.sql`, **이용자 승인 전**) | 보낼 때 대화를 글로만 복사. `request`(품목·브랜드·요청 문장), `purchase`, `verified`, `slots`(최종 칸, 썸네일·data URL 제외), `messages`(`[{seq, role, tag, slot, text}]`, 200KB 이하), `review`(초안·최종·rev), `is_demo`. `requests`를 참조하지 않는다(FK 없음) | 만든 지 30일 뒤 `research_sweep`이 삭제 |
+| `research_archives`(마이그레이션 `20261117010000_research_archive.sql`, **이용자 승인 전**) | 보낼 때 대화를 글로만 복사. `request`(품목·브랜드·요청 문장), `purchase`, `verified`, `slots`(최종 칸, 썸네일·data URL 제외), `messages`(`[{seq, role, tag, slot, text}]`, 200KB 이하), `review`(초안·최종·rev), `is_demo`. 글에 든 전화번호·이메일은 `[전화번호]`·`[이메일]`로 가리고 data URL은 지운다(두 표 공통, `research_scrub_text`). `requests`를 참조하지 않는다(FK 없음) | 만든 지 30일 뒤 `research_sweep`이 삭제 |
 | `research_reviews`(같은 마이그레이션, **이용자 승인 전**) | 검수해 보낸 리뷰. `item`·`brand`·`product`·`model`, `purchase`·`verified`, `review_text`(1~1,000자), `alts`(같이 고민한 제품 이름), `benefit_links`(`[{title, url, kind, condition, confirmedAt}]`), `sent_at`, `is_demo`. `request_id` unique, FK 없음 | **영구**(삭제 규칙 없음) |
 
 | 함수 | 하는 일 |
@@ -354,7 +354,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 - 상한: 요청당 AI 턴 40, 웹 검색 12, 사진 올리기 6, 리뷰 3. 하루 웹 검색 60, AI 호출 600(환경변수 `RESEARCH_DAILY_SEARCH_CAP`·`RESEARCH_DAILY_AI_CAP`로 바꿈).
 - 함수는 모두 `security invoker`, `set search_path = ''`, `revoke execute from public, anon, authenticated`, `grant to service_role`다. 시험은 PGlite(`tests/unit/sql/researchSql.test.ts`).
 - 되돌리기: `supabase/rollback/20261117000000_research_conversation_down.sql`을 사람이 실행하고 `supabase migration repair --status reverted 20261117000000 --linked`를 실행한다.
-- 보관 마이그레이션(`20261117010000_research_archive.sql`, 블록 A1b)은 `research_send`·`research_sweep`을 같은 시그니처로 `create or replace`하고 표 2개와 보조 함수 4개(`research_strip_data`, `research_body_text`, `research_archive_messages`, `research_archive_put`)를 더한다. 원격 적용은 이용자 허락(B15) 뒤다. 시험은 `tests/unit/sql/researchArchiveSql.test.ts`. 되돌리기: `supabase/rollback/20261117010000_research_archive_down.sql`을 한 번에 실행하고 `supabase migration repair --status reverted 20261117010000 --linked`를 실행한다(두 표의 데이터, 영구 리뷰 포함, 가 사라지니 먼저 내려받는다).
+- 보관 마이그레이션(`20261117010000_research_archive.sql`, 블록 A1b)은 `research_send`·`research_sweep`을 같은 시그니처로 `create or replace`하고 표 2개와 보조 함수 5개(`research_scrub_text`, `research_strip_data`, `research_body_text`, `research_archive_messages`, `research_archive_put`)를 더한다. 원격 적용은 이용자 허락(B15) 뒤다. 시험은 `tests/unit/sql/researchArchiveSql.test.ts`. 되돌리기: `supabase/rollback/20261117010000_research_archive_down.sql`을 한 번에 실행하고 `supabase migration repair --status reverted 20261117010000 --linked`를 실행한다(두 표의 데이터, 영구 리뷰 포함, 가 사라지니 먼저 내려받는다).
 - 휴대폰 사진 링크(`photo_links`)는 11/18 뒤 마이그레이션 2(`20261119000000_photo_links.sql`)에서 더한다.
 
 ### 8.4 플로우 A(①②)

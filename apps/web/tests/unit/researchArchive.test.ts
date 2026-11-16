@@ -6,6 +6,7 @@ import {
   ARCHIVE_KEEP_MS,
   ARCHIVE_MESSAGES_MAX_BYTES,
   bodyText,
+  scrubText,
   stripData,
 } from "@/lib/researchArchive";
 import type { ResearchMessage, SlotState } from "@/lib/researchSession";
@@ -42,9 +43,9 @@ afterEach(() => {
   research.close();
 });
 
-async function claimedOpen(): Promise<{ id: string; volunteerId: string; actor: ResearchActor }> {
+async function claimedOpen(product = "소니 헤드셋"): Promise<{ id: string; volunteerId: string; actor: ResearchActor }> {
   const reg = await requests.register({
-    clientRequestId: crypto.randomUUID(), product: "소니 헤드셋", budget: "10만 원", condition: "새 제품",
+    clientRequestId: crypto.randomUUID(), product, budget: "10만 원", condition: "새 제품",
     brand: "Sony", item: "헤드셋", conditionKind: "new",
   });
   const volunteerId = newVol();
@@ -113,6 +114,19 @@ describe("글만 뽑기(순수 함수)", () => {
     expect(bodyText({ text: JPEG, kind: "x" })).toBe("");
   });
 
+  it("scrubText는 SQL research_scrub_text와 같은 표를 만족한다", () => {
+    // tests/unit/sql/researchArchiveSql.test.ts의 SCRUB_CASES와 같은 표다.
+    const cases: Array<[string, string]> = [
+      ["연락은 010-1234-5678로", "연락은 [전화번호]로"],
+      ["01012345678 / 02 123 4567 / 031-123-4567", "[전화번호] / [전화번호] / [전화번호]"],
+      ["+82 10-1234-5678 또는 +82-010-1234-5678", "[전화번호] 또는 [전화번호]"],
+      ["메일 a.b+c@example.co.kr 로", "메일 [이메일] 로"],
+      ["사진 data:image/jpeg;base64,/9j/4AAQSkZJRg== 끝 data:text/plain,hello 끝", "사진  끝  끝"],
+      ["720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234", "720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234"],
+    ];
+    for (const [input, expected] of cases) expect(scrubText(input), input).toBe(expected);
+  });
+
   it("stripData는 data: 문자열 값과 thumb 키를 지운다", () => {
     expect(stripData({ a: 1, thumb: "x", b: JPEG, c: [JPEG, "ok", { thumb: "y", t: "z" }], d: { e: ` ${JPEG}` } }))
       .toEqual({ a: 1, c: ["ok", { t: "z" }], d: {} });
@@ -163,6 +177,49 @@ describe("메모리 보내기 기록", () => {
     expect(research.archiveSnapshot().archives).toHaveLength(1);
     expect(research.archiveSnapshot().reviews).toHaveLength(1);
     expect(research.archiveSnapshot().reviews[0].id).toBe(rv.id);
+  });
+
+  it("연락처·사진 조각이 있어도 가려서 남기고, 리뷰가 공백뿐이면 후보 1 가이드를 쓴다", async () => {
+    const r = await claimedOpen("소니 헤드셋 010-1234-5678");
+    const applied = await research.apply({
+      ...r.actor, clientTurnId: "t1", baseVersion: 0,
+      patch: { purchase: "research", slots: { model: slot("720N a@b.com"), pros: slot("장점 010 1234 5678"), altReason: slot("이유") } },
+      messages: [
+        { role: "volunteer", tag: "answer", body: { text: "번호 010-9999-8888 메일 me@example.com data:text/plain,hello 끝" }, ai: "none" },
+        { role: "ai", tag: "review", body: { text: "초안 02-123-4567" }, ai: "ok" },
+      ],
+      next: [],
+    });
+    if (applied.outcome !== "ok") throw new Error(applied.outcome);
+    const version = applied.response.version;
+    const confirmed = await research.setReview({ ...r.actor, baseVersion: version, text: "문의 010-5555-6666 / x@y.kr", status: "confirmed" });
+    if (confirmed.outcome !== "ok") throw new Error(confirmed.outcome);
+    const rev = confirmed.review.rev ?? 0;
+    expect((await research.send({ ...r.actor, baseVersion: version, reviewRev: rev, candidates: [{ ...CANDIDATES[0], name: "720N 010-1111-2222" }] })).outcome).toBe("sent");
+    const [a] = research.archiveSnapshot().archives;
+    const [rv] = research.archiveSnapshot().reviews;
+    expect(JSON.stringify([a, rv])).not.toMatch(/\d{3}[- ]\d{4}[- ]\d{4}|\d{2}-\d{3}-\d{4}|@|data:/);
+    expect(a.request.product).toBe("소니 헤드셋 [전화번호]");
+    expect(rv.product).toBe("소니 헤드셋 [전화번호]");
+    expect(a.messages[0].text).toBe("번호 [전화번호] 메일 [이메일]  끝");
+    expect(a.review).toEqual({ final: "문의 [전화번호] / [이메일]", draft: "초안 [전화번호]", rev });
+    expect(rv.reviewText).toBe("문의 [전화번호] / [이메일]");
+    expect(rv.model).toBe("720N [이메일]");
+
+    // 공백뿐인 리뷰: 후보 1 가이드를 쓰고, 둘 다 비면 리뷰 행만 건너뛴다.
+    const b = await ready();
+    await research.setReview({ ...b.r.actor, baseVersion: b.version, text: "   ", status: "confirmed" });
+    const bView = await research.open(b.r.id, b.r.volunteerId);
+    const bRev = bView.outcome === "ok" ? (bView.view.review.rev ?? 0) : -1;
+    expect((await research.send({ ...b.r.actor, baseVersion: b.version, reviewRev: bRev, candidates: CANDIDATES })).outcome).toBe("sent");
+    expect(research.archiveSnapshot().reviews.find((x) => x.requestId === b.r.id)?.reviewText).toBe("리뷰 문단");
+    const c = await ready();
+    await research.setReview({ ...c.r.actor, baseVersion: c.version, text: "   ", status: "confirmed" });
+    const cView = await research.open(c.r.id, c.r.volunteerId);
+    const cRev = cView.outcome === "ok" ? (cView.view.review.rev ?? 0) : -1;
+    expect((await research.send({ ...c.r.actor, baseVersion: c.version, reviewRev: cRev, candidates: [{ ...CANDIDATES[0], guide: " " }] })).outcome).toBe("sent");
+    expect(research.archiveSnapshot().archives.some((x) => x.requestId === c.r.id)).toBe(true);
+    expect(research.archiveSnapshot().reviews.some((x) => x.requestId === c.r.id)).toBe(false);
   });
 
   it("보내기가 실패하면 아무것도 남지 않는다", async () => {

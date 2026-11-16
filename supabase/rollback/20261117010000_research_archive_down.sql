@@ -97,6 +97,7 @@ drop function if exists public.research_archive_put(uuid, jsonb);
 drop function if exists public.research_archive_messages(uuid);
 drop function if exists public.research_body_text(jsonb);
 drop function if exists public.research_strip_data(jsonb);
+drop function if exists public.research_scrub_text(text);
 
 drop table if exists public.research_reviews;
 drop table if exists public.research_archives;

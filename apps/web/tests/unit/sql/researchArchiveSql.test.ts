@@ -17,7 +17,16 @@ const MIGRATIONS = [
 ];
 const DOWN = "supabase/rollback/20261117010000_research_archive_down.sql";
 const NEW_TABLES = ["research_archives", "research_reviews"];
-const NEW_FUNCTIONS = ["research_strip_data", "research_body_text", "research_archive_messages", "research_archive_put"];
+// TS `scrubText`(tests/unit/researchArchive.test.ts)와 같은 표다.
+const SCRUB_CASES: Array<[string, string]> = [
+  ["연락은 010-1234-5678로", "연락은 [전화번호]로"],
+  ["01012345678 / 02 123 4567 / 031-123-4567", "[전화번호] / [전화번호] / [전화번호]"],
+  ["+82 10-1234-5678 또는 +82-010-1234-5678", "[전화번호] 또는 [전화번호]"],
+  ["메일 a.b+c@example.co.kr 로", "메일 [이메일] 로"],
+  ["사진 data:image/jpeg;base64,/9j/4AAQSkZJRg== 끝 data:text/plain,hello 끝", "사진  끝  끝"],
+  ["720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234", "720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234"],
+];
+const NEW_FUNCTIONS = ["research_scrub_text", "research_strip_data", "research_body_text", "research_archive_messages", "research_archive_put"];
 const EXISTING_FUNCTIONS = ["register_request", "claim_request", "release_request", "complete_request", "reset_demo_requests"];
 
 const sql = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
@@ -304,6 +313,63 @@ describe("보내기", () => {
     expect(JSON.stringify(rv)).not.toContain(OTHER_URL);
     expect(new Date(rv.sent_at).getTime()).toBe(new Date((await one<Json>("select sent_at from public.results where request_id = $1", [r.id])).sent_at).getTime());
     expect((await one<Json>("select is_demo from public.requests where id = $1", [r.id])).is_demo).toBe(a.is_demo);
+  });
+
+  it("research_scrub_text: data URL은 지우고 이메일·전화번호는 가리며 일반 글은 그대로 둔다", async () => {
+    for (const [input, expected] of SCRUB_CASES) {
+      expect((await one<{ t: string }>("select public.research_scrub_text($1) as t", [input])).t, input).toBe(expected);
+    }
+    expect((await one<{ t: string | null }>("select public.research_scrub_text(null) as t")).t).toBeNull();
+  });
+
+  it("연락처·사진 조각이 요청 문장·칸·대화·리뷰에 있어도 보관본(30일)과 영구 리뷰에는 가려서 남는다", async () => {
+    const volunteerId = vol();
+    const created = await db.query<{ out_request_id: string }>(
+      "select * from public.register_request($1, '소니 헤드셋 010-1234-5678', '10만 원', '새 제품', 'Sony', '헤드셋', 'new')",
+      [randomUUID()],
+    );
+    const id = created.rows[0].out_request_id;
+    await db.query("select public.claim_request($1, $2)", [id, volunteerId]);
+    const o = await call("public.research_open($1::uuid, $2, $3::int)", [id, volunteerId, null]);
+    const r: Actor = { id, volunteerId, sessionId: o.view.sessionId };
+    const out = await apply(r, "t1", 0, {
+      purchase: "research",
+      slots: { model: slot("720N a@b.com"), pros: slot("가벼워요 010 1234 5678"), altReason: slot("이유") },
+    }, [
+      text("제 번호는 010-9999-8888, 메일은 me@example.com 입니다 data:text/plain,hello 끝", "volunteer", "answer"),
+      { role: "ai", tag: "review", slot: null, ai: "ok", body: { text: "초안 02-123-4567" } },
+    ]);
+    expect(out.outcome).toBe("ok");
+    const version = await readVersion(r);
+    const confirmed = await review(r, version, "confirmed", "리뷰입니다. 문의 010-5555-6666 / x@y.kr");
+    expect((await send(r, version, confirmed.review.rev, [{ name: "720N 010-1111-2222", url: "https://e.com", guide: "g", summary: [] }])).outcome).toBe("sent");
+    const a = await one<Json>("select * from public.research_archives where request_id = $1", [r.id]);
+    const rv = await one<Json>("select * from public.research_reviews where request_id = $1", [r.id]);
+    const raw = JSON.stringify([a, rv]);
+    expect(raw).not.toMatch(/\d{3}[- ]\d{4}[- ]\d{4}|\d{2}-\d{3}-\d{4}|@|data:/);
+    expect(a.request.product).toBe("소니 헤드셋 [전화번호]");
+    expect(rv.product).toBe("소니 헤드셋 [전화번호]");
+    expect(a.slots.model.value).toBe("720N [이메일]");
+    expect(a.slots.pros.value).toBe("가벼워요 [전화번호]");
+    expect(a.messages[0].text).toBe("제 번호는 [전화번호], 메일은 [이메일] 입니다  끝");
+    expect(a.review).toEqual({ final: "리뷰입니다. 문의 [전화번호] / [이메일]", draft: "초안 [전화번호]", rev: confirmed.review.rev });
+    expect(rv.review_text).toBe("리뷰입니다. 문의 [전화번호] / [이메일]");
+    expect(rv.model).toBe("720N [이메일]");
+  });
+
+  it("리뷰가 공백뿐이면 후보 1의 가이드를 리뷰 문단으로 쓰고, 둘 다 비면 리뷰 행만 건너뛴다(보내기는 성공)", async () => {
+    const a = await ready();
+    await review(a.r, a.version, "confirmed", "   \n ");
+    const aRev = (await one<{ rev: number }>("select (review->>'rev')::int as rev from public.research_sessions where request_id = $1", [a.r.id])).rev;
+    expect((await send(a.r, a.version, aRev)).outcome).toBe("sent");
+    expect((await one<Json>("select review_text from public.research_reviews where request_id = $1", [a.r.id])).review_text).toBe("리뷰 문단");
+
+    const b = await ready();
+    await review(b.r, b.version, "confirmed", "   ");
+    const bRev = (await one<{ rev: number }>("select (review->>'rev')::int as rev from public.research_sessions where request_id = $1", [b.r.id])).rev;
+    expect((await send(b.r, b.version, bRev, [{ ...CANDIDATES[0], guide: " " }])).outcome).toBe("sent");
+    expect(await count("public.research_archives where request_id = $1", [b.r.id])).toBe(1);
+    expect(await count("public.research_reviews where request_id = $1", [b.r.id])).toBe(0);
   });
 
   it("같은 요청을 다시 보내면 existing이고 두 표는 1행 그대로다", async () => {

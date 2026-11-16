@@ -63,7 +63,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const DATA_URL_VALUE = /^\s*data:/i;
-const DATA_URL_INLINE = /data:[A-Za-z0-9.+/-]+;base64,[A-Za-z0-9+/=]+/g;
+const DATA_URL_INLINE = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"')]+/g;
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const PHONE = /(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])/g;
+
+/** 보관할 글에서 사진 데이터(data URL)는 지우고 이메일·전화번호는 [이메일]·[전화번호]로 바꾼다(SQL `research_scrub_text`). */
+export function scrubText(text: string): string {
+  return text.replace(DATA_URL_INLINE, "").replace(EMAIL, "[이메일]").replace(PHONE, "[전화번호]");
+}
 
 /** "data:"로 시작하는 문자열 값과 thumb 키를 지운다(사진 썸네일이 보관본에 들어가지 않게). */
 export function stripData<T>(value: T): T {
@@ -72,6 +79,7 @@ export function stripData<T>(value: T): T {
       .filter((entry) => !(typeof entry === "string" && DATA_URL_VALUE.test(entry)))
       .map((entry) => stripData(entry)) as unknown as T;
   }
+  if (typeof value === "string") return scrubText(value) as unknown as T;
   if (isRecord(value)) {
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
@@ -135,7 +143,7 @@ export function archiveMessages(messages: ResearchMessage[]): ArchiveMessage[] {
   const out: ArchiveMessage[] = [];
   let bytes = 2;
   for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
-    let text = bodyText(message.body).replace(DATA_URL_INLINE, "");
+    let text = scrubText(bodyText(message.body));
     text = text.slice(0, ARCHIVE_TEXT_MAX).trim();
     if (text === "") continue;
     const item: ArchiveMessage = {
@@ -185,16 +193,22 @@ export function buildArchive(
   const { session } = source;
   const createdAt = new Date(source.now).toISOString();
   const verified = session.purchase === "bought" && source.photoCount > 0;
-  const final = trimmed((session.review.text ?? "").slice(0, REVIEW_TEXT_MAX));
+  let final = trimmed(scrubText((session.review.text ?? "").slice(0, REVIEW_TEXT_MAX)));
+  // 세션 리뷰가 공백뿐이면 보내는 결과의 후보 1 가이드(= 리뷰 문단)를 쓴다(SQL과 같다).
+  if (final === "" && isRecord(source.candidates[0])) {
+    final = trimmed(scrubText(str(source.candidates[0].guide).slice(0, REVIEW_TEXT_MAX)));
+  }
   const lastDraft = [...source.messages]
     .filter((message) => message.role === "ai" && message.tag === "review")
     .sort((a, b) => b.seq - a.seq)[0];
-  const draft = lastDraft ? bodyText(lastDraft.body).slice(0, 2500) : null;
+  const draft = lastDraft ? scrubText(bodyText(lastDraft.body)).slice(0, 2500) : null;
 
   const request: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(source.request)) {
-    if (value !== null && value !== undefined) request[key] = value;
+    if (value === null || value === undefined) continue;
+    request[key] = key === "conditionKind" ? value : scrubText(String(value));
   }
+  const clean = (value: string | null): string | null => (value === null ? null : scrubText(value));
 
   const archive: ResearchArchive = {
     id: newId(),
@@ -214,9 +228,9 @@ export function buildArchive(
     .slice(1)
     .map((candidate) => (isRecord(candidate) ? str(candidate.name) : ""))
     .filter((name) => name !== "")
-    .map((name) => name.slice(0, 100));
+    .map((name) => scrubText(name).slice(0, 100));
   const firstName = isRecord(source.candidates[0]) ? str(source.candidates[0].name) : "";
-  const model = (session.slots.model?.value ?? "").trim() || firstName;
+  const model = scrubText((session.slots.model?.value ?? "").trim() || firstName);
 
   const confirmedAt = session.slots.benefits?.at ?? createdAt;
   const benefitLinks: BenefitLink[] = [];
@@ -233,10 +247,10 @@ export function buildArchive(
       }
     }
     benefitLinks.push({
-      title: str(card?.title).slice(0, 60),
+      title: scrubText(str(card?.title)).slice(0, 60),
       url: url.slice(0, 500),
-      kind: str(card?.kind).slice(0, 40),
-      condition: str(card?.condition).slice(0, 80),
+      kind: scrubText(str(card?.kind)).slice(0, 40),
+      condition: scrubText(str(card?.condition)).slice(0, 80),
       confirmedAt,
     });
   });
@@ -248,9 +262,9 @@ export function buildArchive(
       requestId: source.requestId,
       createdAt,
       isDemo: source.isDemo,
-      item: source.request.item,
-      brand: source.request.brand,
-      product: source.request.product,
+      item: clean(source.request.item),
+      brand: clean(source.request.brand),
+      product: clean(source.request.product),
       model: model === "" ? null : model.slice(0, 200),
       purchase: session.purchase,
       verified,

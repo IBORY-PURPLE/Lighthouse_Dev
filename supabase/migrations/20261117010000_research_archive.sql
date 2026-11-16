@@ -60,6 +60,16 @@ grant select, insert, update, delete on table public.research_archives, public.r
 
 -- ---------- 보조 함수(research_send 안에서만 쓴다. 호출자의 잠금 안에서 돈다) ----------
 
+-- 보관할 글에서 사진 데이터(data URL), 이메일, 전화번호를 지운다(data URL은 빈 글, 나머지는 [이메일]·[전화번호]로 바꾼다).
+-- 대화 글 30일 보관본과 영구 리뷰에 사진 조각이나 연락처가 남지 않게 하는 마지막 안전망이다.
+create or replace function public.research_scrub_text(p_text text)
+returns text language sql immutable security invoker set search_path = '' as $$
+  select regexp_replace(regexp_replace(regexp_replace(p_text,
+    'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'g'),
+    '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[이메일]', 'g'),
+    '(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])', '[전화번호]', 'g')
+$$;
+
 -- jsonb 안의 "data:" 문자열 값과 thumb 키를 지운다(사진 썸네일이 보관본에 들어가지 않게).
 create or replace function public.research_strip_data(p_value jsonb)
 returns jsonb language plpgsql immutable security invoker set search_path = '' as $$
@@ -82,6 +92,8 @@ begin
         from jsonb_array_elements(p_value) with ordinality as e(value, ord)
         where not (jsonb_typeof(e.value) = 'string' and (e.value #>> '{}') ~* '^\s*data:');
       return v_out;
+    when 'string' then
+      return to_jsonb(public.research_scrub_text(p_value #>> '{}'));
     else
       return p_value;
   end case;
@@ -153,8 +165,7 @@ begin
     select m.seq, m.role, m.tag, m.slot, m.body from public.research_messages as m
       where m.request_id = p_request_id order by m.seq
   loop
-    v_text := regexp_replace(public.research_body_text(v_m.body),
-      'data:[A-Za-z0-9.+/-]+;base64,[A-Za-z0-9+/=]+', '', 'g');
+    v_text := public.research_scrub_text(public.research_body_text(v_m.body));
     v_text := regexp_replace(left(v_text, 3000), '^\s+|\s+$', '', 'g');
     continue when v_text = '';
     v_item := jsonb_build_object('seq', v_m.seq, 'role', v_m.role, 'tag', v_m.tag, 'slot', v_m.slot, 'text', v_text);
@@ -187,24 +198,29 @@ begin
 
   v_verified := v_s.purchase = 'bought'
     and exists (select 1 from public.research_photos as p where p.request_id = p_request_id);
-  v_final := regexp_replace(left(coalesce(v_s.review->>'text', ''), 1000), '^\s+|\s+$', '', 'g');
+  v_final := regexp_replace(public.research_scrub_text(left(coalesce(v_s.review->>'text', ''), 1000)), '^\s+|\s+$', '', 'g');
+  -- 세션 리뷰가 공백뿐이면(set_review는 빈 글만 막는다) 보내는 결과의 후보 1 가이드(= 리뷰 문단)를 쓴다.
+  if v_final = '' then
+    v_final := regexp_replace(public.research_scrub_text(left(coalesce(p_candidates->0->>'guide', ''), 1000)), '^\s+|\s+$', '', 'g');
+  end if;
   -- 초안 = AI가 마지막으로 제안한 리뷰 메시지(없으면 null)
-  select left(public.research_body_text(m.body), 2500) into v_draft
+  select left(public.research_scrub_text(public.research_body_text(m.body)), 2500) into v_draft
     from public.research_messages as m
     where m.request_id = p_request_id and m.role = 'ai' and m.tag = 'review'
     order by m.seq desc limit 1;
-  v_model := left(coalesce(nullif(btrim(v_s.slots->'model'->>'value'), ''), p_candidates->0->>'name', ''), 200);
+  v_model := left(public.research_scrub_text(
+    coalesce(nullif(btrim(v_s.slots->'model'->>'value'), ''), p_candidates->0->>'name', '')), 200);
 
-  select coalesce(jsonb_agg(left(e.value->>'name', 100) order by e.ord), '[]'::jsonb) into v_alts
+  select coalesce(jsonb_agg(left(public.research_scrub_text(e.value->>'name'), 100) order by e.ord), '[]'::jsonb) into v_alts
     from jsonb_array_elements(p_candidates) with ordinality as e(value, ord)
     where e.ord > 1 and jsonb_typeof(e.value) = 'object' and coalesce(e.value->>'name', '') <> '';
 
   -- 봉사자가 [확인했어요]한 혜택 주소(slots.benefits.links)에 혜택 카드의 제목·종류·조건을 이어 붙인다.
   select coalesce(jsonb_agg(jsonb_build_object(
-      'title', left(coalesce(i.item->>'title', ''), 60),
+      'title', left(public.research_scrub_text(coalesce(i.item->>'title', '')), 60),
       'url', left(l.url, 500),
-      'kind', left(coalesce(i.item->>'kind', ''), 40),
-      'condition', left(coalesce(i.item->>'condition', ''), 80),
+      'kind', left(public.research_scrub_text(coalesce(i.item->>'kind', '')), 40),
+      'condition', left(public.research_scrub_text(coalesce(i.item->>'condition', '')), 80),
       'confirmedAt', coalesce(v_s.slots->'benefits'->>'at', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
     ) order by l.ord), '[]'::jsonb) into v_links
     from jsonb_array_elements_text(
@@ -223,8 +239,10 @@ begin
 
   insert into public.research_archives (request_id, is_demo, request, purchase, verified, slots, messages, review)
     values (p_request_id, v_r.is_demo,
-      jsonb_strip_nulls(jsonb_build_object('product', v_r.product, 'budget', v_r.budget, 'condition', v_r.condition,
-        'brand', v_r.brand, 'item', v_r.item, 'conditionKind', v_r.condition_kind)),
+      jsonb_strip_nulls(jsonb_build_object('product', public.research_scrub_text(v_r.product),
+        'budget', public.research_scrub_text(v_r.budget), 'condition', public.research_scrub_text(v_r.condition),
+        'brand', public.research_scrub_text(v_r.brand), 'item', public.research_scrub_text(v_r.item),
+        'conditionKind', v_r.condition_kind)),
       v_s.purchase, v_verified, public.research_strip_data(v_s.slots),
       public.research_archive_messages(p_request_id),
       jsonb_build_object('final', v_final, 'draft', v_draft, 'rev', coalesce((v_s.review->>'rev')::int, 0)))
@@ -234,7 +252,8 @@ begin
   if v_final <> '' then
     insert into public.research_reviews (request_id, is_demo, item, brand, product, model, purchase, verified,
       review_text, alts, benefit_links)
-      values (p_request_id, v_r.is_demo, v_r.item, v_r.brand, v_r.product, nullif(v_model, ''), v_s.purchase,
+      values (p_request_id, v_r.is_demo, public.research_scrub_text(v_r.item), public.research_scrub_text(v_r.brand),
+        public.research_scrub_text(v_r.product), nullif(v_model, ''), v_s.purchase,
         v_verified, v_final, v_alts, v_links)
       on conflict (request_id) do nothing;
   end if;
@@ -354,7 +373,7 @@ begin
     select p.oid::regprocedure from pg_proc as p
       join pg_namespace as n on n.oid = p.pronamespace
       where n.nspname = 'public'
-        and p.proname in ('research_strip_data', 'research_body_text', 'research_archive_messages',
+        and p.proname in ('research_scrub_text', 'research_strip_data', 'research_body_text', 'research_archive_messages',
           'research_archive_put', 'research_send', 'research_sweep')
   loop
     execute format('revoke execute on function %s from public, anon, authenticated', v_fn);
