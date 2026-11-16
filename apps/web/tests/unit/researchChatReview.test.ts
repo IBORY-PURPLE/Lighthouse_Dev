@@ -149,6 +149,21 @@ describe("서버 틀 문단", () => {
     expect(text).toContain("가볍고 좋아요");
   });
 
+  it("장점·고른 이유가 주소뿐이라 비어도 틀 문단은 3문장 이상이고 edit 검사를 통과한다", () => {
+    const view = makeView({
+      purchase: "research",
+      slots: { model: filled("LH-200"), pros: filled("https://blog.example.com/a"), altReason: filled("example.edu/page") },
+      photos: [],
+    });
+    const text = buildTemplateReview(buildReviewMaterial(sourceOf(view)));
+    expect(checkReviewText(text, reviewKnownMaterial(sourceOf(view)), "edit")).toEqual([]);
+    expect(text).not.toContain("example");
+  });
+
+  it("점 하나로 이어진 도메인 이름(example.edu 등)도 주소로 걸린다", () => {
+    expect(checkReviewText(`${"가".repeat(60)}. 자세한 건 example.edu 에서 봐요. 둘째예요. 셋째예요.`, [], "edit").join(" ")).toContain("주소");
+  });
+
   it("AI 문단에도 전화번호 모양은 걸린다", () => {
     const known = ["LH-200"];
     const text = `${GOOD_AI.replace("LH-300이고", "LH-200이고")} 문의는 010-1234-5678이에요.`;

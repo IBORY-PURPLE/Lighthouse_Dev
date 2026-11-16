@@ -51,7 +51,7 @@ export interface ReviewSource {
 
 const URL_TOKEN = /https?:\/\/\S+|www\.\S+/gi;
 // 문단에 넣지 않는 것: 주소 모양(도메인 이름 포함)과 마크다운·목록 기호. 칸 값을 쓰기 전에 이것도 뺀다(틀 문단이 검사에 걸리지 않게).
-const BARE_DOMAIN = /[a-z0-9-]+\.(?:com|co\.kr|net|kr|org|io)\b/gi;
+const BARE_DOMAIN = /[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/gi;
 const SYMBOLS = /[*#`_>|]/g;
 // 전화번호 모양: 휴대폰·지역번호(010-1234-5678, 02 123 4567, +82 10…), 대표번호(1588-1234).
 const PHONE = /(?<!\d)0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|\+82[-\s.]?\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|(?<!\d)1[5-9]\d{2}[-\s.]\d{4}(?!\d)/;
@@ -160,7 +160,7 @@ export function checkReviewText(text: string, material: readonly string[], mode:
   if (hasForbidden(text)) reasons.push(`가격·재고·할인으로 보이는 표현이 있어요: “${firstOffender(text)}”`);
   const unknown = unknownModelTokens(text, material);
   if (unknown.length > 0) reasons.push(`자료에 없는 기종 이름이 있어요: ${[...new Set(unknown)].slice(0, 3).join(", ")}`);
-  if (/https?:\/\/|www\.|[a-z0-9-]+\.(?:com|co\.kr|net|kr|org|io)\b/i.test(normalized)) {
+  if (/https?:\/\/|www\./i.test(normalized) || new RegExp(BARE_DOMAIN.source, "i").test(normalized)) {
     reasons.push("주소(링크)는 문단에 넣지 않아요.");
   }
   if (PHONE.test(normalized)) reasons.push("전화번호처럼 보이는 숫자는 넣지 않아요.");
@@ -209,6 +209,8 @@ export function buildTemplateReview(material: ReviewMaterial): string {
     })
     .filter(Boolean);
   if (benefits.length > 0) add(`봉사자가 직접 확인한 혜택 안내로는 ${benefits.join("; ")} 등이 있어요.`);
+  // 칸 값이 주소뿐이라 비면 문장이 3개보다 적을 수 있다. 새 정보 없이 3문장을 채운다.
+  if (parts.length < SENTENCES_MIN - 1) add("봉사자가 더 자세히 말한 내용은 아직 없어요.", false);
   add("이 글은 봉사자가 모은 내용을 정리한 것이라서, 최신 판매 정보는 쇼핑몰에서 직접 확인해 주세요.", false);
 
   const join = () => parts.map((part) => part.text).join(" ");
