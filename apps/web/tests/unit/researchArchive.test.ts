@@ -217,9 +217,31 @@ describe("메모리 보내기 기록", () => {
     await research.setReview({ ...c.r.actor, baseVersion: c.version, text: "   ", status: "confirmed" });
     const cView = await research.open(c.r.id, c.r.volunteerId);
     const cRev = cView.outcome === "ok" ? (cView.view.review.rev ?? 0) : -1;
-    expect((await research.send({ ...c.r.actor, baseVersion: c.version, reviewRev: cRev, candidates: [{ ...CANDIDATES[0], guide: " " }] })).outcome).toBe("sent");
-    expect(research.archiveSnapshot().archives.some((x) => x.requestId === c.r.id)).toBe(true);
+    expect((await research.send({ ...c.r.actor, baseVersion: c.version, reviewRev: cRev, candidates: [{ ...CANDIDATES[0], guide: " " }] })).outcome).toBe("review_not_confirmed");
+    expect(research.archiveSnapshot().archives.some((x) => x.requestId === c.r.id)).toBe(false);
     expect(research.archiveSnapshot().reviews.some((x) => x.requestId === c.r.id)).toBe(false);
+    expect((await requests.get(c.r.id))?.status).toBe("in_progress");
+    expect((await research.send({ ...c.r.actor, baseVersion: c.version, reviewRev: cRev, candidates: [{ ...CANDIDATES[0], guide: "대체 문단" }] })).outcome).toBe("sent");
+    expect(research.archiveSnapshot().reviews.find((x) => x.requestId === c.r.id)?.reviewText).toBe("대체 문단");
+  });
+
+  it("혜택 링크 주소에 전화번호·이메일·data URL이 섞여 있으면 영구 기록에 넣지 않는다", async () => {
+    const { r, version, rev } = await ready();
+    const bad = "https://shop.example/?email=a@b.com&phone=010-1234-5678";
+    const patched = await research.apply({
+      ...r.actor, clientTurnId: "t3", baseVersion: version,
+      patch: { slots: { benefits: slot("x", { status: "confirmed", links: [bad, BENEFIT_URL], at: "2026-11-17T02:00:00Z 010-1234-5678" }) } },
+      messages: [], next: [],
+    });
+    if (patched.outcome !== "ok") throw new Error(patched.outcome);
+    const v = patched.response.version;
+    const confirmed = await research.setReview({ ...r.actor, baseVersion: v, text: "리뷰 문단", status: "confirmed" });
+    if (confirmed.outcome !== "ok") throw new Error(confirmed.outcome);
+    expect((await research.send({ ...r.actor, baseVersion: v, reviewRev: confirmed.review.rev ?? 0, candidates: CANDIDATES })).outcome).toBe("sent");
+    const rv = research.archiveSnapshot().reviews.find((x) => x.requestId === r.id);
+    expect(rv?.benefitLinks).toHaveLength(1);
+    expect(rv?.benefitLinks[0]).toMatchObject({ url: BENEFIT_URL, confirmedAt: "2026-11-17T02:00:00Z [전화번호]" });
+    expect(JSON.stringify(rv)).not.toContain("a@b.com");
   });
 
   it("보내기가 실패하면 아무것도 남지 않는다", async () => {

@@ -34,6 +34,7 @@ import {
 import {
   ARCHIVE_KEEP_MS,
   buildArchive,
+  finalReview,
   type ResearchArchive,
   type ResearchReviewRecord,
 } from "./researchArchive";
@@ -715,6 +716,8 @@ export function createMemoryResearchStore(
       if (!Array.isArray(input.candidates) || input.candidates.length < 1 || input.candidates.length > 3) {
         return { outcome: "bad_request" };
       }
+      // 영구 리뷰에 넣을 문단이 없으면(세션 리뷰도 후보 1 가이드도 공백) 보내지 않는다(SQL과 같다).
+      if (finalReview(session.review.text, input.candidates) === "") return { outcome: "review_not_confirmed" };
       // complete가 요청을 done으로 바꾸면 알림으로 세션이 지워지므로, 보관할 글은 그 전에 만들어 둔다.
       const request = await requests.getForVolunteer(input.requestId, input.volunteerId);
       const kept =

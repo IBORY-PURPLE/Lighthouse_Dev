@@ -150,6 +150,21 @@ begin
 end;
 $$;
 
+-- 영구 리뷰에 들어갈 최종 문단. 세션 리뷰(confirmed)를 쓰고, 공백뿐이면(set_review는 빈 글만 막는다)
+-- 보내는 결과의 후보 1 가이드(= 리뷰 문단)를 쓴다. 가려야 할 글은 가리고 1,000자로 자른다. 둘 다 비면 빈 글.
+create or replace function public.research_final_review(p_review jsonb, p_candidates jsonb)
+returns text language plpgsql immutable security invoker set search_path = '' as $$
+declare
+  v_final text;
+begin
+  v_final := regexp_replace(public.research_scrub_text(left(coalesce(p_review->>'text', ''), 1000)), '^\s+|\s+$', '', 'g');
+  if v_final = '' and jsonb_typeof(p_candidates) = 'array' then
+    v_final := regexp_replace(public.research_scrub_text(left(coalesce(p_candidates->0->>'guide', ''), 1000)), '^\s+|\s+$', '', 'g');
+  end if;
+  return v_final;
+end;
+$$;
+
 -- 한 요청의 대화를 seq 순서로 [{seq, role, tag, slot, text}] 글만 뽑는다. 사진 말풍선·글이 없는 메시지는 건너뛴다.
 -- 메시지마다 3,000자로 자르고, 합계(jsonb 글자 크기)가 190KB를 넘으면 거기서 멈춘다(보관 표의 200KB 검사를 넘지 않게).
 create or replace function public.research_archive_messages(p_request_id uuid)
@@ -198,11 +213,7 @@ begin
 
   v_verified := v_s.purchase = 'bought'
     and exists (select 1 from public.research_photos as p where p.request_id = p_request_id);
-  v_final := regexp_replace(public.research_scrub_text(left(coalesce(v_s.review->>'text', ''), 1000)), '^\s+|\s+$', '', 'g');
-  -- 세션 리뷰가 공백뿐이면(set_review는 빈 글만 막는다) 보내는 결과의 후보 1 가이드(= 리뷰 문단)를 쓴다.
-  if v_final = '' then
-    v_final := regexp_replace(public.research_scrub_text(left(coalesce(p_candidates->0->>'guide', ''), 1000)), '^\s+|\s+$', '', 'g');
-  end if;
+  v_final := public.research_final_review(v_s.review, p_candidates);
   -- 초안 = AI가 마지막으로 제안한 리뷰 메시지(없으면 null)
   select left(public.research_scrub_text(public.research_body_text(m.body)), 2500) into v_draft
     from public.research_messages as m
@@ -221,7 +232,8 @@ begin
       'url', left(l.url, 500),
       'kind', left(public.research_scrub_text(coalesce(i.item->>'kind', '')), 40),
       'condition', left(public.research_scrub_text(coalesce(i.item->>'condition', '')), 80),
-      'confirmedAt', coalesce(v_s.slots->'benefits'->>'at', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+      'confirmedAt', left(public.research_scrub_text(
+        coalesce(v_s.slots->'benefits'->>'at', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))), 40)
     ) order by l.ord), '[]'::jsonb) into v_links
     from jsonb_array_elements_text(
       case when jsonb_typeof(v_s.slots->'benefits'->'links') = 'array' then v_s.slots->'benefits'->'links' else '[]'::jsonb end
@@ -235,7 +247,8 @@ begin
           and jsonb_typeof(it.value) = 'object' and it.value->>'url' = l.url
         order by m.seq desc limit 1
     ) as i on true
-    where l.ord <= 10 and l.url ~ '^https?://';
+    -- 주소에 전화번호·이메일·data URL이 섞여 있으면(가리면 주소가 깨지므로) 그 링크는 영구 기록에 넣지 않는다.
+    where l.ord <= 10 and l.url ~ '^https?://' and public.research_scrub_text(l.url) = l.url;
 
   insert into public.research_archives (request_id, is_demo, request, purchase, verified, slots, messages, review)
     values (p_request_id, v_r.is_demo,
@@ -248,7 +261,7 @@ begin
       jsonb_build_object('final', v_final, 'draft', v_draft, 'rev', coalesce((v_s.review->>'rev')::int, 0)))
     on conflict (request_id) do nothing;
 
-  -- 리뷰 문단이 비어 있으면(검수 규칙상 없지만) 영구 표에는 넣지 않는다.
+  -- research_send가 빈 리뷰를 먼저 거르므로 v_final은 비어 있지 않다(방어용 조건).
   if v_final <> '' then
     insert into public.research_reviews (request_id, is_demo, item, brand, product, model, purchase, verified,
       review_text, alts, benefit_links)
@@ -309,15 +322,18 @@ begin
   if jsonb_typeof(p_candidates) <> 'array' or jsonb_array_length(p_candidates) not between 1 and 3 then
     return jsonb_build_object('outcome', 'bad_request');
   end if;
+  -- 영구 리뷰에 넣을 문단이 없으면(세션 리뷰도 후보 1 가이드도 공백) 보내지 않는다.
+  if public.research_final_review(v_s.review, p_candidates) = '' then
+    return jsonb_build_object('outcome', 'review_not_confirmed');
+  end if;
   -- 요청을 done으로 바꾸면 트리거가 세션을 지우므로, 그 전에 같은 트랜잭션에서 대화 글과 리뷰를 보관 표에 넣는다.
   perform public.research_archive_put(p_request_id, p_candidates);
   update public.requests as r set status = 'done', done_at = now(), updated_at = now()
     where r.id = p_request_id and r.status = 'in_progress' and r.volunteer_id = p_volunteer_id
     returning r.id into v_id;
   if v_id is null then
-    delete from public.research_archives as a where a.request_id = p_request_id;
-    delete from public.research_reviews as rv where rv.request_id = p_request_id;
-    return jsonb_build_object('outcome', 'not_in_progress');
+    -- 가드가 요청 행을 잠갔으므로 여기 올 수 없다. 오면 예외로 이 트랜잭션(보관 표 넣기 포함)을 통째로 되돌린다.
+    raise exception 'research_send: request left in_progress while locked';
   end if;
   insert into public.results as res (request_id, volunteer_id, candidates)
     values (p_request_id, p_volunteer_id, p_candidates) returning res.sent_at into v_sent;
@@ -373,7 +389,8 @@ begin
     select p.oid::regprocedure from pg_proc as p
       join pg_namespace as n on n.oid = p.pronamespace
       where n.nspname = 'public'
-        and p.proname in ('research_scrub_text', 'research_strip_data', 'research_body_text', 'research_archive_messages',
+        and p.proname in ('research_scrub_text', 'research_final_review', 'research_strip_data', 'research_body_text',
+          'research_archive_messages',
           'research_archive_put', 'research_send', 'research_sweep')
   loop
     execute format('revoke execute on function %s from public, anon, authenticated', v_fn);

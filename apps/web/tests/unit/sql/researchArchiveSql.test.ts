@@ -26,7 +26,7 @@ const SCRUB_CASES: Array<[string, string]> = [
   ["사진 data:image/jpeg;base64,/9j/4AAQSkZJRg== 끝 data:text/plain,hello 끝", "사진  끝  끝"],
   ["720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234", "720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234"],
 ];
-const NEW_FUNCTIONS = ["research_scrub_text", "research_strip_data", "research_body_text", "research_archive_messages", "research_archive_put"];
+const NEW_FUNCTIONS = ["research_scrub_text", "research_final_review", "research_strip_data", "research_body_text", "research_archive_messages", "research_archive_put"];
 const EXISTING_FUNCTIONS = ["register_request", "claim_request", "release_request", "complete_request", "reset_demo_requests"];
 
 const sql = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
@@ -357,7 +357,7 @@ describe("보내기", () => {
     expect(rv.model).toBe("720N [이메일]");
   });
 
-  it("리뷰가 공백뿐이면 후보 1의 가이드를 리뷰 문단으로 쓰고, 둘 다 비면 리뷰 행만 건너뛴다(보내기는 성공)", async () => {
+  it("리뷰가 공백뿐이면 후보 1의 가이드를 리뷰 문단으로 쓰고, 둘 다 비면 보내지 않는다(아무것도 남지 않음)", async () => {
     const a = await ready();
     await review(a.r, a.version, "confirmed", "   \n ");
     const aRev = (await one<{ rev: number }>("select (review->>'rev')::int as rev from public.research_sessions where request_id = $1", [a.r.id])).rev;
@@ -367,9 +367,30 @@ describe("보내기", () => {
     const b = await ready();
     await review(b.r, b.version, "confirmed", "   ");
     const bRev = (await one<{ rev: number }>("select (review->>'rev')::int as rev from public.research_sessions where request_id = $1", [b.r.id])).rev;
-    expect((await send(b.r, b.version, bRev, [{ ...CANDIDATES[0], guide: " " }])).outcome).toBe("sent");
-    expect(await count("public.research_archives where request_id = $1", [b.r.id])).toBe(1);
+    expect((await send(b.r, b.version, bRev, [{ ...CANDIDATES[0], guide: " " }])).outcome).toBe("review_not_confirmed");
+    expect(await count("public.research_archives where request_id = $1", [b.r.id])).toBe(0);
     expect(await count("public.research_reviews where request_id = $1", [b.r.id])).toBe(0);
+    expect(await count("public.results where request_id = $1", [b.r.id])).toBe(0);
+    expect((await one<Json>("select status from public.requests where id = $1", [b.r.id])).status).toBe("in_progress");
+    // 가이드를 채워 다시 보내면 들어간다.
+    expect((await send(b.r, b.version, bRev, [{ ...CANDIDATES[0], guide: "대체 문단" }])).outcome).toBe("sent");
+    expect((await one<Json>("select review_text from public.research_reviews where request_id = $1", [b.r.id])).review_text).toBe("대체 문단");
+  });
+
+  it("혜택 링크 주소에 전화번호·이메일·data URL이 섞여 있으면 영구 기록에 넣지 않고 확인 날짜도 가린다", async () => {
+    const { r, version, rev } = await ready();
+    const bad = "https://shop.example/?email=a@b.com&phone=010-1234-5678";
+    await db.query(
+      `update public.research_sessions set slots = slots || jsonb_build_object('benefits', jsonb_build_object(
+         'value', 'x', 'status', 'confirmed', 'by', 'volunteer', 'at', '2026-11-17T02:00:00Z 010-1234-5678',
+         'links', jsonb_build_array($2::text, $3::text))) where request_id = $1`,
+      [r.id, bad, BENEFIT_URL],
+    );
+    expect((await send(r, version, rev)).outcome).toBe("sent");
+    const rv = await one<Json>("select benefit_links from public.research_reviews where request_id = $1", [r.id]);
+    expect(rv.benefit_links).toHaveLength(1);
+    expect(rv.benefit_links[0]).toMatchObject({ url: BENEFIT_URL, confirmedAt: "2026-11-17T02:00:00Z [전화번호]" });
+    expect(JSON.stringify(rv)).not.toContain("a@b.com");
   });
 
   it("같은 요청을 다시 보내면 existing이고 두 표는 1행 그대로다", async () => {

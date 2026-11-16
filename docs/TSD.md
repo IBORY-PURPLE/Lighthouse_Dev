@@ -345,7 +345,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 | `research_begin(...)` | 소유·`session_id` 확인, 중복 턴·처리 중, stale(세지 않음), 검색 캐시, 요청당·하루 상한 확인, 스냅숏 |
 | `research_apply(...)` | 중복이면 저장된 응답(stale보다 먼저), stale, patch 반영, 칸이 바뀌면 `version+1`이고 확정 리뷰는 draft로, 다음 질문 후보 중 첫 유효 후보를 메시지로 |
 | `research_add_message` / `research_add_photo` / `research_remove_photo` | 검색 결과 저장, 사진(3장, 리서치만이면 거부) 넣기·지우기와 같은 처리에서 다음 질문 |
-| `research_set_review` / `research_send` | 리뷰 draft·confirmed 저장, 보내기(필수 칸·확정 리뷰·`version` 확인 뒤 요청 done과 `results` 삽입. 다시 보내면 existing). 마이그레이션 `20261117010000`부터 요청을 done으로 바꾸기 전에 같은 트랜잭션에서 `research_archives`·`research_reviews`에 넣는다(재전송 때는 넣지 않음) |
+| `research_set_review` / `research_send` | 리뷰 draft·confirmed 저장, 보내기(필수 칸·확정 리뷰·`version` 확인 뒤 요청 done과 `results` 삽입. 다시 보내면 existing). 마이그레이션 `20261117010000`부터 요청을 done으로 바꾸기 전에 같은 트랜잭션에서 `research_archives`·`research_reviews`에 넣는다(재전송 때는 넣지 않음). 리뷰 문단이 공백뿐이면 후보 1 가이드를 쓰고 둘 다 비면 보내지 않는다(`review_not_confirmed`) |
 | `research_sweep(p_idle)` | 6시간 넘게 활동이 없는 in_progress 요청을 `release_request`와 같은 값으로 대기열에 돌린다. `20261117010000`부터 30일 지난 `research_archives`도 지운다(`research_reviews`는 지우지 않음) |
 | 트리거 `research_drop_on_leave` | `requests`가 in_progress에서 벗어나거나 봉사자가 바뀌면 그 세션을 지운다 |
 
@@ -354,7 +354,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 - 상한: 요청당 AI 턴 40, 웹 검색 12, 사진 올리기 6, 리뷰 3. 하루 웹 검색 60, AI 호출 600(환경변수 `RESEARCH_DAILY_SEARCH_CAP`·`RESEARCH_DAILY_AI_CAP`로 바꿈).
 - 함수는 모두 `security invoker`, `set search_path = ''`, `revoke execute from public, anon, authenticated`, `grant to service_role`다. 시험은 PGlite(`tests/unit/sql/researchSql.test.ts`).
 - 되돌리기: `supabase/rollback/20261117000000_research_conversation_down.sql`을 사람이 실행하고 `supabase migration repair --status reverted 20261117000000 --linked`를 실행한다.
-- 보관 마이그레이션(`20261117010000_research_archive.sql`, 블록 A1b)은 `research_send`·`research_sweep`을 같은 시그니처로 `create or replace`하고 표 2개와 보조 함수 5개(`research_scrub_text`, `research_strip_data`, `research_body_text`, `research_archive_messages`, `research_archive_put`)를 더한다. 원격 적용은 이용자 허락(B15) 뒤다. 시험은 `tests/unit/sql/researchArchiveSql.test.ts`. 되돌리기: `supabase/rollback/20261117010000_research_archive_down.sql`을 한 번에 실행하고 `supabase migration repair --status reverted 20261117010000 --linked`를 실행한다(두 표의 데이터, 영구 리뷰 포함, 가 사라지니 먼저 내려받는다).
+- 보관 마이그레이션(`20261117010000_research_archive.sql`, 블록 A1b)은 `research_send`·`research_sweep`을 같은 시그니처로 `create or replace`하고 표 2개와 보조 함수 6개(`research_scrub_text`, `research_final_review`, `research_strip_data`, `research_body_text`, `research_archive_messages`, `research_archive_put`)를 더한다. 원격 적용은 이용자 허락(B15) 뒤다. 시험은 `tests/unit/sql/researchArchiveSql.test.ts`. 되돌리기: `supabase/rollback/20261117010000_research_archive_down.sql`을 한 번에 실행하고 `supabase migration repair --status reverted 20261117010000 --linked`를 실행한다(두 표의 데이터, 영구 리뷰 포함, 가 사라지니 먼저 내려받는다).
 - 휴대폰 사진 링크(`photo_links`)는 11/18 뒤 마이그레이션 2(`20261119000000_photo_links.sql`)에서 더한다.
 
 ### 8.4 플로우 A(①②)

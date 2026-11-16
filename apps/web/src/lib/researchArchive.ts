@@ -185,6 +185,16 @@ function trimmed(text: string): string {
   return text.replace(/^\s+|\s+$/g, "");
 }
 
+/**
+ * 영구 리뷰에 들어갈 최종 문단(SQL `research_final_review`). 세션 리뷰를 쓰고, 공백뿐이면 보내는 결과의
+ * 후보 1 가이드(= 리뷰 문단)를 쓴다. 가려야 할 글은 가리고 1,000자로 자른다. 둘 다 비면 빈 글.
+ */
+export function finalReview(reviewText: string | undefined, candidates: unknown[]): string {
+  const final = trimmed(scrubText((reviewText ?? "").slice(0, REVIEW_TEXT_MAX)));
+  if (final !== "" || !isRecord(candidates[0])) return final;
+  return trimmed(scrubText(str(candidates[0].guide).slice(0, REVIEW_TEXT_MAX)));
+}
+
 /** 보내는 순간 만들 두 기록. 리뷰 문단이 비어 있으면 review는 null이다(영구 표에 넣지 않는다). */
 export function buildArchive(
   source: ArchiveSource,
@@ -193,11 +203,7 @@ export function buildArchive(
   const { session } = source;
   const createdAt = new Date(source.now).toISOString();
   const verified = session.purchase === "bought" && source.photoCount > 0;
-  let final = trimmed(scrubText((session.review.text ?? "").slice(0, REVIEW_TEXT_MAX)));
-  // 세션 리뷰가 공백뿐이면 보내는 결과의 후보 1 가이드(= 리뷰 문단)를 쓴다(SQL과 같다).
-  if (final === "" && isRecord(source.candidates[0])) {
-    final = trimmed(scrubText(str(source.candidates[0].guide).slice(0, REVIEW_TEXT_MAX)));
-  }
+  const final = finalReview(session.review.text, source.candidates);
   const lastDraft = [...source.messages]
     .filter((message) => message.role === "ai" && message.tag === "review")
     .sort((a, b) => b.seq - a.seq)[0];
@@ -232,11 +238,12 @@ export function buildArchive(
   const firstName = isRecord(source.candidates[0]) ? str(source.candidates[0].name) : "";
   const model = scrubText((session.slots.model?.value ?? "").trim() || firstName);
 
-  const confirmedAt = session.slots.benefits?.at ?? createdAt;
+  const confirmedAt = scrubText(session.slots.benefits?.at ?? createdAt).slice(0, 40);
   const benefitLinks: BenefitLink[] = [];
   const links = Array.isArray(session.slots.benefits?.links) ? session.slots.benefits.links : [];
   links.slice(0, BENEFIT_LINKS_MAX).forEach((url) => {
-    if (typeof url !== "string" || !/^https?:\/\//.test(url)) return;
+    // 주소에 전화번호·이메일·data URL이 섞여 있으면(가리면 주소가 깨지므로) 그 링크는 영구 기록에 넣지 않는다.
+    if (typeof url !== "string" || !/^https?:\/\//.test(url) || scrubText(url) !== url) return;
     let card: Record<string, unknown> | null = null;
     for (const message of [...source.messages].sort((a, b) => b.seq - a.seq)) {
       if (message.body.kind !== "benefits" || !Array.isArray(message.body.items)) continue;
