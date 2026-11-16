@@ -151,16 +151,37 @@ function unsafe(text: string, material: readonly string[]): boolean {
   return hasForbidden(text) || unknownModelTokens(text, material).length > 0;
 }
 
+const compactKey = (value: string) => value.normalize("NFKC").toUpperCase().replace(/[^A-Z0-9가-힣]/g, "");
+
+/**
+ * 이름이 검색 인용(evidence)에 근거가 있나. 숫자가 든 토큰(영문 기종 번호뿐 아니라 "버즈3" 같은 한글+숫자도)은 모두 인용에 있어야 한다.
+ * 첫 토큰(보통 브랜드)과 브랜드·품목(generic) 토큰을 뺀 나머지 토큰도 모두 인용에 있어야 하고, 남는 토큰이 없으면 첫 토큰이 인용에 있어야 한다.
+ */
+function nameInEvidence(name: string, evidence: readonly string[], generic: readonly string[]): boolean {
+  const known = compactKey(evidence.join(" "));
+  const skip = compactKey(generic.join(" "));
+  const tokens = name
+    .normalize("NFKC")
+    .split(/[\s|·,/()]+/)
+    .map((token) => ({ raw: token, key: compactKey(token) }))
+    .filter((token) => token.key.length >= 2);
+  if (tokens.length === 0) return false;
+  if (tokens.some((token) => /\d/.test(token.raw) && !known.includes(token.key))) return false;
+  const rest = tokens.slice(1).filter((token) => !skip.includes(token.key));
+  return rest.length > 0 ? rest.every((token) => known.includes(token.key)) : known.includes(tokens[0]!.key);
+}
+
 /**
  * 같이 고민한 제품 목록. 이름은 금지 표현이 없고 자료(검색 인용의 제목·주소와 요청·기종)에 없는 기종 이름이 없어야 하고,
  * 주소는 검색 결과에 있던 https 주소여야 한다(없으면 버린다). 특징은 금지 표현·없는 기종 이름이 든 문장을 버리고 60자로 자른다.
- * exclude는 뺄 이름(이미 고른 기종).
+ * exclude는 뺄 이름(이미 고른 기종). evidence가 있으면 이름은 그 인용(제목·주소)에 근거가 있어야 한다(generic은 브랜드·품목). 같은 주소를 쓰는 둘째 제품은 버린다(주소는 그 제품의 인용 페이지여야 한다).
  */
 export function cleanProducts(
   raw: unknown,
   allowed: AllowedUrls,
   material: readonly string[],
   exclude: readonly string[] = [],
+  evidence?: { texts: readonly string[]; generic: readonly string[] },
 ): ProductItem[] {
   const seen = new Set(exclude.map(nameKey).filter(Boolean));
   const usedUrls = new Set<string>();
@@ -169,17 +190,18 @@ export function cleanProducts(
     if (items.length >= PRODUCTS_MAX) break;
     const name = oneLine(entry.name);
     if (name.length < 2 || charCount(name) > NAME_MAX || unsafe(name, material) || seen.has(nameKey(name))) continue;
+    if (evidence && !nameInEvidence(name, evidence.texts, evidence.generic)) continue;
     const key = urlKey(oneLine(entry.pageUrl ?? entry.url));
     const source = key === null ? undefined : allowed.get(key);
     if (key === null || source === undefined || charCount(source) > URL_MAX) continue;
+    if (usedUrls.has(key)) continue;
     seen.add(nameKey(name));
-    const shared = usedUrls.has(key);
     usedUrls.add(key);
     const feature = oneLine(entry.feature ?? entry.note);
     const sentences = feature
       .split(/(?<=[.!?。])\s+/)
       .filter((sentence) => sentence !== "" && !unsafe(sentence, [...material, name]));
-    items.push({ name, feature: clip(sentences.join(" "), FEATURE_MAX), pageUrl: shared ? "" : source });
+    items.push({ name, feature: clip(sentences.join(" "), FEATURE_MAX), pageUrl: source });
   }
   return items;
 }
@@ -475,8 +497,9 @@ export async function searchProducts(
     });
     const raw = parseJsonObject(result.text)?.items;
     // 이름 대조 자료는 검색 인용(제목·주소)과 브랜드·품목뿐이다(design 4.8 "자료 = 인용"). 요청 글과 고른 기종은 넣지 않는다.
-    const material = [context.brand ?? "", context.item ?? "", ...result.titles, ...result.allowed.values()];
-    const items = cleanProducts(raw, result.allowed, material, [model]);
+    const generic = [context.brand ?? "", context.item ?? ""];
+    const texts = [...result.titles, ...result.allowed.values()];
+    const items = cleanProducts(raw, result.allowed, [...generic, ...texts], [model], { texts, generic });
     const citations = [...result.allowed.values()];
     return items.length > 0
       ? { data: items, ai: "ok", upstream: null, usage, citations }

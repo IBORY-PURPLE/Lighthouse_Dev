@@ -93,7 +93,7 @@ describe("cleanProducts: 같이 고민한 제품 이름·특징·주소 검사",
     ]);
   });
 
-  it("이미 고른 기종은 빼고, 이름이 겹치면 한 번만, 같은 주소를 쓰는 둘째 제품은 주소를 비운다", () => {
+  it("이미 고른 기종은 빼고, 이름이 겹치면 한 번만, 같은 주소를 쓰는 둘째 제품은 버린다", () => {
     const items = cleanProducts(
       [
         { name: "소니 WH-1000XM4", feature: "이미 고른 기종", pageUrl: "https://www.bose.co.kr/qc45" },
@@ -107,8 +107,26 @@ describe("cleanProducts: 같이 고민한 제품 이름·특징·주소 검사",
     );
     expect(items.map((item) => [item.name, item.pageUrl])).toEqual([
       ["보스 헤드셋", "https://www.bose.co.kr/qc45"],
-      ["젠하이저 헤드셋", ""],
     ]);
+  });
+
+  it("evidence가 있으면 이름은 인용에 근거가 있어야 한다(한글+숫자 이름과 인용에 없는 이름은 버린다)", () => {
+    const texts = ["삼성 갤럭시 버즈2 프로 | 삼성닷컴", "https://www.samsung.com/sec/buds2-pro/", "소니 WH-CH720N 무선 헤드폰"];
+    const generic = ["Sony", "헤드폰"];
+    const urls = ["https://a.example.com/1", "https://a.example.com/2", "https://a.example.com/3", "https://a.example.com/4"];
+    const items = cleanProducts(
+      [
+        { name: "갤럭시 버즈2 프로", feature: "작아요", pageUrl: urls[0] },
+        { name: "갤럭시 버즈3", feature: "새 기종이에요", pageUrl: urls[1] },
+        { name: "소니 헤드폰 플래그십", feature: "지어낸 이름", pageUrl: urls[2] },
+        { name: "소니 WH-CH720N", feature: "가벼워요", pageUrl: urls[3] },
+      ],
+      allowedOf(urls),
+      [...generic, ...texts],
+      [],
+      { texts, generic },
+    );
+    expect(items.map((item) => item.name)).toEqual(["갤럭시 버즈2 프로", "소니 WH-CH720N"]);
   });
 
   it("특징에서 가격·재고 문장과 없는 기종 이름 문장은 버리고 60자로 자르며, 5개까지만 남긴다", () => {
