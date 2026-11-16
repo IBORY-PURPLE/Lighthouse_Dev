@@ -145,3 +145,56 @@ describe("checkAnswer", () => {
     expect(checkAnswer(0, "헤드셋".padEnd(201, "가"))).toBe(STATUS.answerTooLong);
   });
 });
+
+describe("AI 대화 단계(chatting)", () => {
+  const initial = createInitialFlow("speech");
+  const answers = { product: "소니 헤드셋", budget: "10만 원 이하", condition: "새 제품" };
+
+  it("intro → chatting → (동의) summary: 정리된 요청이 답으로 들어가고 요약 문구가 나온다", () => {
+    const chatting = requestFlowReducer(initial, { type: "startChat" });
+    expect(chatting).toMatchObject({ step: "chatting", status: "" });
+    const summary = requestFlowReducer(chatting, { type: "chatDone", answers });
+    expect(summary).toMatchObject({
+      step: "summary",
+      answers,
+      status: STATUS.summary("소니 헤드셋", "10만 원 이하", "새 제품"),
+    });
+  });
+
+  it("chatDone 뒤에는 기존 접수 흐름이 그대로 이어진다(register → registered)", () => {
+    let model = requestFlowReducer(initial, { type: "startChat" });
+    model = requestFlowReducer(model, { type: "chatDone", answers });
+    model = requestFlowReducer(model, { type: "register", clientRequestId: "c-1" });
+    expect(model).toMatchObject({ step: "registering", clientRequestId: "c-1" });
+    model = requestFlowReducer(model, { type: "registered", requestId: "r-1", queueNumber: 4 });
+    expect(model).toMatchObject({ step: "queued", queued: { requestId: "r-1", queueNumber: 4 } });
+  });
+
+  it("접수가 실패하면 요약으로 돌아와 같은 요청·같은 clientRequestId로 다시 보낼 수 있다", () => {
+    let model = requestFlowReducer(initial, { type: "startChat" });
+    model = requestFlowReducer(model, { type: "chatDone", answers });
+    model = requestFlowReducer(model, { type: "register", clientRequestId: "c-1" });
+    model = requestFlowReducer(model, { type: "registerFailed", status: STATUS.registerFailed });
+    expect(model).toMatchObject({ step: "summary", answers, clientRequestId: "c-1" });
+  });
+
+  it("기본 질문으로 하기는 intro와 chatting에서 질문 1로 간다", () => {
+    expect(requestFlowReducer(initial, { type: "useBasic" })).toMatchObject({
+      step: "asking",
+      question: 0,
+    });
+    const chatting = requestFlowReducer(initial, { type: "startChat" });
+    expect(requestFlowReducer(chatting, { type: "useBasic" })).toMatchObject({
+      step: "asking",
+      question: 0,
+    });
+  });
+
+  it("다른 단계에서는 이 액션들을 무시한다", () => {
+    const asking = requestFlowReducer(initial, { type: "start" });
+    expect(requestFlowReducer(asking, { type: "startChat" })).toBe(asking);
+    expect(requestFlowReducer(asking, { type: "chatDone", answers })).toBe(asking);
+    expect(requestFlowReducer(asking, { type: "useBasic" })).toBe(asking);
+    expect(requestFlowReducer(initial, { type: "chatDone", answers })).toBe(initial);
+  });
+});

@@ -78,7 +78,7 @@ async function openUserScreen(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
   await installFakeSpeech(page);
-  await page.goto("/");
+  await page.goto("/?basic=1");
 }
 
 /** 플로우 A로 세 질문에 답하고(질문 1 = sentence) 요약에서 매칭을 요청한다. */
@@ -270,7 +270,7 @@ test.describe("접수 실패 안내", () => {
       route.fulfill({ status: 401, json: { ok: false, error: "unauthorized" } }),
     );
     await installFakeSpeech(page);
-    await page.goto("/");
+    await page.goto("/?basic=1");
     await hearAndConfirm(page, PASS_SENTENCE);
 
     await expect(status(page)).toHaveText(

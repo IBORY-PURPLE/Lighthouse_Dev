@@ -67,7 +67,7 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
 
   await installFakeSpeech(page);
 
-  const entered = await page.goto("/");
+  const entered = await page.goto("/?basic=1");
   expect(entered?.status(), "첫 화면").toBe(200);
   expect(new URL(page.url()).pathname).toBe("/");
   await shot("user-first-screen");

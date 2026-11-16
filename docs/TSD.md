@@ -20,8 +20,8 @@ v2.1(2026-11-13): 봉사자 ③④⑤를 리서치 챗 한 화면으로 합침. 
 ### 플로우 A: 이용자 요청(①②)
 
 1. 이용자가 아이폰에서 VoiceOver를 켜고 이용자 주소(`/`)를 연다.
-2. 질문 3개(제품, 예산, 새 제품·중고)에 차례로 말하거나 입력창에 받아쓴다. 답마다 확인을 거친다. 답하는 동안 기기 밖으로 아무것도 보내지 않는다.
-3. 요약을 듣고 "봉사자 매칭 요청"을 누르면 요청이 대기열에 들어가고 대기번호를 듣는다(`waiting`).
+2. 기본은 AI 대화다(§8.9). AI가 한 번에 질문 하나씩 제품·예산·새 제품 또는 중고를 묻고, 이용자는 말하거나 글자로 답한다. AI가 요청을 1~2문장으로 정리해 "이 내용으로 구매 요청을 등록할까요?"라고 물으면 이용자가 동의한다(동의 전에는 등록하지 않는다). 동의하면 곧바로 3으로 간다. AI가 안 되면 "기본 질문으로 하기"로 고정 질문 3개(제품, 예산, 새 제품·중고)에 답한다(`/?basic=1`로 바로 열 수도 있다). 고정 질문은 답마다 확인을 거치고, 답하는 동안 기기 밖으로 아무것도 보내지 않는다. AI 대화는 답할 때마다 대화 내용이 AI 서버로 간다.
+3. 고정 질문이면 요약을 듣고 "봉사자 매칭 요청"을 누르고, AI 대화면 동의가 그 요청이다. 요청이 대기열에 들어가고 대기번호를 듣는다(`waiting`).
 4. 앱을 닫았다 다시 열면 대기번호와 상태를 다시 듣는다.
 
 ### 플로우 B: 봉사자 수행(②~⑥)
@@ -120,7 +120,8 @@ supabase/                                   Supabase CLI 설정, link됨(.temp/�
   config.toml
   migrations/<시각>_<이름>.sql              표, SQL 함수. 추가만 한다(§11)
 apps/web/                                   Vercel Root Directory
-  src/app/page.tsx                          이용자(플로우 A, ⑦)
+  src/app/page.tsx                          이용자(플로우 A, ⑦). 화면은 components/UserHome.tsx, 기본 AI 대화, ?basic=1은 고정 질문
+  src/app/api/requests/converse/route.ts    이용자 AI 대화 한 턴(§8.9)
   src/app/volunteer/page.tsx                봉사자 대기열(②). ② 전에는 v1 시연 화면
   src/app/volunteer/requests/[requestId]/page.tsx   리서치 챗(③④⑤) → ⑥, 완료면 보낸 결과
   src/app/enter/route.ts
@@ -129,9 +130,11 @@ apps/web/                                   Vercel Root Directory
   src/app/api/volunteer/queue/route.ts
   src/app/api/volunteer/requests/[requestId]/{route,claim/route,release/route,result/route}.ts
   src/app/api/volunteer/research/route.ts   리서치 AI(§8.7)
-  src/components/{SpeechInput,StatusRegion,DemoHandoff,VolunteerChat}.tsx
+  src/components/{SpeechInput,StatusRegion,DemoHandoff,VolunteerChat,UserHome,AiConversation}.tsx
   src/components/{ResearchChat,ResearchCards,ResearchSummary,SentView}.tsx   리서치 챗 화면, 카드, 보내기 전 확인, 보낸 결과
   src/lib/{rateLimit,llm,prompt,chat,speech,parseRequest,matchHandoff,volunteers,answerRules}.ts
+  src/lib/{converse,aiChat,tts}.ts          이용자 AI 대화: 요청 형식·상한·호출, 화면 상태, 읽어 주기(§8.9)
+  src/lib/{converseModel,converseMock}.ts   서버: 모델 출력 해석·금지 표현 검사, 시험용 가짜 대화
   src/lib/requestStore.ts                   서버 전용. 저장소 인터페이스, 메모리 구현, Supabase 구현
   src/lib/volunteerView.ts                  화면·서버 공용 타입(VolunteerRequestView 등)
   src/lib/research.ts                       화면·서버 공용. 카드 순서·필수 여부 상수, 상태, 구매 인증, 화면 문구
@@ -368,6 +371,26 @@ v1 계약에 선택 필드만 더한다. 봉사자 화면에서만 호출한다.
 ### 8.8 (v2.1에서 없앰) ④ `extract-text`, ④⑤ `summarize`
 
 v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자 읽기)와 §8.8 `POST /api/volunteer/summarize`(`SummaryDraft` 요약 초안, `evidenceCheck` 근거 대조), `GET /api/volunteer/requests/{id}/candidates`는 v2.1에서 없앴다. 계약 원문은 이 파일의 v2.1 이전 판(git 기록)에 있다. 그중 "가격·재고·할인은 AI 출력에 넣지 않는다"(11/9 계획 정해 줄 것 2의 추천안)는 리서치 AI 출력 검사(§9.1)로 이어진다.
+
+### 8.9 플로우 A AI 대화 `POST /api/requests/converse`
+
+apps/user-voice-ui(PR #40)의 음성 대화를 옮겨 온 것이다. 서버는 대화를 저장하지 않는다(무상태): 브라우저가 대화 기록 전체를 한 턴마다 보낸다. 서버리스는 인스턴스가 바뀌면 메모리 세션이 사라지기 때문이다.
+
+| 항목 | 값 |
+|---|---|
+| 요청 | `{messages: [{role, content}, ...]}` 빈 배열이면 첫 질문. 아니면 `assistant`로 시작해 `assistant`·`user`가 번갈아 나오고 `user`로 끝난다 |
+| 상한 | 30개, 이용자 한 턴 200자, AI 한 턴 400자, 합계 6000자, 본문 16KB. 넘으면 400 `too_long`, 모양이 틀리면 400 `invalid_request` |
+| 성공 | 200 `{reply, status, request?}`. `status`는 `asking`·`confirming`·`done`. `request`는 `done`일 때만 `{product, budget, condition}`이고 `POST /api/requests` 본문과 같은 모양이다. 예산·조건이 비면 "정하지 않음"·"상관없음" |
+| 실패 | 429 `rate_limited`(주소당 분당 12회, Retry-After), 503 `not_configured`, 502 `llm_failed`(모델 실패, 시간 초과, 형식 오류, 금지 표현) |
+| 호출 | `llm.ts`의 `converseTurn`. `gpt-6-luna`, `reasoning_effort: "none"`, JSON 모드, `max_completion_tokens: 400`, 28초 마감. `LLM_MODE=mock`이면 `converseMock.ts`의 고정 대화 |
+| 해석 | `converseModel.ts`의 `interpretTurn`. 모델 글에서 JSON을 꺼내 검사한다 |
+
+- 지시문은 `prompt.ts`의 `CONVERSE_INSTRUCTIONS`. 한 번에 질문 하나, 예시·선택지 나열 금지, 충분하면 정리해 등록 확인, 동의 전 `done` 금지, 가격·재고를 확인한 것처럼 말하지 않기는 PR #40 지시문 그대로다. 접수가 받는 품목이 헤드셋뿐이라(`parseRequest`) 그 제약 한 줄을 더했다.
+- 금지 표현: 답과 요청 칸에서 이용자가 말하지 않은 금액·재고 단정·모델명이 나오면(`answerRules.ts`의 `forbiddenClaims`) 502로 막는다. 이용자가 말한 예산과 상품 이름은 되풀이해도 된다.
+- `done`은 바로 앞 AI 문장이 등록 확인 질문일 때만 받는다. 품목이 헤드셋이 아니면 `done` 대신 "지금은 헤드셋 요청만 받을 수 있습니다"를 되묻는다.
+- 화면: `UserHome`(기본 AI 대화, `/?basic=1`이면 고정 질문)과 `AiConversation`. 실패하면 "다시 시도"와 "기본 질문으로 하기"가 나온다. `done`이면 `registerRequest`로 바로 접수하고 실패하면 요약 단계에서 다시 누른다. 소리 내어 읽어 주기(`tts.ts`)는 끌 수 있다(화면 낭독기와 겹치지 않게).
+- 로그에는 상태 코드와 소요 시간만 남긴다(이용자 문장·AI 답 제외).
+- 확인하지 못한 것: 실제 모델이 JSON 형식과 금지 규칙을 지키는지(실호출 전), 실기기 음성·VoiceOver 동작.
 
 ### 리서치 챗 사진 축소(브라우저)
 

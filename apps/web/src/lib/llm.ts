@@ -1,6 +1,12 @@
 import "server-only";
 import OpenAI, { APIError } from "openai";
-import { buildSystemPrompt, type ChatContext } from "@/lib/prompt";
+import type { ChatTurn } from "@/lib/converse";
+import { mockConverseText } from "@/lib/converseMock";
+import {
+  buildSystemPrompt,
+  CONVERSE_INSTRUCTIONS,
+  type ChatContext,
+} from "@/lib/prompt";
 
 // 답변 스트림. TSD §9. 제품 코드는 streamAnswer만 쓴다.
 
@@ -93,6 +99,53 @@ export async function* streamAnswer(
     throw toLlmError(error);
   }
 }
+
+/** 이용자 대화 한 턴의 출력 상한. JSON 한 덩어리와 400자 안쪽 문장이면 넉넉하다. */
+export const CONVERSE_MAX_COMPLETION_TOKENS = 400;
+
+/**
+ * 이용자 AI 대화 한 턴. 모델이 낸 JSON 글(해석 전)을 돌려준다. 실패는 LlmError로 던진다.
+ * 글자 없이 끝난 답이나 상한에 잘린 답은 실패로 친다(잘린 JSON은 해석할 수 없다).
+ */
+export async function converseTurn(
+  turns: ChatTurn[],
+  signal?: AbortSignal,
+): Promise<string> {
+  if (getLlmMode() === "mock") return mockConverseText(turns);
+
+  try {
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      maxRetries: 1,
+      timeout: 20_000,
+    });
+    const completion = await client.chat.completions.create(
+      {
+        model: LLM_MODEL,
+        max_completion_tokens: CONVERSE_MAX_COMPLETION_TOKENS,
+        reasoning_effort: "none",
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: CONVERSE_INSTRUCTIONS },
+          { role: "user", content: CONVERSE_START },
+          ...turns,
+        ],
+      },
+      { signal },
+    );
+    const choice = completion.choices[0];
+    const text = choice?.message?.content ?? "";
+    if (!text.trim() || choice?.finish_reason === "length") {
+      throw new LlmError("failed");
+    }
+    return text;
+  } catch (error) {
+    throw toLlmError(error);
+  }
+}
+
+/** 첫 AI 문장 앞에 붙는 시작 신호. 대화 기록(turns)은 AI 문장부터 시작한다. */
+const CONVERSE_START = "대화를 시작해 주세요. 첫 질문을 해주세요.";
 
 const MOCK_CHUNK_DELAY_MS = 40;
 
