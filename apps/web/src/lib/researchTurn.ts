@@ -59,6 +59,10 @@ const SLOT_VALUE_LIMIT = 120;
 const EDIT_MAX = 200;
 const URL_MAX = 500;
 const BODY_BYTES_MAX = 8000;
+/** 혜택 링크를 [확인했어요]로 남기는 수. 리뷰·결과에는 이 가운데 2개까지 들어간다. */
+const BENEFIT_LINKS_MAX = 4;
+const BENEFIT_LINK_VALUE = "혜택 링크를 확인했어요";
+const BENEFIT_LINK_CHECKED = "혜택 링크를 확인한 것으로 적었어요.";
 
 export const QUICK_IDS = [
   "purchase.bought",
@@ -653,13 +657,22 @@ function lastQuestionSlot(pending: ResearchView["pending"]): string | null {
   return typeof slot === "string" ? slot : null;
 }
 
-function shownLinks(pending: ResearchView["pending"]): { url: string; slot: SlotKey }[] {
-  const raw = pending.shownLinks;
+function readLinks(raw: unknown): { url: string; slot: SlotKey }[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((entry) => {
     if (!isRecord(entry) || typeof entry.url !== "string" || typeof entry.slot !== "string") return [];
     return isSlotKey(entry.slot) ? [{ url: entry.url, slot: entry.slot }] : [];
   });
+}
+
+/** 참고 글 링크 카드가 쓰는 목록(턴이 쓴다). */
+function refsLinks(pending: ResearchView["pending"]): { url: string; slot: SlotKey }[] {
+  return readLinks(pending.shownLinks);
+}
+
+/** 화면이 [확인했어요]를 누를 수 있는 링크 전부. 혜택 링크(shownBenefitLinks)는 검색 라우트만 쓰고, 두 목록은 키가 달라 서로 덮어쓰지 않는다. */
+function shownLinks(pending: ResearchView["pending"]): { url: string; slot: SlotKey }[] {
+  return [...refsLinks(pending), ...readLinks(pending.shownBenefitLinks)];
 }
 
 /** 참고 글 칸에 적는 짧은 표시(호스트와 경로, 200자 이하). */
@@ -813,7 +826,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
           body: { kind: "link", url, note: LINK_NOTE },
           ai: "none",
         });
-        const known = shownLinks(session.pending).filter((entry) => entry.url !== url);
+        const known = refsLinks(session.pending).filter((entry) => entry.url !== url);
         pendingPatch.shownLinks = [...known, { url, slot: "refs" }].slice(-5);
         hold = true;
         break;
@@ -950,14 +963,30 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
     case "link_check": {
       messages.push(volunteerMessage("확인했어요"));
-      const entry = shownLinks(session.pending).find((link) => link.url === input.url);
-      if (!entry || entry.slot !== "refs") {
+      // 같은 주소가 참고 글 카드와 혜택 카드에 함께 보일 수 있다. 어느 카드를 눌렀는지는 알 수 없으므로 보인 칸 모두에 기록한다.
+      const slots = new Set(shownLinks(session.pending).filter((link) => link.url === input.url).map((link) => link.slot));
+      const toBenefits = slots.has("benefits");
+      const toRefs = slots.has("refs");
+      if (!toBenefits && !toRefs) {
         messages.push(aiNotice("확인할 링크를 찾지 못했어요."));
         hold = true;
       } else {
-        // 칸 값은 200자 이하라서 200자를 넘는 주소는 줄여 적는다. 전체 주소는 links에만 둔다.
-        slotsPatch.refs = { value: [...input.url].length <= SLOT_VALUE_MAX ? input.url : linkLabel(input.url), links: [input.url], status: "confirmed", by: "volunteer" };
-        messages.push(aiNotice(LINK_CHECKED));
+        if (toBenefits) {
+          // 혜택 카드 [확인했어요]: 경험 칸의 값은 그대로 두고 확인한 링크만 더한다(리뷰·결과에는 2개까지 들어간다). 다음 질문은 만들지 않는다.
+          const before = session.slots.benefits;
+          const links = [...new Set([...(before?.links ?? []), input.url])].slice(-BENEFIT_LINKS_MAX);
+          slotsPatch.benefits = before
+            ? { ...before, links }
+            : { value: BENEFIT_LINK_VALUE, links, status: "confirmed", by: "volunteer" };
+          messages.push(aiNotice(BENEFIT_LINK_CHECKED));
+        }
+        if (toRefs) {
+          // 칸 값은 200자 이하라서 200자를 넘는 주소는 줄여 적는다. 전체 주소는 links에만 둔다.
+          slotsPatch.refs = { value: [...input.url].length <= SLOT_VALUE_MAX ? input.url : linkLabel(input.url), links: [input.url], status: "confirmed", by: "volunteer" };
+          messages.push(aiNotice(LINK_CHECKED));
+        } else {
+          hold = true;
+        }
       }
       break;
     }

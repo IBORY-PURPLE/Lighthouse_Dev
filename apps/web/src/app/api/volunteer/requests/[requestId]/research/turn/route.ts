@@ -3,6 +3,7 @@ import { createRateLimiter } from "@/lib/rateLimit";
 import { getRequestStore } from "@/lib/requestStore";
 import {
   failWith,
+  followUpOf,
   guardResponse,
   labelFromMessages,
   logTail,
@@ -31,16 +32,8 @@ const MAX_BODY_BYTES = 16 * 1024;
 /** AI 한 번의 마감(design.md 3.2). */
 const AI_DEADLINE_MS = 15_000;
 
-/** 방금 만든 질문이 기종 질문이면 화면이 이어서 웹 검색(model)을 부르게 알린다. A3 이후 alts·benefits도 여기서 알린다. */
-function followUpOf(messages: readonly ResearchMessage[]) {
-  const asksModel = messages.some(
-    (message) => message.role === "ai" && message.tag === "question" && message.slot === "model",
-  );
-  return asksModel ? { search: "model" as const } : null;
-}
-
-function turnBody(response: TurnResponse, ai: AiLabel) {
-  const followUp = followUpOf(response.messages);
+function turnBody(response: TurnResponse, ai: AiLabel, input: { type: string; slot?: string }) {
+  const followUp = followUpOf(response.messages, response.session.slots, input);
   return {
     version: response.version,
     lastSeq: response.lastSeq,
@@ -175,7 +168,7 @@ export async function POST(
         case "duplicate": {
           const label = labelFromMessages(begun.response.messages);
           tail = logTail({ kind: "turn", ai: label });
-          return succeed(turnBody(begun.response, label));
+          return succeed(turnBody(begun.response, label, input));
         }
         case "pending":
           return succeed({ pending: true }, 202);
@@ -249,7 +242,7 @@ export async function POST(
               up: label === "fallback" ? run.upstream : null,
               usage: run.usage,
             });
-            return succeed(turnBody(applied.response, label));
+            return succeed(turnBody(applied.response, label, input));
           }
           case "stale":
             return failWith(409, "stale", { version: applied.version });

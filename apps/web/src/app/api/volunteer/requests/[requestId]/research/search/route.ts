@@ -4,8 +4,19 @@ import { getRequestStore } from "@/lib/requestStore";
 import { benefitShortcuts, subjectOf, type ResearchResponse } from "@/lib/research";
 import { answerResearch, fallbackResponse } from "@/lib/researchAi";
 import { guardResponse, logTail, readJsonBody, type AiLabel } from "@/lib/researchApi";
+import {
+  ALTS_CACHE_KEY,
+  BENEFITS_CACHE_KEY,
+  BENEFITS_UNITS,
+  benefitLinkEntries,
+  benefitMessages,
+  fixedProducts,
+  productsMessages,
+  searchBenefits,
+  searchProducts,
+} from "@/lib/researchSearch";
 import { capsFromEnv, type NextMessage } from "@/lib/researchSession";
-import { getResearchStore } from "@/lib/researchStore";
+import { getResearchStore, type ResearchActor } from "@/lib/researchStore";
 import { fitMessage } from "@/lib/researchTurn";
 import {
   CAP_DAILY,
@@ -18,8 +29,9 @@ import {
 } from "@/lib/researchTurnText";
 import { fail, isUuid, runVolunteerRoute, succeed } from "@/lib/volunteerApi";
 
-// 웹 검색 한 번(design.md 3.2, 4.8). 11/18 핵심에서는 kind=model(기종 후보 칩)만 있다. 질문 4·6의 검색은 A3에서 더한다.
+// 웹 검색 한 번(design.md 3.2, 4.8, 4.9). kind=model(기종 후보 칩), alts(같이 고민한 제품 목록), benefits(혜택 1회차, 호출 3번).
 // version을 올리지 않고 메시지만 더한다. 캐시 적중과 처리 중(202)은 세지 않는다.
+// 검색하는 동안 GET의 pending.search = {kind}가 보이고(화면의 생각 중 표시), 끝나면 지운다.
 // 실패하면 고정 후보·쇼핑몰 바로가기로 이어 가므로 AI가 죽어도 대화는 막히지 않는다.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +44,12 @@ const MAX_BODY_BYTES = 2 * 1024;
 const AI_DEADLINE_MS = 50_000;
 const MODEL_CACHE_KEY = "model";
 const CHIP_URL_MAX = 500;
+type SearchKind = "model" | "alts" | "benefits";
+const CACHE_KEY: Record<SearchKind, string> = { model: MODEL_CACHE_KEY, alts: ALTS_CACHE_KEY, benefits: BENEFITS_CACHE_KEY };
+const UNITS: Record<SearchKind, number> = { model: 1, alts: 1, benefits: BENEFITS_UNITS };
+
+/** 혜택 경험 칸이 정해졌나(채움·확인·건너뛰기). 건너뛰기는 "혜택은 없었어요"라는 답이다. */
+const benefitsDecided = (status: string | undefined) => status === "filled" || status === "confirmed" || status === "skipped";
 
 type ModelBody = Extract<ResearchResponse, { items: unknown }>;
 
@@ -81,8 +99,11 @@ export async function POST(
       if (!raw.ok) return fail(raw.status, raw.error);
       const value = raw.value as { sessionId?: unknown; kind?: unknown } | null;
       const sessionId = typeof value?.sessionId === "string" ? value.sessionId : "";
-      // 11/18 핵심은 model만이다. 다른 종류는 A3에서 더한다.
-      if (!isUuid(sessionId) || value?.kind !== "model") return fail(400, "invalid_request");
+      // refs·link와 혜택 2회차는 11/18 뒤(P4)다.
+      const kind: SearchKind | null =
+        value?.kind === "model" || value?.kind === "alts" || value?.kind === "benefits" ? value.kind : null;
+      if (!isUuid(sessionId) || kind === null) return fail(400, "invalid_request");
+      tail = logTail({ kind, ai: "none" });
 
       const found = await getRequestStore().getForVolunteer(id, volunteerId);
       if (found.kind === "not_found") return fail(404, "not_found");
@@ -99,12 +120,23 @@ export async function POST(
       const caps = capsFromEnv();
 
       const store = getResearchStore();
-      const actor = { requestId: id, volunteerId, sessionId: sessionId.toLowerCase() };
+      const actor: ResearchActor = { requestId: id, volunteerId, sessionId: sessionId.toLowerCase() };
+      const cacheKey = CACHE_KEY[kind];
+
+      // 혜택 검색은 경험 칸이 정해진 뒤에만 한다(채움·확인·건너뛰기). 칸이 비어 있으면 검색 3단위를 쓰기 전에 돌려보낸다.
+      // begin은 사용량을 올리고 되돌릴 방법이 없어서 begin보다 먼저 읽는다. 세션이 바뀐 경우는 begin이 session_changed로 답한다.
+      if (kind === "benefits") {
+        const view = await store.open(id, volunteerId, 2_147_483_647);
+        if (view.outcome !== "ok") return guardResponse(view.outcome);
+        if (view.view.sessionId === actor.sessionId && !benefitsDecided(view.view.slots.benefits?.status)) {
+          return fail(409, "not_ready");
+        }
+      }
       const begun = await store.begin({
         ...actor,
         kind: "search",
-        cacheKey: MODEL_CACHE_KEY,
-        units: 1,
+        cacheKey,
+        units: UNITS[kind],
         caps: gate.allowed ? caps : { ...caps, searches: 0 },
       });
       if (!gate.allowed && (begun.outcome === "capped" || begun.outcome === "ok")) {
@@ -120,17 +152,26 @@ export async function POST(
       }
       if (begun.outcome === "capped") {
         // 한도에 닿으면 AI 없이 고정 후보와 바로가기만 보인다.
-        const body = fallbackResponse({ requestId: id, kind: "model" }, context) as ModelBody;
         const notice = begun.cap === "daily" ? CAP_DAILY : CAP_REQUEST;
-        const message = { ...modelMessage(body, subject, notice), ai: "capped" as const };
-        const added = await store.addMessage({
-          ...actor,
-          cacheKey: MODEL_CACHE_KEY,
-          messages: [message],
-          pending: { shownModels: body.items.map((item) => item.name) },
-          cacheState: "done",
-        });
-        tail = logTail({ kind: "model", ai: "capped", cap: begun.cap });
+        let messages: NextMessage[];
+        let pending: Record<string, unknown>;
+        if (kind === "model") {
+          const body = fallbackResponse({ requestId: id, kind: "model" }, context) as ModelBody;
+          messages = [{ ...modelMessage(body, subject, notice), ai: "capped" as const }];
+          pending = { shownModels: body.items.map((item) => item.name) };
+        } else if (kind === "alts") {
+          // 봉사자가 이미 고른 기종은 같이 고민한 제품에서 뺀다(capped 결과에는 세션이 없어 칸을 따로 읽는다).
+          const view = await store.open(id, volunteerId, 2_147_483_647);
+          const chosen = view.outcome === "ok" ? (view.view.slots.model?.value.trim() ?? "") : "";
+          const items = fixedProducts(context, chosen);
+          messages = productsMessages(items, "capped", notice);
+          pending = { shownAlts: items.map((item) => item.name) };
+        } else {
+          messages = benefitMessages([], "", subject, "capped", notice);
+          pending = {};
+        }
+        const added = await store.addMessage({ ...actor, cacheKey, messages, pending, cacheState: "done" });
+        tail = logTail({ kind, ai: "capped", cap: begun.cap });
         return added.outcome === "ok" ? succeed({ messages: added.messages, lastSeq: added.lastSeq }) : guardResponse(added.outcome);
       }
       if (begun.outcome !== "ok") {
@@ -144,31 +185,61 @@ export async function POST(
       // 새로 AI 검색을 부르는 이 순간에 센다. 위 확인과 사이에 다른 요청이 한도를 채웠으면 검색 중 표시만 지운다.
       const limit = checkSearchLimit(volunteerId);
       if (!limit.allowed) {
-        await store.addMessage({ ...actor, cacheKey: MODEL_CACHE_KEY, messages: [], cacheState: "clear" });
+        await store.addMessage({ ...actor, cacheKey, messages: [], cacheState: "clear" });
         return fail(429, "rate_limited", { "Retry-After": String(limit.retryAfterSeconds) });
       }
 
-      const outcome = await answerResearch(
-        { requestId: id, kind: "model" },
-        context,
-        // 브라우저 연결이 끊겨도 검색은 끝까지 하고 결과를 저장한다(이미 센 검색을 버리지 않고, 새로 고친 뒤 GET으로 보인다).
-        AbortSignal.timeout(AI_DEADLINE_MS),
-      );
-      const body = outcome.body as ModelBody;
-      const label: AiLabel = body.ai === "ok" ? "ok" : "fallback";
-      tail = logTail({
-        kind: "model",
-        ai: label,
-        up: outcome.upstream,
-        usage: outcome.usage,
-      });
-      const added = await store.addMessage({
+      // 화면이 생각 중 표시를 띄우고 폴링하도록 GET의 pending.search를 켠다(끝나면 마지막 쓰기에서 지운다).
+      // 시각(at)을 같이 적어 두어, 이 함수가 도중에 끊겨도 GET이 오래된 표시를 걸러 낸다.
+      const marked = await store.addMessage({
         ...actor,
-        cacheKey: MODEL_CACHE_KEY,
-        messages: [modelMessage(body, subject, null)],
-        pending: { shownModels: body.items.map((item) => item.name) },
-        cacheState: "done",
+        cacheKey: null,
+        messages: [],
+        pending: { search: { kind, at: Date.now() } },
       });
+      if (marked.outcome !== "ok") return guardResponse(marked.outcome);
+
+      // 브라우저 연결이 끊겨도 검색은 끝까지 하고 결과를 저장한다(이미 센 검색을 버리지 않고, 새로 고친 뒤 GET으로 보인다).
+      const signal = AbortSignal.timeout(AI_DEADLINE_MS);
+      const model = begun.session.slots.model?.value.trim() ?? "";
+      let messages: NextMessage[];
+      let pending: Record<string, unknown>;
+      if (kind === "model") {
+        const outcome = await answerResearch({ requestId: id, kind: "model" }, context, signal);
+        const body = outcome.body as ModelBody;
+        const label: AiLabel = body.ai === "ok" ? "ok" : "fallback";
+        tail = logTail({ kind, ai: label, up: outcome.upstream, usage: outcome.usage });
+        messages = [modelMessage(body, subject, null)];
+        pending = { shownModels: body.items.map((item) => item.name) };
+      } else if (kind === "alts") {
+        const run = await searchProducts(context, model, signal);
+        tail = logTail({ kind, ai: run.ai, up: run.upstream, usage: run.usage });
+        messages = productsMessages(run.data, run.ai);
+        // 카드에서 [같이 고민했어요]로 고르는 이름은 보인 목록(shownAlts)에 있어야 칸에 들어간다(chip 입력의 확인).
+        pending = { shownAlts: run.data.map((item) => item.name) };
+      } else {
+        const benefits = begun.session.slots.benefits;
+        const experience = benefits && benefits.status !== "skipped" ? benefits.value : "";
+        const run = await searchBenefits(context, { model, experience }, signal);
+        tail = logTail({ kind, ai: run.ai, up: run.upstream, usage: run.usage });
+        messages = benefitMessages(run.data, experience, model || subject, run.ai);
+        // 혜택 링크는 턴이 쓰는 shownLinks와 다른 키에 둔다(검색 중에 다른 턴이 참고 글 링크를 더해도 덮어쓰지 않는다). 갈래 3 x 3개 = 9개 전부 담는다.
+        pending = { shownBenefitLinks: benefitLinkEntries(run.data) };
+      }
+      let added;
+      try {
+        added = await store.addMessage({
+          ...actor,
+          cacheKey,
+          messages,
+          pending: { ...pending, search: null },
+          cacheState: "done",
+        });
+      } catch (error) {
+        // 저장에 실패하면(예: pending 크기 제약) 생각 중 표시와 처리 중 자리가 90초 남아 다시 부를 때마다 검색 단위를 또 쓴다. 자리를 닫고 다시 던진다.
+        await store.addMessage({ ...actor, cacheKey, messages: [], pending: { search: null }, cacheState: "clear" }).catch(() => undefined);
+        throw error;
+      }
       if (added.outcome !== "ok") return guardResponse(added.outcome);
       return succeed({ messages: added.messages, lastSeq: added.lastSeq });
     },

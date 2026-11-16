@@ -1,6 +1,7 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
-import { purchaseBadge, type ResearchMessage, type ResearchView } from "./researchSession";
+import { purchaseBadge, SEARCH_PENDING_MS, type ResearchMessage, type ResearchView } from "./researchSession";
+import { SKIP_LABEL } from "./researchTurnText";
 import type { GuardFail } from "./researchStore";
 import { fail } from "./volunteerApi";
 
@@ -75,6 +76,19 @@ type SessionLike = Pick<
   "lastSeq" | "purchase" | "slots" | "extras" | "pending" | "review" | "counters"
 >;
 
+/**
+ * 화면에 주는 pending. 검색 중 표시(search = {kind, at})는 시각을 떼고 {kind}만 주고,
+ * 검색이 도중에 끊겨 SEARCH_PENDING_MS(90초)보다 오래된 표시는 걸러 낸다(화면이 끝없이 기다리지 않게).
+ */
+export function visiblePending(pending: ResearchView["pending"], now = Date.now()): ResearchView["pending"] {
+  if (!("search" in pending)) return pending;
+  const { search, ...rest } = pending;
+  if (typeof search !== "object" || search === null) return rest;
+  const { kind, at } = search as { kind?: unknown; at?: unknown };
+  if (typeof kind !== "string" || typeof at !== "number" || now - at > SEARCH_PENDING_MS) return rest;
+  return { ...rest, search: { kind } };
+}
+
 /** 칸·구매·검수 상태(턴·사진 응답이 같이 준다). */
 export function sessionSnapshot(session: SessionLike) {
   return {
@@ -83,7 +97,7 @@ export function sessionSnapshot(session: SessionLike) {
     verified: purchaseBadge(session) === "verified",
     slots: session.slots,
     extras: session.extras,
-    pending: session.pending,
+    pending: visiblePending(session.pending),
     review: publicReview(session.review),
   };
 }
@@ -128,4 +142,39 @@ export function logTail(parts: {
   const up = parts.up !== null && parts.up !== undefined ? ` up=${parts.up}` : "";
   const usage = parts.usage ?? { in: 0, out: 0 };
   return ` kind=${parts.kind} ai=${parts.ai}${cap}${up} in=${usage.in} out=${usage.out} ws=${usage.ws ?? 0}`;
+}
+
+/** 턴 응답이 화면에 이어서 부르라고 알리는 웹 검색(contract-ui.md "턴 응답 followUp"). */
+export type FollowUp = { search: "model" | "alts" | "benefits" };
+
+/**
+ * 이번 턴 메시지로 화면이 이어서 부를 검색을 정한다. 한 번에 하나만 알리고, 순서는 model, alts, benefits다.
+ * - model: 방금 기종 질문을 만들었다.
+ * - alts: 방금 같이 고민한 제품 질문(질문 4)을 만들었다(리서치만 고른 경로와 사진 없는 경로. 사진 뒤는 photos 응답 규칙을 따른다).
+ * - benefits: 이번 턴에 혜택 경험 칸이 채워졌거나(AI 채움·짧은 답·패널 고치기) 건너뛰어졌다. 칸이 실제로 찬 상태일 때만 알린다.
+ *   [확인했어요](link_check)는 칸 값을 바꾸지 않으므로 알리지 않는다.
+ * 이미 찾은 검색을 다시 부르면 서버가 캐시로 답하고 사용량을 세지 않는다. 그래서 저장 응답을 다시 보낼 때도 같은 값이면 된다.
+ */
+export function followUpOf(
+  messages: readonly ResearchMessage[],
+  slots: Partial<Record<string, { status?: string } | null>>,
+  input?: { type: string; slot?: string } | null,
+): FollowUp | null {
+  const asked = (slot: string) =>
+    messages.some((message) => message.role === "ai" && message.tag === "question" && message.slot === slot);
+  if (asked("model")) return { search: "model" };
+  if (asked("alts")) return { search: "alts" };
+  const status = slots.benefits?.status;
+  if (status === "filled" || status === "confirmed" || status === "skipped") {
+    const skipLabel = SKIP_LABEL.benefits;
+    // 패널에서 고친 칸(edit)은 채움 말풍선이 없어 입력으로 알아본다.
+    const edited = input?.type === "edit" && input.slot === "benefits";
+    const changed = edited || messages.some(
+      (message) =>
+        (message.role === "ai" && message.tag === "fill" && message.slot === "benefits") ||
+        (message.role === "volunteer" && skipLabel !== undefined && message.body?.text === skipLabel),
+    );
+    if (changed) return { search: "benefits" };
+  }
+  return null;
 }

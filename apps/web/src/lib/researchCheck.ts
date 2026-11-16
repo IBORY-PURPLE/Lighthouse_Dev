@@ -305,3 +305,36 @@ export function cleanText(raw: unknown, max: number, material?: readonly string[
   const kept = dropSentences(raw.trim(), (sentence) => hasForbidden(sentence) || hasUnknownModel(sentence, material));
   return clip(kept, max);
 }
+
+// 혜택 카드(제목·조건·비교)에는 금액·할인율·포인트 수량이 한 글자도 보이면 안 된다(design.md 4.9 "혜택은 금액 없이").
+// hasForbidden은 퍼센트를 돈 낱말이 6자 안에 있을 때만 걸어서 "20% 포인트 추가", "즉시 5%", "최대 3천 포인트"가 빠져나간다.
+// 혜택 글은 종류와 조건만 말하므로, 퍼센트 기호·퍼센트 글자·천/만 단위 수·포인트(P) 수량은 낱말과 상관없이 모두 버린다.
+const BENEFIT_STRICT: readonly RegExp[] = [
+  /%|퍼센트|percent/i,
+  // "10 프로 혜택", "이십 프로 적립"(프로모션·프로그램·프로젝트는 낱말이라 뺀다)
+  /(?:\d|(?<![가-힣])[일이삼사오육칠팔구]?[십백][일이삼사오육칠팔구]?)\s?프로(?!모|그|젝|필|세)/,
+  /\d\s*[천만]/,
+  /\d[\d,.]*\s*(?:P(?![A-Za-z])|포인트)|[천만]\s?(?:P(?![A-Za-z])|포인트)/i,
+  // 한글 수 포인트: 오백 포인트, 십만 P("이 포인트", "카드사 포인트"는 수가 아니라 낱말이라 십·백·천·만이 든 수만 건다)
+  /(?<![가-힣])[일이삼사오육칠팔구]?[십백천만][일이삼사오육칠팔구십백천만]*\s?(?:포인트|P(?![A-Za-z]))/i,
+];
+
+/** 혜택 글 전용 검사: hasForbidden에 더해 퍼센트 기호·천만 단위 수·포인트 수량이 있으면 참. */
+export function hasBenefitForbidden(text: string): boolean {
+  const normalized = text.normalize("NFKC");
+  return hasForbidden(normalized) || BENEFIT_STRICT.some((pattern) => pattern.test(normalized));
+}
+
+// 전화번호·이메일·메신저 연락처. 웹 페이지에 심어 둔 글이 혜택·제품 글로 흘러와 봉사자 화면에 연락처가 뜨지 않게 한다.
+const CONTACT: readonly RegExp[] = [
+  /(?<!\d)0\d{1,2}[\s.)-]+\d{3,4}[\s.-]+\d{4}(?!\d)/,
+  /(?<!\d)01\d[\s.-]?\d{7,8}(?!\d)/,
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}/,
+  /카카오\s?톡|카톡|오픈\s?채팅|오픈\s?카톡|텔레그램|위챗|왓츠\s?앱|라인\s?(?:아이디|id)|open\.kakao|t\.me\/|wa\.me\/|line\.me\//i,
+];
+
+/** 전화번호·이메일·메신저 연락처 모양이 있나. */
+export function hasContact(text: string): boolean {
+  const normalized = text.normalize("NFKC");
+  return CONTACT.some((pattern) => pattern.test(normalized));
+}
