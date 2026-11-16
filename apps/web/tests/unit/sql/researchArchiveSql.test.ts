@@ -41,6 +41,7 @@ const SCRUB_CASES: Array<[string, string]> = [
   ["주민 900101-1234567 번호 / 900101-5234567 / 9001011234567", "주민 [주민번호] 번호 / 900101-5234567 / 9001011234567"],
   ["카드 1234-5678-9012-3456 / 1234 5678 9012 3456 / 1234567890123456 끝", "카드 [카드번호] / [카드번호] / [카드번호] 끝"],
   ["구분이 섞이면 그대로 1234-5678 9012-3456 끝", "구분이 섞이면 그대로 1234-5678 9012-3456 끝"],
+  [`덩어리가 서른 겹 a${"%" + "25".repeat(29) + "40"}b.com 끝`, "덩어리가 서른 겹  끝"],
   ["정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr 010-1234-5678", "정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr [전화번호]"],
 ];
 const NEW_FUNCTIONS = ["research_url_decode", "research_scrub_plain", "research_scrub_text", "research_final_review", "research_strip_data", "research_body_text", "research_archive_messages", "research_archive_put"];

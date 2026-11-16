@@ -129,7 +129,7 @@ export function scrubText(text: string): string {
       out += match[2];
     } else {
       const decoded = urlDecode(word);
-      if (decoded === word || scrubPlain(decoded) === decoded) out += word;
+      if (decoded === word || (scrubPlain(decoded) === decoded && !STILL_ENCODED.test(decoded))) out += word;
     }
   }
   return scrubPlain(out);

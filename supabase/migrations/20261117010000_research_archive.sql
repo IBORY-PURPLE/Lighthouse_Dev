@@ -133,7 +133,9 @@ begin
   loop
     if v_tok[1] is not null then
       v_dec := public.research_url_decode(v_tok[1]);
-      if v_dec <> v_tok[1] and public.research_scrub_plain(v_dec) <> v_dec then
+      -- 20번을 풀어도 %XX가 남는 덩어리(여러 겹으로 숨긴 것)도 뺀다.
+      if v_dec <> v_tok[1] and (public.research_scrub_plain(v_dec) <> v_dec
+         or v_dec ~ '%(0[1-9A-Fa-f]|[1-7][0-9A-Fa-f])') then
         continue;
       end if;
       v_out2 := v_out2 || v_tok[1];
