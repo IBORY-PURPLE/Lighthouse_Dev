@@ -582,7 +582,7 @@ describe("POST …/research/send", () => {
     const lateRetry = await send(o, confirmed.rev, o.version, randomUUID());
     expect(lateRetry.status).toBe(200);
     expect((await lateRetry.json()).sentAt).toBe(sent.sentAt);
-    expect(await read(o)).toEqual({ stage: "sent", sentAt: sent.sentAt });
+    expect(await read(o)).toMatchObject({ stage: "sent", sentAt: sent.sentAt, messages: [], photos: [] });
   });
 
   it("리서치만: 사진 없이 보낼 수 있고 구매 인증이 아니라 리서치만으로 적힌다", async () => {
