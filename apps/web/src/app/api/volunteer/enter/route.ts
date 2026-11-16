@@ -3,10 +3,8 @@ import {
   ACCESS_COOKIE,
   ACCESS_COOKIE_MAX_AGE_SECONDS,
   hasAccess,
-  hasVolunteerEntryCode,
   hashAccessCode,
   isValidAccessCode,
-  isValidVolunteerEntryCode,
 } from "@/lib/access";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
 import { fail, logLine } from "@/lib/volunteerApi";
@@ -18,9 +16,7 @@ import {
   VOLUNTEER_COOKIE_MAX_AGE_SECONDS,
 } from "@/lib/volunteerSession";
 
-// 입장: 입장 코드와 별명으로 기기 열쇠 쿠키를 심는다.
-// VOLUNTEER_ENTRY_CODE가 설정돼 있으면 접근 쿠키(lh_access)가 있든 없든 그 코드를 늘 요구한다.
-// 설정돼 있지 않으면 예전처럼 lh_access가 있는 기기는 코드를 생략한다(로컬 개발).
+// 입장: 입장 코드(이미 lh_access가 있으면 생략)와 별명으로 기기 열쇠 쿠키를 심는다.
 // 별명은 길이만 검사하고 저장하거나 로그에 남기지 않는다(기기 localStorage에만 둔다).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,20 +64,12 @@ async function handle(request: NextRequest): Promise<NextResponse> {
     return fail(400, "invalid_nickname");
   }
 
-  let accessValue: string;
-  if (hasVolunteerEntryCode()) {
-    // 이용자가 넣은 코드로 접근 쿠키를 만들지 않는다. 서버가 DEMO_ACCESS_CODE에서 직접 만든다.
+  const alreadyAccess = hasAccess(request.cookies.get(ACCESS_COOKIE)?.value);
+  let accessValue = request.cookies.get(ACCESS_COOKIE)?.value ?? "";
+  if (!alreadyAccess) {
     const code = typeof body.code === "string" ? body.code.trim() : "";
-    if (!code || !isValidVolunteerEntryCode(code)) return fail(401, "invalid_code");
-    accessValue = hashAccessCode(process.env.DEMO_ACCESS_CODE!.trim());
-  } else {
-    const alreadyAccess = hasAccess(request.cookies.get(ACCESS_COOKIE)?.value);
-    accessValue = request.cookies.get(ACCESS_COOKIE)?.value ?? "";
-    if (!alreadyAccess) {
-      const code = typeof body.code === "string" ? body.code.trim() : "";
-      if (!code || !isValidAccessCode(code)) return fail(401, "invalid_code");
-      accessValue = hashAccessCode(code);
-    }
+    if (!code || !isValidAccessCode(code)) return fail(401, "invalid_code");
+    accessValue = hashAccessCode(code);
   }
 
   const secure = cookieSecure(request);

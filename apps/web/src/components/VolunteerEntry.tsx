@@ -6,7 +6,7 @@ import { enterVolunteer, readNickname, saveNickname } from "@/lib/volunteerClien
 import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
 
 interface VolunteerEntryProps {
-  /** 입장 코드 칸을 보일지. 서버가 정한다(봉사자 입장 코드가 설정돼 있으면 입장 전 기기는 늘 true). false면 별명만 묻는다. */
+  /** 이 기기에 입장 코드 쿠키(lh_access)가 없으면 true. false면 별명만 묻는다. */
   needsCode: boolean;
   onEntered: () => void;
 }

@@ -30,19 +30,3 @@ export function hasAccess(cookieValue: string | null | undefined): boolean {
   if (!expected || !cookieValue) return false;
   return constantTimeEqual(cookieValue, expected);
 }
-
-/** 봉사자 전용 입장 코드(VOLUNTEER_ENTRY_CODE). 설정돼 있지 않으면 null. */
-export function volunteerEntryCode(): string | null {
-  return process.env.VOLUNTEER_ENTRY_CODE?.trim() || null;
-}
-
-/** 봉사자 입장 코드가 따로 설정돼 있는가. 설정되면 접근 쿠키만으로는 봉사자로 입장할 수 없다. */
-export function hasVolunteerEntryCode(): boolean {
-  return volunteerEntryCode() !== null;
-}
-
-export function isValidVolunteerEntryCode(code: string | null | undefined): boolean {
-  const entry = volunteerEntryCode();
-  if (!entry || !code) return false;
-  return constantTimeEqual(hashAccessCode(code), hashAccessCode(entry));
-}
