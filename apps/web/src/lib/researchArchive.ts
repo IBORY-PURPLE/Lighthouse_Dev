@@ -63,23 +63,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const DATA_URL_VALUE = /^\s*data:/i;
-const DATA_URL_INLINE = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"')]+/g;
+const DATA_URL_INLINE = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"')]+/gi;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const PHONE = /(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])/g;
 
 const URL_TOKEN = /([hH][tT][tT][pP][sS]?:\/\/[^\s"'<>)]+)|([^hH]+|[hH])/g;
 
-/** 주소 안의 %XX(ASCII 0x01~0x7F)를 글자로 푼다. 최대 3번(SQL `research_url_decode`). */
+/** 주소 안의 %XX(ASCII 0x01~0x7F)를 더 바뀌지 않을 때까지(최대 20번) 푼다(SQL `research_url_decode`). */
 export function urlDecode(text: string): string {
   let out = text;
-  for (let pass = 0; pass < 3; pass += 1) {
+  for (let pass = 0; pass < 20; pass += 1) {
     if (!/%[0-7][0-9A-Fa-f]/.test(out)) break;
+    const prev = out;
     out = out.replace(/%([0-7][0-9A-Fa-f])/g, (whole, hex: string) =>
       hex === "00" ? whole : String.fromCharCode(parseInt(hex, 16)),
     );
+    if (out === prev) break;
   }
   return out;
 }
+
+// 20번을 풀어도 남는 %XX(%00 제외)는 여러 겹으로 숨긴 주소로 보고 주소를 뺀다.
+const STILL_ENCODED = /%(0[1-9A-Fa-f]|[1-7][0-9A-Fa-f])/;
 
 function scrubPlain(text: string): string {
   return text.replace(DATA_URL_INLINE, "").replace(EMAIL, "[이메일]").replace(PHONE, "[전화번호]");
@@ -95,8 +100,9 @@ export function scrubText(text: string): string {
     const url = match[1];
     if (url === undefined) {
       out += match[2];
-    } else if (scrubPlain(url) === url && scrubPlain(urlDecode(url)) === urlDecode(url)) {
-      out += url;
+    } else {
+      const decoded = urlDecode(url);
+      if (scrubPlain(url) === url && scrubPlain(decoded) === decoded && !STILL_ENCODED.test(decoded)) out += url;
     }
   }
   return scrubPlain(out);

@@ -129,6 +129,9 @@ describe("글만 뽑기(순수 함수)", () => {
     ["혜택 https://shop.example/?email=a@b.com 끝", "혜택  끝"],
     ["https://shop.example/?p=010%2D1234%2D5678&q=1", ""],
     ["이중 https://shop.example/?e=a%2540b.com 끝", "이중  끝"],
+    ["대소문자 Data:text/plain,hello DATA:image/png;base64,AAAA 끝", "대소문자   끝"],
+    ["네 번 https://shop.example/?email=a%25252540b.com 끝", "네 번  끝"],
+    [`서른 번 https://shop.example/?email=a${"%" + "25".repeat(29) + "40"}b.com 끝`, "서른 번  끝"],
     ["대문자 HTTPS://shop.example/?e=a%40b.com 끝", "대문자  끝"],
     ["정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr 010-1234-5678", "정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr [전화번호]"],
     ];

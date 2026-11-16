@@ -60,20 +60,23 @@ grant select, insert, update, delete on table public.research_archives, public.r
 
 -- ---------- 보조 함수(research_send 안에서만 쓴다. 호출자의 잠금 안에서 돈다) ----------
 
--- 주소 안의 %XX(ASCII 0x01~0x7F)를 글자로 푼다. %2540처럼 두 번 감싼 것도 풀도록 최대 3번 돈다. 연락처를 %40·%2B로 숨긴 주소를 가려내는 데 쓴다.
+-- 주소 안의 %XX(ASCII 0x01~0x7F)를 글자로 푼다. %2540처럼 여러 번 감싼 것도 더 바뀌지 않을 때까지(최대 20번) 푼다. 연락처를 %40·%2B로 숨긴 주소를 가려내는 데 쓴다.
 create or replace function public.research_url_decode(p_text text)
 returns text language plpgsql immutable security invoker set search_path = '' as $$
 declare
   v text := p_text;
+  v_prev text;
   v_pass int;
 begin
   if v is null then return null; end if;
-  for v_pass in 1..3 loop
+  for v_pass in 1..20 loop
     exit when v !~ '%[0-7][0-9A-Fa-f]';
+    v_prev := v;
     select string_agg(
         case when t.m[1] ~ '^%[0-7][0-9A-Fa-f]$' and t.m[1] <> '%00'
           then chr(get_byte(decode(substr(t.m[1], 2), 'hex'), 0)) else t.m[1] end, '' order by t.ord)
       into v from regexp_matches(v, '(%[0-7][0-9A-Fa-f]|[^%]+|%)', 'g') with ordinality as t(m, ord);
+    exit when v = v_prev;
   end loop;
   return v;
 end;
@@ -83,7 +86,7 @@ $$;
 create or replace function public.research_scrub_plain(p_text text)
 returns text language sql immutable security invoker set search_path = '' as $$
   select regexp_replace(regexp_replace(regexp_replace(p_text,
-    'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'g'),
+    'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'gi'),
     '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[이메일]', 'g'),
     '(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])', '[전화번호]', 'g')
 $$;
@@ -105,7 +108,9 @@ begin
   loop
     if v_tok[1] is not null then
       v_dec := public.research_url_decode(v_tok[1]);
-      if public.research_scrub_plain(v_tok[1]) <> v_tok[1] or public.research_scrub_plain(v_dec) <> v_dec then
+      -- 20번을 풀어도 %XX가 남는 주소(여러 겹으로 숨긴 것)도 뺀다.
+      if public.research_scrub_plain(v_tok[1]) <> v_tok[1] or public.research_scrub_plain(v_dec) <> v_dec
+         or v_dec ~ '%(0[1-9A-Fa-f]|[1-7][0-9A-Fa-f])' then
         continue;
       end if;
       v_out := v_out || v_tok[1];
