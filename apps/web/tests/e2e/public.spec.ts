@@ -22,7 +22,7 @@ test.beforeAll(() => {
 });
 
 test("공개 주소 첫 화면과 음성 시험 페이지가 열린다", async ({ page }) => {
-  const home = await page.goto("/");
+  const home = await page.goto("/classic");
   expect(home?.status()).toBe(200);
   await expect(page.getByRole("heading", { name: "LightHouse" })).toBeVisible();
 
@@ -67,7 +67,7 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
 
   await installFakeSpeech(page);
 
-  const entered = await page.goto("/");
+  const entered = await page.goto("/classic");
   expect(entered?.status(), "첫 화면").toBe(200);
   expect(new URL(page.url()).pathname).toBe("/");
   await shot("user-first-screen");

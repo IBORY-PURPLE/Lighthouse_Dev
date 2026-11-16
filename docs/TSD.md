@@ -21,8 +21,8 @@ v2.1(2026-11-13): 봉사자 ③④⑤를 리서치 챗 한 화면으로 합침. 
 ### 플로우 A: 이용자 요청(①②)
 
 1. 이용자가 아이폰에서 VoiceOver를 켜고 이용자 주소(`/`)를 연다.
-2. 질문 3개(제품, 예산, 새 제품·중고)에 차례로 말하거나 입력창에 받아쓴다. 답마다 확인을 거친다. 답하는 동안 기기 밖으로 아무것도 보내지 않는다.
-3. 요약을 듣고 "봉사자 매칭 요청"을 누르면 요청이 대기열에 들어가고 대기번호를 듣는다(`waiting`).
+2. `/`는 apps/user-voice-ui(동료 작성)의 음성 대화 화면이다(§8.9). "상품 요청"을 누르면 AI가 한 번에 질문 하나씩 구매 조건을 묻고, 이용자는 말로 답한다. AI가 요청을 1~2문장으로 정리해 "이 내용으로 구매 요청을 등록할까요?"라고 물으면 이용자가 동의한다(동의 전에는 등록하지 않는다). 답할 때마다 대화 내용이 AI 서버로 간다. 고정 질문 3개(제품, 예산, 새 제품·중고) 화면은 `/classic`으로 옮겨 남아 있다. 답마다 확인을 거치고, 답하는 동안 기기 밖으로 아무것도 보내지 않는다.
+3. 동의(`done`)하면 요청이 대기열에 들어간다(`POST /api/requests`). `/classic`에서는 요약을 듣고 "봉사자 매칭 요청"을 누르면 들어가고 대기번호를 듣는다(`waiting`). `/`의 음성 대화 화면은 대기번호를 읽어 주지 않고 기기 안 목록에만 카드를 보인다.
 4. 앱을 닫았다 다시 열면 대기번호와 상태를 다시 듣는다.
 
 ### 플로우 B: 봉사자 수행(②~⑥)
@@ -123,7 +123,9 @@ supabase/                                   Supabase CLI 설정, link됨(.temp/�
   config.toml
   migrations/<시각>_<이름>.sql              표, SQL 함수. 추가만 한다(§11)
 apps/web/                                   Vercel Root Directory
-  src/app/page.tsx                          이용자(플로우 A, ⑦)
+  public/voice/index.html                   이용자(플로우 A, ⑦). apps/user-voice-ui 화면. next.config.ts가 /를 여기로 보낸다(§8.9)
+  src/app/classic/page.tsx                  고정 질문 3개 이용자 화면(옛 /)
+  src/app/api/voice/chat/route.ts           이용자 AI 대화 한 턴(§8.9)
   src/app/volunteer/page.tsx                봉사자 대기열(②). ② 전에는 v1 시연 화면
   src/app/volunteer/requests/[requestId]/page.tsx   리서치 챗(③④⑤) → ⑥, 완료면 보낸 결과
   src/app/enter/route.ts
@@ -135,6 +137,7 @@ apps/web/                                   Vercel Root Directory
   src/components/{SpeechInput,StatusRegion,DemoHandoff,VolunteerChat}.tsx
   src/components/{ResearchChat,ResearchCards,ResearchSummary,SentView}.tsx   리서치 챗 화면, 카드, 보내기 전 확인, 보낸 결과
   src/lib/{rateLimit,llm,prompt,chat,speech,parseRequest,matchHandoff,volunteers,answerRules}.ts
+  src/lib/{voiceChat,voiceInstructions}.ts  서버 전용. 이용자 음성 대화: 요청 검사, OpenAI 호출, 접수 변환, 가짜 대화 / 지시문 원문(§8.9)
   src/lib/requestStore.ts                   서버 전용. 저장소 인터페이스, 메모리 구현, Supabase 구현
   src/lib/volunteerView.ts                  화면·서버 공용 타입(VolunteerRequestView 등)
   src/lib/research.ts                       화면·서버 공용. 카드 순서·필수 여부 상수, 상태, 구매 인증, 화면 문구
@@ -400,6 +403,28 @@ v1 계약에 선택 필드만 더한다. 봉사자 화면에서만 호출한다.
 ### 8.8 (v2.1에서 없앰) ④ `extract-text`, ④⑤ `summarize`
 
 v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자 읽기)와 §8.8 `POST /api/volunteer/summarize`(`SummaryDraft` 요약 초안, `evidenceCheck` 근거 대조), `GET /api/volunteer/requests/{id}/candidates`는 v2.1에서 없앴다. 계약 원문은 이 파일의 v2.1 이전 판(git 기록)에 있다. 그중 "가격·재고·할인은 AI 출력에 넣지 않는다"(11/9 계획 정해 줄 것 2의 추천안)는 리서치 AI 출력 검사(§9.1)로 이어진다.
+
+### 8.9 플로우 A 음성 대화(`/`)와 `POST /api/voice/chat`
+
+이용자 화면(`/`)은 동료가 만든 apps/user-voice-ui(PR #40)의 화면이다. 화면(`public/voice/index.html`)과 서버 계약은 원본 그대로 옮겼고, 아래 둘만 바꿨다. apps/user-voice-ui는 그대로 두고 읽기만 한다. 봉사자용 `/api/chat`과 경로가 겹쳐 서버는 `/api/voice/chat`이다.
+
+- 서버는 대화를 저장하지 않는다(무상태). 서버리스는 인스턴스가 바뀌면 메모리 세션이 사라지므로 화면이 대화 기록(`history`)을 한 턴마다 함께 보낸다.
+- 확정(`done`)하면 화면이 `POST /api/requests`를 불러 봉사자 대기열에 올린다. 대화 id(`sessionId`)가 `clientRequestId`라 다시 보내도 번호가 늘지 않는다. 접수가 실패해도 화면 흐름(기기 안 목록)은 그대로다.
+
+| 항목 | 값 |
+|---|---|
+| 요청 | `{sessionId, message, reset, history}`. 원본 `{sessionId, message, reset}`에 `history: [{role, content}]`만 더했다. `reset`이면 history는 무시한다 |
+| 응답 | 200 `{reply, status, summary, product, request?}`. `status`는 `asking`·`confirming`·`done`. `request`는 `done`이고 품목(헤드셋)을 알아볼 수 있을 때만 `{product, budget, condition}`(접수 본문 모양) |
+| 실패 | 원본 메시지 그대로: 400(세션 식별자·메시지 길이·답변 비어 있음·대화가 길어짐), 503(키 없음), 500(AI 실패·시간 초과). 새로 더한 것: 400 `대화 기록 오류`·`요청이 너무 큽니다`, 429(주소당 분당 20회) |
+| 호출 | OpenAI Responses API. 모델 `OPENAI_MODEL`(없으면 `gpt-4.1-mini`), `max_output_tokens: 450`, JSON 모드, `store: false`, 25초 마감. 키는 `OPENAI_API_KEY` |
+| 상한 | 기록 36칸 미만(원본과 같다), 기록 한 칸 2000자, 이용자 문장 1000자, 본문 64KB |
+| 지시문 | `voiceInstructions.ts`. 원본 `instructions` 원문이고 시험이 원본 파일과 글자 단위로 같은지 확인한다 |
+| 가짜 | `LLM_MODE=mock`이면 `voiceChat.ts`의 고정 대화(운영 `VERCEL_ENV=production`에서는 꺼진다) |
+
+- 접수 변환(`toQueueRequest`): `product`나 `summary`에 품목(헤드셋·헤드폰)이 있으면 그 글을 product로 쓴다. 접수가 품목을 알아볼 수 있어야 받기 때문에, 없으면(예: 밥솥) request를 주지 않고 대기열에는 올리지 않는다(기기 안 목록에만 남는다). 예산은 요약에서 금액 표현을 찾고, 조건은 "중고"·"새 제품"을 찾으며, 없으면 "정하지 않음"이다.
+- 이 서버 계약에는 가격·재고·모델명 금지 검사가 없다(원본 지시문에 맡긴다). 봉사자 챗봇의 `answerRules`와 달리 이 화면의 AI 답은 검사하지 않는다.
+- 로그에는 상태 코드와 소요 시간, 오류 종류만 남긴다(이용자 문장·AI 답 제외).
+- 확인하지 못한 것: 실제 `gpt-4.1-mini` 호출 결과, 실기기 음성 인식·읽어 주기·VoiceOver 동작.
 
 ### 리서치 챗 사진 축소(브라우저)
 

@@ -18,7 +18,7 @@ async function openUserScreen(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": `test-${randomUUID()}` });
   await installFakeSpeech(page);
-  await page.goto("/");
+  await page.goto("/classic");
 }
 
 /** 기기 안 기록을 직접 넣고 다시 연다. */

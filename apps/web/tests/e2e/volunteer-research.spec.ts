@@ -1104,14 +1104,16 @@ test.describe("봉사자 리서치 챗(가짜 AI 응답 기준)", () => {
     });
     await page.goto("/enter?code=old-link-value");
     await expect(page).toHaveURL(/\/$/);
+    // /는 apps/user-voice-ui 화면이다(고정 질문 화면은 /classic).
     await expect(
-      page.getByRole("heading", { name: "LightHouse" }),
+      page.getByRole("button", { name: "상품 요청", exact: true }),
     ).toBeVisible();
     expect(requested).toEqual([]);
 
     const root = path.resolve(__dirname, "../../src");
     for (const file of [
-      "app/page.tsx",
+      "app/classic/page.tsx",
+      "../public/voice/index.html",
       "components/SpeechInput.tsx",
       "components/DemoHandoff.tsx",
       "lib/speech.ts",
