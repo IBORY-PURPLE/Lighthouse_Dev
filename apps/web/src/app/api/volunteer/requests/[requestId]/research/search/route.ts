@@ -92,15 +92,24 @@ export async function POST(
       const subject = subjectOf(context);
 
       // 분당 8회는 AI 검색을 새로 부를 때만 센다(캐시 적중·처리 중·한도 응답·틀린 요청은 세지 않는다).
-      // 이미 한도에 닿아 있으면 검색 사용량을 올리는 begin 전에 막는다: begin이 올린 요청당·하루 검색 사용량은
-      // 되돌릴 방법이 없어서, 거절된 재시도가 한도를 쓰지 않게 하려는 것이다. 한도에 닿으려면 AI 검색을 1분에 8번 새로
-      // 불러야 하는데 대화 한 번에 모델 검색은 한 번뿐이라 정상 사용에서는 닿지 않는다.
+      // 이미 한도에 닿아 있으면 요청당 검색 상한을 0으로 두고 begin을 부른다: begin은 캐시·처리 중 판정을 상한 확인보다
+      // 먼저 하므로 끝난 검색은 200, 진행 중인 검색은 202로 답하고, 새 검색이면 사용량을 올리기 전에 capped로 돌아온다.
+      // (begin이 올린 요청당·하루 검색 사용량은 되돌릴 방법이 없어서, 거절된 재시도가 한도를 쓰지 않게 하려는 것이다.)
       const gate = checkSearchLimit.peek(volunteerId);
-      if (!gate.allowed) return fail(429, "rate_limited", { "Retry-After": String(gate.retryAfterSeconds) });
+      const caps = capsFromEnv();
 
       const store = getResearchStore();
       const actor = { requestId: id, volunteerId, sessionId: sessionId.toLowerCase() };
-      const begun = await store.begin({ ...actor, kind: "search", cacheKey: MODEL_CACHE_KEY, units: 1, caps: capsFromEnv() });
+      const begun = await store.begin({
+        ...actor,
+        kind: "search",
+        cacheKey: MODEL_CACHE_KEY,
+        units: 1,
+        caps: gate.allowed ? caps : { ...caps, searches: 0 },
+      });
+      if (!gate.allowed && (begun.outcome === "capped" || begun.outcome === "ok")) {
+        return fail(429, "rate_limited", { "Retry-After": String(gate.retryAfterSeconds) });
+      }
       if (begun.outcome === "pending") return succeed({ pending: true }, 202);
       if (begun.outcome === "cached") {
         // 이미 찾았다. 메시지는 이미 대화에 있으니 새로 주지 않고 마지막 번호만 알린다.

@@ -525,6 +525,33 @@ describe("POST …/research/search (model)", () => {
     }
   });
 
+  it("분당 8회에 닿아도 이미 끝난 검색은 200, 진행 중인 검색은 202로 답하고, 새 검색만 429이며 사용량은 올리지 않는다", async () => {
+    const o = await opened();
+    const volunteerId = volunteerOf(o.cookie);
+    const actor = { requestId: o.id, volunteerId, sessionId: o.sessionId, cacheKey: "model" };
+    const store = getResearchStore();
+    for (let index = 0; index < 8; index += 1) {
+      expect((await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" })).status, `새 검색 ${index}`).toBe(200);
+      await store.addMessage({ ...actor, messages: [], cacheState: "clear" });
+    }
+    // 새 검색은 한도에 닿아 429(Retry-After)이고, 거절을 몇 번 되풀이해도 요청당 검색 상한(12)을 쓰지 않는다.
+    for (let index = 0; index < 10; index += 1) {
+      const limited = await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" });
+      expect(limited.status, `거절 ${index}`).toBe(429);
+      expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    }
+    // 끝난 검색을 다시 부르면 200(새 메시지 없음), 처리 중이면 202.
+    await store.addMessage({ ...actor, messages: [], cacheState: "done" });
+    const cached = await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" });
+    expect(cached.status).toBe(200);
+    expect((await cached.json()).messages).toEqual([]);
+    await store.addMessage({ ...actor, messages: [], cacheState: "clear" });
+    // 거절 10번이 사용량을 썼다면 여기서 요청당 상한(12) = 8 + 이 begin 1 + 거절분이 넘어 capped가 된다.
+    const begun = await store.begin({ ...actor, kind: "search", units: 1 });
+    expect(begun.outcome).toBe("ok");
+    expect((await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" })).status).toBe(202);
+  });
+
   it("인용 주소가 아주 길어도 메시지 본문은 8,192바이트 안에 든다(긴 주소는 뺀다)", async () => {
     vi.stubEnv("LLM_MODE", "");
     const longUrl = `https://www.sony.co.kr/headphones/${"a".repeat(9000)}`;
