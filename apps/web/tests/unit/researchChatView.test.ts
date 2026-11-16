@@ -10,6 +10,7 @@ import {
   failureText,
   imageSearchUrl,
   missingText,
+  needsBenefitsSearch,
   panelSlots,
   planFold,
   productsOf,
@@ -22,7 +23,7 @@ import {
   slotTag,
   thinkingPhase,
 } from "@/lib/researchChatView";
-import { mergeMessages, normalizeView, type ChatMessage } from "@/lib/researchClient";
+import { mergeMessages, mergeView, normalizeView, type ChatMessage } from "@/lib/researchClient";
 
 const question = (seq: number, slot: string): ChatMessage => ({ seq, role: "ai", tag: "question", slot, body: { text: "?" } });
 const volunteer = (seq: number): ChatMessage => ({ seq, role: "volunteer", body: { text: "답" } });
@@ -192,5 +193,57 @@ describe("지금 눌러 답할 수 있는 빠른 답(activeQuick)", () => {
     const confirm = msg(3, "ai", "notice", { quick: [{ id: "confirm.yes", label: "넣기" }, { id: "confirm.no", label: "아니요" }] });
     expect(activeQuick([older, plain, confirm]).map((reply) => reply.id)).toEqual(["confirm.yes", "confirm.no"]);
     expect(activeQuick([])).toEqual([]);
+  });
+});
+
+describe("혜택 검색이 빠졌는지(needsBenefitsSearch)", () => {
+  const filled = { value: "카드 할인", status: "filled" as const, by: "volunteer" as const };
+  const benefitsCard: ChatMessage = { seq: 5, role: "ai", tag: "search", slot: "benefits", body: { kind: "benefits", items: [] } };
+
+  it("혜택 칸이 채워지거나 건너뛰어졌는데 혜택 카드가 대화에 없으면 true", () => {
+    expect(needsBenefitsSearch({ slots: { benefits: filled }, messages: [question(1, "model")] })).toBe(true);
+    expect(needsBenefitsSearch({ slots: { benefits: { ...filled, status: "skipped" } }, messages: [] })).toBe(true);
+    expect(needsBenefitsSearch({ slots: { benefits: { ...filled, status: "confirmed" } }, messages: [] })).toBe(true);
+  });
+
+  it("칸이 비었거나 혜택 카드가 이미 있으면 false", () => {
+    expect(needsBenefitsSearch({ slots: {}, messages: [] })).toBe(false);
+    expect(needsBenefitsSearch({ slots: { benefits: filled }, messages: [question(1, "refs"), benefitsCard] })).toBe(false);
+  });
+
+  it("다른 칸의 검색 결과(기종·대안)는 혜택 카드로 세지 않는다", () => {
+    const modelCard: ChatMessage = { seq: 2, role: "ai", tag: "search", slot: "model", body: { kind: "text", text: "후보" } };
+    expect(needsBenefitsSearch({ slots: { benefits: filled }, messages: [modelCard] })).toBe(true);
+  });
+});
+
+describe("mergeView: GET ?after가 주지 않는 사진 썸네일을 지킨다", () => {
+  const base = normalizeView({ sessionId: "s", version: 1, lastSeq: 2, photos: [{ id: "p1", thumb: "data:image/jpeg;base64,AAA", description: null }] });
+
+  it("같은 id의 사진은 이미 가진 썸네일을 남기고, 새 값에 썸네일이 있으면 그것을 쓴다", () => {
+    const incoming = normalizeView({
+      sessionId: "s",
+      version: 2,
+      lastSeq: 3,
+      photos: [{ id: "p1", description: "설명" }, { id: "p2", thumb: "data:image/jpeg;base64,BBB" }],
+    });
+    const merged = mergeView(base, incoming);
+    expect(merged.photos).toEqual([
+      { id: "p1", description: "설명", thumb: "data:image/jpeg;base64,AAA" },
+      { id: "p2", thumb: "data:image/jpeg;base64,BBB" },
+    ]);
+    expect(merged.version).toBe(2);
+  });
+
+  it("처음 보는 사진에 썸네일이 없으면 없는 채로 둔다(자리 표시가 나온다)", () => {
+    const merged = mergeView(base, normalizeView({ sessionId: "s", version: 2, photos: [{ id: "p9" }] }));
+    expect(merged.photos).toEqual([{ id: "p9" }]);
+  });
+
+  it("메시지는 seq로 합치고 lastSeq는 큰 쪽을 쓴다", () => {
+    const prev = normalizeView({ sessionId: "s", lastSeq: 1, messages: [question(1, "model")] });
+    const merged = mergeView(prev, normalizeView({ sessionId: "s", lastSeq: 3, messages: [question(3, "alts")] }));
+    expect(merged.messages.map((message) => message.seq)).toEqual([1, 3]);
+    expect(merged.lastSeq).toBe(3);
   });
 });

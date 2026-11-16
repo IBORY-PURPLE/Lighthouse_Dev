@@ -22,6 +22,7 @@ import {
   badgeOf,
   currentSlot,
   failureText,
+  needsBenefitsSearch,
   planFold,
   reasonsOf,
   requiredProgress,
@@ -36,6 +37,7 @@ import {
   isStaleFailure,
   maxSeq,
   mergeMessages,
+  mergeView,
   newTurnId,
   postPhoto,
   postReview,
@@ -59,13 +61,14 @@ import {
   saveFlash,
   type DetailResponse,
 } from "@/lib/volunteerClient";
-import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
+import { structuredLine, VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
 
 const PURCHASE_QUICK: QuickReply[] = [
   { id: "purchase.bought", label: "구매했어요", tone: "normal", action: "turn" },
   { id: "purchase.research", label: "구매하지 않았어요 · 리서치만", tone: "normal", action: "turn" },
 ];
 
+const PANEL_ID = "vc-panel";
 const POLL_MS = 2000;
 const POLL_MAX = 45;
 
@@ -110,12 +113,6 @@ interface Notice {
   loud: boolean;
 }
 
-/** 합칠 때 새 응답의 칸·구매 상태는 덮어쓰고 메시지는 seq로 합친다. */
-function mergeView(prev: ResearchView, incoming: ResearchView): ResearchView {
-  const messages = mergeMessages(prev.messages, incoming.messages);
-  return { ...incoming, messages, lastSeq: maxSeq(messages, incoming.lastSeq) };
-}
-
 /**
  * 봉사자 리서치 챗(대화형, D안). 히어로(E1)에서 시작해 질문·검색·사진·리뷰 검수·보내기까지 한 화면에서 이어 간다.
  * 서버 상태는 GET research가 기준이고(새로 고쳐도 이어진다), 턴·검색은 응답 메시지를 seq로 합친다.
@@ -147,12 +144,22 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const [reviewReasons, setReviewReasons] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [releasing, setReleasing] = useState(false);
-  const [localChecked, setLocalChecked] = useState<string[]>([]);
 
   const alive = useRef(true);
   const viewRef = useRef<ResearchView | null>(null);
   const turnBusy = useRef(false);
   const searching = useRef(false);
+  /** 부르기로 한 검색. 한 번에 하나씩 차례로 부른다(이미 돌고 있는 종류는 다시 넣지 않는다). */
+  const searchQueue = useRef<SearchKind[]>([]);
+  const runningSearch = useRef<SearchKind | null>(null);
+  /** 혜택 검색을 한 번 마쳤다(실패하면 false). 턴마다 같은 검색을 되풀이해 부르지 않으려는 표시. */
+  const benefitsAsked = useRef(false);
+  /** [확인했어요]가 눌렸고 서버가 아직 답하지 않은 주소(같은 카드를 두 번 보내지 않는다)와 턴이 끝나길 기다리는 주소. */
+  const pendingLinks = useRef<Set<string>>(new Set());
+  const linkQueue = useRef<string[]>([]);
+  const afterTurn = useRef<() => void>(() => undefined);
+  const drainRef = useRef<() => Promise<void>>(async () => undefined);
+  const panelToggleRef = useRef<HTMLButtonElement>(null);
   const focusSend = useRef(false);
   /** 맨 아래를 보던 중인가. 스크롤을 직접 올리면 false가 되고, 새 말풍선이 붙어 맨 아래로 가면 true가 된다. */
   const stick = useRef(true);
@@ -167,9 +174,19 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     };
   }, []);
 
-  useEffect(() => {
-    viewRef.current = view;
-  }, [view]);
+  /** 화면 상태의 기준은 viewRef다. 바꾸면 곧바로 ref에 반영해(렌더를 기다리지 않아) 이어지는 호출이 최신 version을 쓴다. */
+  const putView = useCallback((next: ResearchView) => {
+    viewRef.current = next;
+    setView(next);
+  }, []);
+
+  const updateView = useCallback(
+    (change: (prev: ResearchView) => ResearchView) => {
+      const prev = viewRef.current;
+      if (prev) putView(change(prev));
+    },
+    [putView],
+  );
 
   const say = useCallback((text: string) => setNotice({ text, loud: false }), []);
   const warn = useCallback((text: string) => setNotice({ text, loud: true }), []);
@@ -186,10 +203,9 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       return null;
     }
     if (result.kind !== "ok") return null;
-    setView(result.data);
-    viewRef.current = result.data;
+    putView(result.data);
     return result.data;
-  }, [requestId, toList]);
+  }, [requestId, toList, putView]);
 
   const pollSearch = useCallback(async () => {
     for (let index = 0; index < POLL_MAX && alive.current; index += 1) {
@@ -203,11 +219,12 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       }
       if (result.kind !== "ok") continue;
       const incoming = result.data;
-      setView((prev) => (prev ? mergeView(prev, incoming) : incoming));
+      if (viewRef.current) updateView((prev) => mergeView(prev, incoming));
+      else putView(incoming);
       if (!incoming.pending.search) return true;
     }
     return false;
-  }, [requestId, toList]);
+  }, [requestId, toList, updateView, putView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -253,23 +270,28 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         setLoad({ kind: "failed", message: VOLUNTEER_MESSAGES.connectFailed });
         return;
       }
-      setView(result.data);
-      viewRef.current = result.data;
+      putView(result.data);
       setLoad({ kind: "ready" });
       // 검색 중에 새로 고친 화면이면 끝날 때까지 이어서 기다린다.
       const pending = result.data.pending.search;
       if (pending) {
         searching.current = true;
+        runningSearch.current = pending.kind;
         setThinking({ kind: pending.kind, startedAt: Date.now() });
         await pollSearch();
         searching.current = false;
-        if (!cancelled) setThinking(null);
+        runningSearch.current = null;
+        if (!cancelled) {
+          setThinking(null);
+          // 기다리는 동안 부르기로 한 검색이 있으면 이어서 부른다.
+          if (searchQueue.current.length > 0) void drainRef.current();
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [requestId, toList, attempt, pollSearch]);
+  }, [requestId, toList, attempt, pollSearch, putView]);
 
   const finishSent = useCallback(async () => {
     const detail = await fetchRequest(requestId);
@@ -362,7 +384,11 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   useEffect(() => {
     if (!panelOpen) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPanelOpen(false);
+      if (event.key !== "Escape") return;
+      // 패널 안에 있던 초점은 패널을 열었던 버튼으로 돌려준다(패널이 숨겨지면 초점이 body로 떨어진다).
+      const inside = document.getElementById(PANEL_ID)?.contains(document.activeElement) ?? false;
+      setPanelOpen(false);
+      if (inside) panelToggleRef.current?.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -371,8 +397,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   // ----- 서버 호출 -----
 
   const applyTurn = useCallback((response: TurnResponse, shownText: string | null, turnId: string) => {
-    setView((prev) => {
-      if (!prev) return prev;
+    updateView((prev) => {
       let incoming: ChatMessage[] = response.messages;
       // 서버 응답에 내 말이 없으면 보낸 글을 내 말풍선으로 앞에 붙인다(다시 불러오면 서버 값으로 바뀐다).
       if (shownText && !incoming.some((message) => message.role === "volunteer")) {
@@ -389,20 +414,32 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         response.version,
       );
     });
-  }, []);
+  }, [updateView]);
 
-  const runSearch = useCallback(
+  /** 6시간 활동이 없어 대기열로 돌아갔거나 다른 곳에서 보냈다. 어느 호출에서나 요청 상태를 다시 읽어 화면을 바꾼다(contract-ui.md). */
+  const leftProgress = useCallback(
+    (outcome: Outcome<unknown>): boolean => {
+      if (outcome.kind !== "failed" || outcome.error !== "not_in_progress") return false;
+      void finishSent();
+      return true;
+    },
+    [finishSent],
+  );
+
+  /** 검색 한 번. 같은 검색이 이미 처리 중이면(202) 서버 상태를 기다린다. */
+  const searchOnce = useCallback(
     async (kind: SearchKind) => {
       const current = viewRef.current;
-      if (!current || searching.current) return;
-      searching.current = true;
+      if (!current) return;
+      runningSearch.current = kind;
+      if (kind === "benefits") benefitsAsked.current = true;
       setThinking({ kind, startedAt: Date.now() });
       let outcome = await postSearch(requestId, { sessionId: current.sessionId, kind });
       if (outcome.kind === "accepted") {
         await pollSearch();
         outcome = { kind: "accepted" };
       }
-      searching.current = false;
+      runningSearch.current = null;
       if (!alive.current) return;
       setThinking(null);
       if (outcome.kind === "unauthorized") {
@@ -411,24 +448,50 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       }
       if (outcome.kind === "ok") {
         const done = outcome.data;
-        setView((prev) => {
-          if (!prev) return prev;
+        updateView((prev) => {
           const messages = mergeMessages(prev.messages, done.messages);
           return { ...prev, messages, lastSeq: maxSeq(messages, done.lastSeq) };
         });
       } else if (outcome.kind === "failed") {
-        warn(failureText("search", outcome.status, outcome.error, outcome.body, COPY.searchFailed));
+        if (kind === "benefits") benefitsAsked.current = false;
+        if (!leftProgress(outcome)) warn(failureText("search", outcome.status, outcome.error, outcome.body, COPY.searchFailed));
       }
-      restoreFocus();
     },
-    [requestId, pollSearch, toList, warn, restoreFocus],
+    [requestId, pollSearch, toList, warn, updateView, leftProgress],
   );
 
-  /** 턴 한 번. 보낸 글은 먼저 보여 주고, 실패하면 입력 글을 되돌려 놓는다. 성공했으면 true. */
-  const sendInput = useCallback(
-    async (input: TurnInput, shownText: string | null, restoreDraft = ""): Promise<boolean> => {
+  /** 모인 검색을 차례로 부른다. 한 검색이 도는 동안 온 다음 검색은 기다렸다가 이어서 부른다. */
+  const drainSearches = useCallback(async () => {
+    if (searching.current) return;
+    searching.current = true;
+    while (alive.current) {
+      const kind = searchQueue.current.shift();
+      if (!kind) break;
+      await searchOnce(kind);
+    }
+    searching.current = false;
+    if (alive.current) restoreFocus();
+  }, [searchOnce, restoreFocus]);
+
+  useEffect(() => {
+    drainRef.current = drainSearches;
+  }, [drainSearches]);
+
+  const runSearch = useCallback(
+    (kind: SearchKind) => {
+      if (!viewRef.current) return;
+      if (runningSearch.current === kind || searchQueue.current.includes(kind)) return;
+      searchQueue.current.push(kind);
+      void drainSearches();
+    },
+    [drainSearches],
+  );
+
+  /** 턴 한 번(turnBusy를 비운 쪽이 부른다). 보낸 글은 먼저 보여 주고, 실패하면 입력 글을 되돌려 놓는다. 성공했으면 true. */
+  const runTurn = useCallback(
+    async (input: TurnInput, shownText: string | null, restoreDraft: string): Promise<boolean> => {
       const current = viewRef.current;
-      if (!current || turnBusy.current) return false;
+      if (!current) return false;
       turnBusy.current = true;
       const turnId = newTurnId();
       const key = `o-${turnId}`;
@@ -467,8 +530,11 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       if (outcome.kind === "ok") {
         applyTurn(outcome.data, shownText, turnId);
         const search = outcome.data.followUp?.search;
-        if (search) void runSearch(search);
-        else restoreFocus();
+        if (search) runSearch(search);
+        // followUp은 하나만 온다. 같은 턴에 혜택 칸도 정해졌다면(기종·대안 질문과 함께 앞질러 답함) 그 검색도 이어서 부른다.
+        const now = viewRef.current;
+        if (now && !benefitsAsked.current && needsBenefitsSearch(now)) runSearch("benefits");
+        if (!search) restoreFocus();
         return true;
       }
       if (outcome.kind === "unauthorized") {
@@ -481,9 +547,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         warn(COPY.stale);
       } else if (outcome.kind === "failed" && (outcome.status === 403 || outcome.status === 404)) {
         setLoad({ kind: "denied" });
-      } else if (outcome.kind === "failed" && outcome.error === "not_in_progress") {
-        // 6시간 활동이 없어 대기열로 돌아갔거나 다른 곳에서 보냈다. 요청 상태를 다시 읽어 화면을 바꾼다.
-        void finishSent();
+      } else if (leftProgress(outcome)) {
+        // 요청 상태를 다시 읽어 화면을 바꾼다.
       } else {
         warn(
           outcome.kind === "failed"
@@ -494,7 +559,18 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       restoreFocus();
       return false;
     },
-    [requestId, say, warn, applyTurn, runSearch, reload, restoreFocus, toList, finishSent],
+    [requestId, say, warn, applyTurn, runSearch, reload, restoreFocus, toList, leftProgress],
+  );
+
+  /** 턴을 보낸다. 다른 턴이 처리 중이면 보내지 않고 false를 돌려준다. 끝나면 기다리던 [확인했어요]를 이어서 보낸다. */
+  const sendInput = useCallback(
+    async (input: TurnInput, shownText: string | null, restoreDraft = ""): Promise<boolean> => {
+      if (turnBusy.current) return false;
+      const ok = await runTurn(input, shownText, restoreDraft);
+      if (alive.current) afterTurn.current();
+      return ok;
+    },
+    [runTurn],
   );
 
   const submitDraft = useCallback(() => {
@@ -538,8 +614,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         }
         if (outcome.kind === "ok") {
           const result = outcome.data;
-          setView((prev) => {
-            if (!prev) return prev;
+          updateView((prev) => {
             const messages = mergeMessages(prev.messages, result.messages ?? []);
             const photo: PhotoView = { ...result.photo, thumb: result.photo.thumb ?? shrunk.thumb };
             return { ...prev, messages, lastSeq: maxSeq(messages, prev.lastSeq), photos: [...prev.photos.filter((item) => item.id !== photo.id), photo] };
@@ -550,17 +625,18 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
           say(COPY.photoDone);
           // 사진 뒤 다음 질문이 같이 고민한 제품이면 웹에서 후보를 찾는다(사진 응답에는 followUp이 없다).
           const tail = fresh?.messages[fresh.messages.length - 1];
-          if (tail?.role === "ai" && tail.tag === "question" && tail.slot === "alts") void runSearch("alts");
+          if (tail?.role === "ai" && tail.tag === "question" && tail.slot === "alts") runSearch("alts");
         } else {
           setUploadingThumb(null);
           if (outcome.kind === "failed") {
+            if (leftProgress(outcome)) return;
             warn(failureText("photo", outcome.status, outcome.error, outcome.body, COPY.photoFailed));
           } else warn(COPY.photoFailed);
         }
       }
       restoreFocus();
     },
-    [requestId, uploadingThumb, say, warn, reload, restoreFocus, toList, runSearch],
+    [requestId, uploadingThumb, say, warn, reload, restoreFocus, toList, runSearch, updateView, leftProgress],
   );
 
   const removePhoto = useCallback(
@@ -574,9 +650,9 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       if (outcome.kind === "ok") {
         await reload();
         say(COPY.photoRemoved);
-      } else warn(COPY.photoFailed);
+      } else if (!leftProgress(outcome)) warn(COPY.photoFailed);
     },
-    [requestId, reload, say, warn, toList],
+    [requestId, reload, say, warn, toList, leftProgress],
   );
 
   // ----- 리뷰 -----
@@ -595,14 +671,16 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       return;
     }
     if (outcome.kind === "ok") {
-      setView((prev) => (prev ? { ...prev, stage: "review", review: outcome.data.review } : prev));
+      updateView((prev) => ({ ...prev, stage: "review", review: outcome.data.review }));
+    } else if (leftProgress(outcome)) {
+      // 요청 상태를 다시 읽어 화면을 바꾼다.
     } else if (outcome.kind === "failed" && outcome.status === 409) {
       warn(failureText("review", outcome.status, outcome.error, outcome.body, COPY.reviewNotReady));
       await reload();
     } else {
       warn(COPY.reviewFailed);
     }
-  }, [requestId, reviewBusy, toList, warn, reload]);
+  }, [requestId, reviewBusy, toList, warn, reload, updateView, leftProgress]);
 
   const pickQuick = useCallback(
     (reply: QuickReply) => {
@@ -626,9 +704,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         return;
       }
       if (outcome.kind === "ok") {
-        setView((prev) =>
-          prev ? { ...prev, review: { ...prev.review, ...outcome.data.review, text: outcome.data.review.text ?? text } } : prev,
-        );
+        updateView((prev) => ({ ...prev, review: { ...prev.review, ...outcome.data.review, text: outcome.data.review.text ?? text } }));
         setEditing(false);
         say(COPY.confirmed);
         // 편집 칸이 사라지고 [보내기]가 그려진 뒤 그리로 초점이 간다(아래 effect).
@@ -642,13 +718,15 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         await reload();
         setEditing(false);
         warn(COPY.stale);
+      } else if (leftProgress(outcome)) {
+        // 요청 상태를 다시 읽어 화면을 바꾼다.
       } else if (outcome.kind === "failed" && outcome.status === 409) {
         warn(failureText("review", outcome.status, outcome.error, outcome.body, COPY.reviewNotReady));
       } else {
         warn(COPY.reviewFailed);
       }
     },
-    [requestId, reviewBusy, toList, say, warn, reload],
+    [requestId, reviewBusy, toList, say, warn, reload, updateView, leftProgress],
   );
 
   const sendFinal = useCallback(async () => {
@@ -673,15 +751,15 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     if (outcome.kind === "failed" && isStaleFailure(outcome)) {
       await reload();
       warn(COPY.stale);
-    } else if (outcome.kind === "failed" && outcome.error === "not_in_progress") {
-      void finishSent();
+    } else if (leftProgress(outcome)) {
+      // 요청 상태를 다시 읽어 화면을 바꾼다.
     } else if (outcome.kind === "failed" && outcome.status === 409) {
       warn(failureText("send", outcome.status, outcome.error, outcome.body, COPY.sendBlocked));
       await reload();
     } else if (outcome.kind === "failed" && (outcome.status === 403 || outcome.status === 404)) {
       setLoad({ kind: "denied" });
     } else warn(COPY.sendFailed);
-  }, [requestId, sending, toList, warn, reload, finishSent]);
+  }, [requestId, sending, toList, warn, reload, finishSent, leftProgress]);
 
   const release = useCallback(async () => {
     if (releasing) return;
@@ -701,36 +779,43 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
 
   // ----- 파생 값 -----
 
+  /**
+   * [확인했어요]. 서버가 받은 뒤에야(`slots.*.links`에 들어간 뒤에야) "확인함"으로 그린다. 실패하면 그대로 두고 안내한다.
+   * 다른 턴이 처리 중이면 그 턴이 끝난 뒤에 보낸다(버리지 않는다).
+   */
+  const checkLink = useCallback(
+    (url: string) => {
+      if (pendingLinks.current.has(url)) return;
+      pendingLinks.current.add(url);
+      if (turnBusy.current) {
+        linkQueue.current.push(url);
+        say("확인한 내용을 저장하는 중이에요. 잠시만 기다려 주세요.");
+        return;
+      }
+      void sendInput({ type: "link_check", url }, null).finally(() => pendingLinks.current.delete(url));
+    },
+    [sendInput, say],
+  );
+
+  useEffect(() => {
+    afterTurn.current = () => {
+      const url = linkQueue.current.shift();
+      if (url === undefined) return;
+      void sendInput({ type: "link_check", url }, null).finally(() => pendingLinks.current.delete(url));
+    };
+  }, [sendInput]);
+
   const actions: ChatActions = useMemo(
     () => ({
       pickChip: (chip) => void sendInput({ type: "chip", slot: chip.slot, value: chip.value }, chip.label),
       own: () => composerRef.current?.focus(),
       pickProduct: (name) => void sendInput({ type: "chip", slot: "alts", value: name }, `${name}이랑 고민했어요`),
       noAlts: () => void sendInput({ type: "skip", slot: "alts" }, "같이 고민한 제품 없어요"),
-      checkLink: (url) => {
-        setLocalChecked((list) => (list.includes(url) ? list : [...list, url]));
-        void sendInput({ type: "link_check", url }, null);
-      },
+      checkLink,
       removePhoto: (photo) => void removePhoto(photo),
     }),
-    [sendInput, removePhoto],
+    [sendInput, removePhoto, checkLink],
   );
-
-  const slotsForLog = useMemo(() => {
-    if (!view) return {};
-    if (localChecked.length === 0) return view.slots;
-    const benefits = view.slots.benefits;
-    return {
-      ...view.slots,
-      benefits: {
-        value: benefits?.value ?? "",
-        status: benefits?.status ?? "filled",
-        by: benefits?.by ?? "volunteer",
-        ...benefits,
-        links: [...(benefits?.links ?? []), ...localChecked],
-      },
-    };
-  }, [view, localChecked]);
 
   // 질문 7은 혜택 카드 뒤에 그린다(검색 중에는 보류). 화면이 보이는 순서가 이 목록이다.
   const searchingBenefits = thinking?.kind === "benefits" || view?.pending.search?.kind === "benefits";
@@ -798,13 +883,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const idle = !thinking && optimistic.length === 0 && !editing && !reviewShown;
   let quick: QuickReply[] = idle ? lastQuick : [];
   if (idle && view.purchase === "unset" && quick.length === 0) quick = PURCHASE_QUICK;
-  const detailLine = [
-    request.item ? `품목 ${request.item}` : null,
-    request.brand ? `브랜드 ${request.brand}` : null,
-    `예산 ${request.budget}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  // 이용자가 말한 조건(새 제품·중고 또는 자유 문장)과 브랜드를 빠뜨리지 않는다.
+  const detailLine = structuredLine(request);
   const reviewReady = reviewShown && view.review.status === "confirmed";
   const photoCount = view.photos.length;
   const placeholder = hero
@@ -827,7 +907,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         panelOpen={panelOpen}
         panelSummary={`필수 ${progress.filled}/${progress.total}`}
         onTogglePanel={() => setPanelOpen((value) => !value)}
-        panelId="vc-panel"
+        panelId={PANEL_ID}
+        toggleRef={panelToggleRef}
       />
       <div className="vc-body">
         <HeroBackdrop variant={hero ? "hero" : "chat"} />
@@ -857,7 +938,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
               <ChatLog
                 messages={shown}
                 photos={view.photos}
-                slots={slotsForLog}
+                slots={view.slots}
                 fold={fold}
                 foldOpen={foldOpen}
                 onToggleFold={() => setFoldOpen((value) => !value)}
@@ -932,7 +1013,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
           </div>
         </main>
         <SlotPanel
-          id="vc-panel"
+          id={PANEL_ID}
           purchase={view.purchase}
           slots={view.slots}
           photoCount={photoCount}

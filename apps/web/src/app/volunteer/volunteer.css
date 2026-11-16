@@ -1939,6 +1939,21 @@
   .vol-chat.is-chat main.vc-main {
     margin-right: 360px;
   }
+
+  /* 히어로(맡은 직후)에는 패널이 숨어 있지만 [요청 내려놓기]는 거기서도 닿아야 한다. 버튼으로 열고 닫는다. */
+  .is-hero .vc-panel-toggle {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .is-hero .vc-panel.is-open {
+    visibility: visible;
+    transform: none;
+    box-shadow: -12px 0 28px rgba(18, 20, 23, 0.14);
+    transition:
+      transform var(--lh-motion-card) var(--lh-ease-enter),
+      visibility 0s;
+  }
 }
 
 @media (max-width: 1179px) {

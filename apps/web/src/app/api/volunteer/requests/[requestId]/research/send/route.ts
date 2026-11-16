@@ -8,7 +8,7 @@ import { checkCandidate } from "@/lib/resultInput";
 import { fail, isUuid, runVolunteerRoute, succeed } from "@/lib/volunteerApi";
 
 // 보내기(design.md 3.2, 4.11). 검수를 마친 리뷰와 칸으로 결과를 만들어 research_send로 저장한다(필수·confirmed·version·rev를 저장소가 확인).
-// 처음 보내면 201, 다시 보내면 처음 저장한 값으로 200이다. B1이 옛 POST …/result를 지우면 결과를 쓰는 길은 이 라우트 하나다(그 전에는 옛 라우트도 살아 있다).
+// 처음 보내면 201, 다시 보내면 처음 저장한 값으로 200이다. 결과를 쓰는 길은 이 라우트 하나다(옛 POST …/result는 지웠다).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

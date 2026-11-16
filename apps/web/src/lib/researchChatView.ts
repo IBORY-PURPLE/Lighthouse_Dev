@@ -331,6 +331,17 @@ const isBenefitsSearch = (message: ChatMessage) => message.role === "ai" && mess
 const isRefsQuestion = (message: ChatMessage) => message.role === "ai" && message.tag === "question" && message.slot === "refs";
 
 /**
+ * 혜택 칸이 정해졌는데(채움·확인·건너뜀) 대화에 혜택 검색 결과가 아직 없는가.
+ * 턴 응답의 followUp은 한 번에 하나만 와서, 같은 턴에 기종·대안 질문이 함께 나오면 혜택 검색이 빠진다(contract-ui.md).
+ * 그때 화면이 직접 `benefits`를 부른다(서버가 캐시로 답해 한 번만 센다).
+ */
+export function needsBenefitsSearch(view: { slots: SlotMap; messages: readonly ChatMessage[] }): boolean {
+  const status = view.slots.benefits?.status;
+  if (status !== "filled" && status !== "confirmed" && status !== "skipped") return false;
+  return !view.messages.some(isBenefitsSearch);
+}
+
+/**
  * 질문 7(참고 글) 말풍선은 혜택 카드 뒤에 그린다(contract-ui.md "질문 7 말풍선 그리기 순서").
  * 혜택 칸을 채운 턴 응답에는 질문 7이 이미 들어 있어 메시지 번호는 질문 7이 혜택 카드보다 앞이다.
  * - 혜택 검색이 진행 중이면(searching) 질문 7을 아직 그리지 않는다. 검색이 실패해 카드가 끝내 안 와도 진행이 끝나면 제자리에 보인다.

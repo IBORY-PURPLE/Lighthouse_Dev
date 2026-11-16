@@ -57,8 +57,8 @@ WBS #8 확정 전 가정(③은 챗봇 대화, ④는 스크린샷 업로드만)
 Vercel 서버 함수 (Next.js, Node 22, 기본 지역 iad1 — §11에서 icn1 검토)
   /enter(옛 링크 이동만), /api/health, /api/match(시연 이어 보기)
   /api/requests, /api/requests/{id}                         플로우 A
-  /api/volunteer/queue, /api/volunteer/requests/{id}[/claim|/release|/result]   플로우 B ②⑥
-  /api/volunteer/research                                   ③④⑤ 리서치 AI (상태 없음)
+  /api/volunteer/queue, /api/volunteer/requests/{id}[/claim|/release]   플로우 B ②⑥
+  /api/volunteer/requests/{id}/research[/turn|/search|/photos|/review|/send]   ③④⑤ 대화형 리서치 챗(v2.2 초안, 서버가 대화 상태를 가짐. 옛 /api/volunteer/research·/result는 지움)
   /api/chat                                                 시연 이어 보기 화면(/volunteer/demo)의 챗봇 (스트리밍)
       │                       │
       ▼                       ▼
@@ -132,10 +132,10 @@ apps/web/                                   Vercel Root Directory
   src/app/api/{health,match,chat}/route.ts
   src/app/api/requests/route.ts, [requestId]/route.ts                 플로우 A
   src/app/api/volunteer/queue/route.ts
-  src/app/api/volunteer/requests/[requestId]/{route,claim/route,release/route,result/route}.ts
-  src/app/api/volunteer/research/route.ts   리서치 AI(§8.7)
+  src/app/api/volunteer/requests/[requestId]/{route,claim/route,release/route}.ts
+  src/app/api/volunteer/requests/[requestId]/research/{route,turn/route,search/route,photos/route,photos/[photoId]/route,review/route,send/route}.ts   대화형 리서치 챗(§8.3). 옛 카드형 research·result 라우트는 지움
   src/components/{SpeechInput,StatusRegion,DemoHandoff,VolunteerChat}.tsx
-  src/components/{ResearchChat,ResearchCards,ResearchSummary,SentView}.tsx   리서치 챗 화면, 카드, 보내기 전 확인, 보낸 결과
+  src/components/{SentView}.tsx, src/components/research/*.tsx   보낸 결과, 대화형 리서치 챗 화면(`ResearchConversation.tsx`와 부품). 옛 ResearchChat·ResearchCards·ResearchSummary는 지움
   src/lib/{rateLimit,llm,prompt,chat,speech,parseRequest,matchHandoff,volunteers,answerRules}.ts
   src/lib/{voiceChat,voiceInstructions}.ts  서버 전용. 이용자 음성 대화: 요청 검사, OpenAI 호출, 접수 변환, 가짜 대화 / 지시문 원문(§8.9)
   src/lib/requestStore.ts                   서버 전용. 저장소 인터페이스, 메모리 구현, Supabase 구현
@@ -239,7 +239,7 @@ recognition.maxAlternatives = 1;
 | 내려놓기 취소(취소 버튼, Esc, 카드 이동) | 없음 | "내려놓기" 버튼(카드 이동이면 새 질문) |
 
 - 화면 구조: 위 띠(제목·구매 인증 배지·진행 점·현재 질문)는 고정이라, 답을 쓰는 동안에도 현재 질문이 화면 위에 보인다(이용자 기획 설계원칙 4). "이용자가 한 말" 상자와 보조 문구는 스크롤 본문에 둔다. 화면이 아주 작거나 글자를 크게 키워 두 띠가 화면을 너무 많이 차지할 때만 고정을 풀어 입력 칸이 가려지지 않게 한다(조건은 `ResearchChat.tsx`). 초점 받은 칸은 띠 밖으로 스크롤된다.
-- 리서치 챗의 안내 글자는 `research.ts`의 `RESEARCH_COPY`와 `ResearchChat.tsx`에, 대기열·전송 안내는 `volunteerView.ts`의 `VOLUNTEER_MESSAGES`에 있다. 이 표는 시점과 초점만 정한다.
+- 리서치 챗의 안내 글자는 `research.ts`의 `RESEARCH_COPY`와 `ResearchConversation.tsx`(`COPY`)에, 대기열·전송 안내는 `volunteerView.ts`의 `VOLUNTEER_MESSAGES`에 있다. 이 표는 시점과 초점만 정한다.
 - 상태 안내는 화면마다 `StatusRegion`(`role="status"`) 하나로 한다.
 - 진행 점 7개는 그림(`role="img"`)으로 묶고 몇 번째 질문인지 글 이름을 준다(`RESEARCH_COPY.progressAlt`). 눈에 보이는 진행 글자는 낭독에서 숨긴다.
 - 막힌 버튼은 `disabled` 대신 `aria-disabled`로 둔다. 초점이 버튼에 남고, 막힌 "다음"·"완료하고 보내기"를 누르면 이유를 안내한다.
@@ -369,7 +369,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 | 2 | `POST /api/volunteer/requests/{id}/claim` | 200 `{requestId, status:"in_progress", claimedAt, alreadyMine, request: VolunteerRequestView}` | 409 `already_claimed` / `already_done` / `expired`, 404 |
 | 3 | `GET /api/volunteer/requests/{id}` | 200 `VolunteerRequestView` + `status` | 403 `not_yours`, 404 |
 | 4 | `POST /api/volunteer/requests/{id}/release` (선택) | 200 `{requestId, status:"waiting"}` | 403 `not_yours`, 409 `not_in_progress` |
-| 5 | `POST /api/volunteer/requests/{id}/result` `{candidateName, purchaseUrl, guide, summary, summarySource, summaryEdited}` | 201 `{requestId, status:"done", sentAt, durationSeconds}`, 같은 봉사자 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`/`invalid_url`, 403 `not_yours`, 409 `not_in_progress`, 404 |
+| 5 | *(v2.2 초안에서 `POST /api/volunteer/requests/{id}/research/send`로 대체됨. 이 줄의 `/result`는 지웠다)* `POST /api/volunteer/requests/{id}/result` `{candidateName, purchaseUrl, guide, summary, summarySource, summaryEdited}` | 201 `{requestId, status:"done", sentAt, durationSeconds}`, 같은 봉사자 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`/`invalid_url`, 403 `not_yours`, 409 `not_in_progress`, 404 |
 
 Next 16의 동적 경로 `params`는 Promise라 `await`한다(구현 때 설치된 Next 타입으로 확인).
 
@@ -385,9 +385,9 @@ v1 계약에 선택 필드만 더한다. 봉사자 화면에서만 호출한다.
 - 응답, 오류 표, `runtime`, `maxDuration`은 v1 그대로.
 - 대화 기록은 보내지 않는다(v1 그대로). 대화는 봉사자 탭 메모리에만 있다.
 
-### 8.7 ③④⑤ `POST /api/volunteer/research` (v2.1)
+### 8.7 ③④⑤ `POST /api/volunteer/research` (v2.1, v2.2 초안에서 지움: 대화형 `research/*` 라우트로 대체, §8.3)
 
-리서치 챗의 AI 도움 한 번을 돌려준다. 상태가 없다. 요청·응답 필드, 로그 형식, 검사 패턴 같은 세부 계약은 `apps/web/src/lib/research.ts`·`researchRequest.ts`·`researchCheck.ts`와 `src/app/api/volunteer/research/route.ts`를 따른다.
+리서치 챗의 AI 도움 한 번을 돌려준다. 상태가 없다. 요청·응답 필드, 로그 형식, 검사 패턴 같은 세부 계약은 `apps/web/src/lib/research.ts`·`researchImage.ts`·`researchCheck.ts`를 따른다(옛 라우트 파일은 지웠다).
 
 - 설정: `runtime = 'nodejs'`, `dynamic = 'force-dynamic'`, `maxDuration = 60`. 응답은 래퍼 없는 JSON, `Cache-Control: no-store`. 봉사자 쿠키가 있어야 한다.
 - 요청 `{ requestId, kind, ... }`. `kind`는 8종이다: 카드용 `model`·`pros`·`alts`·`altReason`·`benefits`·`refs`, 사진 설명 `photo`, 핵심 정리 초안 `summary`. kind에 필요한 답(기종, 같이 고민한 제품 등)을 함께 보낸다.
@@ -476,7 +476,7 @@ AI는 봉사자의 리서치를 돕기만 한다. 경계는 코드로 고정한�
 - v1의 가짜 음성 입력, 화면 시험 환경(iPhone 15·WebKit), 필수 사례, 챗봇 품질 규칙은 그대로다. 통과 보고에는 "가짜 음성 입력 기준"을 밝힌다.
 - 저장소: `requestStore`는 인터페이스 하나에 메모리 구현과 Supabase 구현을 둔다. Supabase 구현은 가짜 RPC 클라이언트를 주입해 단위 시험한다.
 - 리서치 챗 단위 시험: `tests/unit/research*.test.ts`(카드 상태·구매 인증, 출력 검사, 사진 축소 계산, 결과 변환, 라우트). 라우트 시험은 가짜 OpenAI로 fallback과 오류 코드를 본다.
-- 리서치 챗 화면 시험: `tests/e2e/volunteer-research.spec.ts`(도우미 `e2e/helpers/researchFlow.ts`). `LLM_MODE=mock` 가짜 AI 응답 기준이고, fallback은 `page.route`로 만든다. 보고에는 "가짜 AI 응답 기준"을 밝힌다.
+- 리서치 챗 화면 시험: `tests/e2e/research-chat.spec.ts`(`e2e-desktop` 프로젝트, 노트북 1440·1024). 실제 Next 서버를 `LLM_MODE=mock` 가짜 AI로 띄워 붙고, 응답은 꾸미지 않는다(실패 시험만 `page.route`로 요청을 끊는다). 실제 AI 한 사이클은 `research-cycle.spec.ts`(`npm run test:research-cycle`, 공개 주소). 보고에는 "가짜 AI 응답 기준"을 밝힌다.
 - v2.1에서 화면이 바뀌어 대상이 없어진 시험(요청 상세·캡처·전송 화면 시험, `extract-text`·`summarize` 라우트 시험, `candidateDraft`·`captureRead`·`evidenceCheck`·`imagePieces`·`summaryDraft`·`summaryEdit` 단위 시험)은 리서치 챗 시험으로 바꿨다. 기준을 낮춘 것이 아니다.
 - (v2.1에서 없앰) ④ 합성 이미지 조각과 `EXTRACT_MODE=mock`으로 자르기·보내기·텍스트 입력 경로 시험, `evidenceCheck` 고정 시험값, ④ 엔진 정확도 정답지 비교.
 - 필수 사례 추가: 대기열 빈 목록, 이미 진행 중(409) → 목록 복귀와 낭독, 남의 요청 상세(403), 사진 413·415, 필수 카드가 빈 채 보내기 막힘, AI fallback에서도 카드 진행, ⑥ 실패 → 입력 유지·재전송 같은 결과, 봉사자 화면 axe 위반 0건.

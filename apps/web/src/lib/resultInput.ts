@@ -1,6 +1,6 @@
 import type { SentCandidate } from "./volunteerView";
 
-// 봉사자가 보내는 결과(후보 1~3개)의 한도와 검사. 화면(요약 확인)과 서버(/result)가 함께 쓴다(서버 전용 import 없음).
+// 봉사자가 보내는 결과(후보 1~3개)의 한도와 후보 한 개의 검사. 대화형 보내기(`research/send`)와 결과 만들기(`researchResult.ts`)가 쓴다(서버 전용 import 없음).
 // 결과에는 상품명, 링크, 구매 가이드, 요약 항목의 이름·값만 담는다. 이미지, 읽은 글자 원문, 근거 문장은 담지 않는다:
 // 검사를 통과한 값만 새 객체로 옮기므로 그 밖의 속성은 버려진다.
 
@@ -20,10 +20,6 @@ export type ResultErrorCode = "invalid_request" | "too_long" | "invalid_url";
 
 export type CandidateCheck =
   | { ok: true; candidate: SentCandidate }
-  | { ok: false; error: ResultErrorCode };
-
-export type ResultCheck =
-  | { ok: true; candidates: SentCandidate[] }
   | { ok: false; error: ResultErrorCode };
 
 const textLength = (value: string) => [...value].length;
@@ -86,18 +82,4 @@ export function checkCandidate(input: unknown): CandidateCheck {
     ok: true,
     candidate: { name: trimmedName, url: trimmedUrl, guide: trimmedGuide, summary: items },
   };
-}
-
-/** 요청 본문 `{candidates:[…]}`를 검사한다. 후보는 1~3개. */
-export function parseResultBody(body: unknown): ResultCheck {
-  const list = (body as { candidates?: unknown } | null)?.candidates;
-  if (!Array.isArray(list) || list.length < 1) return { ok: false, error: "invalid_request" };
-  if (list.length > RESULT_LIMITS.maxCandidates) return { ok: false, error: "too_long" };
-  const candidates: SentCandidate[] = [];
-  for (const entry of list) {
-    const checked = checkCandidate(entry);
-    if (!checked.ok) return checked;
-    candidates.push(checked.candidate);
-  }
-  return { ok: true, candidates };
 }

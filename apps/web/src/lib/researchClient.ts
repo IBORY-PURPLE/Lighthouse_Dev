@@ -226,6 +226,20 @@ export function maxSeq(messages: readonly ChatMessage[], floor = 0): number {
   return messages.reduce((top, message) => Math.max(top, message.seq), floor);
 }
 
+/**
+ * 합칠 때 새 응답의 칸·구매 상태는 덮어쓰고 메시지는 seq로 합친다.
+ * `GET ?after`는 사진 썸네일을 주지 않으므로, 같은 id의 사진은 이미 가진 썸네일을 남긴다.
+ */
+export function mergeView(prev: ResearchView, incoming: ResearchView): ResearchView {
+  const messages = mergeMessages(prev.messages, incoming.messages);
+  const photos = incoming.photos.map((photo) => {
+    if (photo.thumb) return photo;
+    const thumb = prev.photos.find((item) => item.id === photo.id)?.thumb;
+    return thumb ? { ...photo, thumb } : photo;
+  });
+  return { ...incoming, messages, photos, lastSeq: maxSeq(messages, incoming.lastSeq) };
+}
+
 export function snapshotOf(view: ResearchView): SessionSnapshot {
   return {
     stage: view.stage,

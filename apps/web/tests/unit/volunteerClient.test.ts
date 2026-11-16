@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { STATUS } from "@/lib/speech";
 import {
   claimRequest,
+  clearLegacyDrafts,
   enterVolunteer,
   failureMessage,
   fetchQueue,
@@ -71,5 +72,49 @@ describe("volunteerClient", () => {
     });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await enterVolunteer()).toMatchObject({ kind: "error" });
+  });
+});
+
+describe("clearLegacyDrafts", () => {
+  class FakeStorage {
+    private items = new Map<string, string>();
+    get length() {
+      return this.items.size;
+    }
+    key(index: number) {
+      return [...this.items.keys()][index] ?? null;
+    }
+    getItem(key: string) {
+      return this.items.get(key) ?? null;
+    }
+    setItem(key: string, value: string) {
+      this.items.set(key, value);
+    }
+    removeItem(key: string) {
+      this.items.delete(key);
+    }
+  }
+
+  it("옛 카드형 리서치 상태(lh.vol.research.v1.*)와 요약 초안(lh.vol.draft.v1.*)만 지우고 다른 키는 둔다", () => {
+    const storage = new FakeStorage();
+    storage.setItem("lh.vol.research.v1.x", "{}");
+    storage.setItem("lh.vol.draft.v1.y", "초안");
+    storage.setItem("lh.vol.seen.v1", "[]");
+    storage.setItem("unrelated", "1");
+    vi.stubGlobal("window", { localStorage: storage });
+    clearLegacyDrafts();
+    expect(storage.getItem("lh.vol.research.v1.x")).toBeNull();
+    expect(storage.getItem("lh.vol.draft.v1.y")).toBeNull();
+    expect(storage.getItem("lh.vol.seen.v1")).toBe("[]");
+    expect(storage.getItem("unrelated")).toBe("1");
+  });
+
+  it("저장소를 못 읽어도 던지지 않는다", () => {
+    vi.stubGlobal("window", {
+      get localStorage(): Storage {
+        throw new Error("blocked");
+      },
+    });
+    expect(() => clearLegacyDrafts()).not.toThrow();
   });
 });

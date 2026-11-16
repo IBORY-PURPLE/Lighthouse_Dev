@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkCandidate, isHttpsLink, parseResultBody, RESULT_LIMITS } from "@/lib/resultInput";
+import { checkCandidate, isHttpsLink, RESULT_LIMITS } from "@/lib/resultInput";
 
 const good = () => ({
   name: "소니 WH-CH720N",
@@ -21,27 +21,14 @@ describe("결과 한도(resultInput)", () => {
     });
   });
 
-  it("후보 1~3개는 통과하고 값은 앞뒤 공백을 자른다", () => {
-    for (const count of [1, 2, 3]) {
-      const result = parseResultBody({ candidates: Array.from({ length: count }, good) });
-      expect(result).toMatchObject({ ok: true });
-      expect(result.ok && result.candidates).toHaveLength(count);
-    }
+  it("후보 한 개는 통과하고 값은 앞뒤 공백을 자른다", () => {
     const trimmed = checkCandidate({ ...good(), name: "  이름  ", guide: " 가이드 " });
     expect(trimmed).toEqual({
       ok: true,
       candidate: { ...good(), name: "이름", guide: "가이드" },
     });
-  });
-
-  it("후보 0개는 invalid_request, 4개는 too_long, 목록이 아니면 invalid_request", () => {
-    expect(parseResultBody({ candidates: [] })).toEqual({ ok: false, error: "invalid_request" });
-    expect(parseResultBody({ candidates: Array.from({ length: 4 }, good) })).toEqual({
-      ok: false,
-      error: "too_long",
-    });
-    for (const body of [null, {}, { candidates: "x" }, [], "x"]) {
-      expect(parseResultBody(body)).toEqual({ ok: false, error: "invalid_request" });
+    for (const entry of [null, "x", 1, []]) {
+      expect(checkCandidate(entry)).toEqual({ ok: false, error: "invalid_request" });
     }
   });
 

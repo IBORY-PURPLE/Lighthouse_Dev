@@ -174,6 +174,8 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(page.getByRole("heading", { level: 2, name: /소니 헤드셋 구매경험\s*리서치 어시스턴트/ })).toBeVisible();
     await expect(page.getByText("요청을 맡았어요 · 이용자: “소니 무선 헤드셋 사고 싶어요”")).toBeVisible();
     await expect(page.getByTestId("purchase-badge")).toHaveText("구매 확인 전");
+    // 위 바의 요청 줄에 이용자가 말한 조건(새 제품)이 있다.
+    await expect(page.getByText("품목 헤드셋 · 브랜드 소니 · 예산 30만 원 안쪽 · 새 제품")).toBeVisible();
     await expect(composer(page)).toHaveAttribute("placeholder", "소니 헤드셋을 써 본 경험을 편하게 적어 주세요. 사진도 올릴 수 있어요.");
     await expect(quickGroup(page).getByRole("button")).toHaveText(["구매했어요", "구매하지 않았어요 · 리서치만"]);
     await expect(count(page)).toBeHidden();
@@ -308,6 +310,96 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     expect(calls.some((call) => call.path.endsWith("/result"))).toBe(false);
     // 서버가 알린 검색(followUp)만 불렀다: 기종, 대안, 혜택.
     expect(calls.filter((call) => call.path === "/research/search").map((call) => call.body?.kind)).toEqual(["model", "alts", "benefits"]);
+  });
+
+  test("히어로 글에 혜택 이야기를 앞질러 적어도 혜택 카드가 나오고, [확인했어요]는 서버가 받은 뒤 확인함이 되어 새로 고쳐도 남는다", async ({ page }) => {
+    test.setTimeout(90_000);
+    const calls = await begin(page);
+    // 구매 여부와 혜택 경험을 한 글에 적는다. 서버는 기종 질문(followUp model)을 주고 혜택 칸도 채운다.
+    await sendText(page, "소니 헤드셋 샀어요. 카드 할인 받고 무료 배송이었어요");
+    await expect(page.getByText("AI 제안 · 웹에서 찾은 후보 3개")).toBeVisible();
+    // 기종 검색 뒤에 화면이 혜택 검색을 이어서 부른다(followUp은 하나만 온다).
+    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    expect(calls.filter((call) => call.path === "/research/search").map((call) => call.body?.kind)).toEqual(["model", "benefits"]);
+
+    // 카드 둘을 잇따라 누른다. 두 번째는 첫 번째 턴이 끝난 뒤에 보내진다(버려지지 않는다).
+    // 혜택은 종류별로 묶음이 따로 오므로 화면 전체의 카드 버튼에서 고른다.
+    const buttons = page.getByRole("list", { name: "찾은 혜택" }).getByRole("button", { name: /^확인했어요/ });
+    const first = buttons.nth(0);
+    const second = buttons.nth(1);
+    await first.click();
+    await second.click();
+    await expect(first).toHaveAttribute("aria-pressed", "true");
+    await expect(second).toHaveAttribute("aria-pressed", "true");
+    expect(calls.filter((call) => call.path === "/research/turn" && (call.body?.input as { type?: string } | undefined)?.type === "link_check")).toHaveLength(2);
+
+    // 새로 고쳐도 서버 칸에서 둘 다 확인함으로 돌아온다.
+    await page.reload();
+    const again = page.getByRole("list", { name: "찾은 혜택" }).getByRole("button", { name: /^확인했어요/ });
+    await expect(again.nth(0)).toHaveAttribute("aria-pressed", "true");
+    await expect(again.nth(1)).toHaveAttribute("aria-pressed", "true");
+    await expect(again.nth(2)).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("혜택 검색이 실패해도 안내하고 질문 7이 제자리에 나오며 다음 턴이 막히지 않는다", async ({ page }) => {
+    test.setTimeout(120_000);
+    // 서버의 한도(CAP) 응답은 환경 변수로 0에 맞출 수 없어(양의 정수만 받는다) 혜택 검색 호출만 네트워크 단계에서 끊는다.
+    let cut = 0;
+    await page.route("**/research/search", async (route) => {
+      const kind = (route.request().postDataJSON() as { kind?: string } | null)?.kind;
+      if (kind === "benefits") {
+        cut += 1;
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+    await answerPros(page);
+    await uploadPhoto(page);
+    await pickAlt(page);
+    await answerReason(page);
+    await sendText(page, "카드 할인 받고 무료 배송이었어요");
+    await expect(page.getByText("찾지 못했어요. 쇼핑몰에서 직접 찾아도 돼요.")).toBeVisible();
+    expect(cut).toBe(1);
+    await expect(page.getByTestId("thinking")).toHaveCount(0);
+    await expect(page.getByRole("list", { name: "찾은 혜택" })).toHaveCount(0);
+    // 혜택 카드가 끝내 안 와도 질문 7이 제자리에 보이고, 다음 턴(건너뛰기)을 보낼 수 있다.
+    await expect(log(page).getByText(REFS_QUESTION)).toBeVisible();
+    await skipRefs(page);
+    await expect(count(page)).toHaveText("필수 4/4");
+  });
+
+  test("턴을 보내지 못하면 쓴 글을 되돌려 놓고, 다시 보내면 이어진다", async ({ page }) => {
+    await begin(page);
+    let cut = true;
+    await page.route("**/research/turn", async (route) => {
+      if (cut) {
+        cut = false;
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    await composer(page).fill("소니 헤드셋 샀어요");
+    await composer(page).press("Enter");
+    await expect(page.getByText("보내지 못했어요. 쓴 글은 그대로 두었어요. 다시 보내 주세요.")).toBeVisible();
+    await expect(composer(page)).toHaveValue("소니 헤드셋 샀어요");
+    await composer(page).press("Enter");
+    await expect(log(page).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
+  });
+
+  test("히어로에서도 모은 정보 패널을 열어 요청을 내려놓을 수 있다(1440)", async ({ page }) => {
+    await begin(page);
+    await expect(page.getByTestId("research-stage")).toHaveAttribute("data-mode", "hero");
+    const toggle = page.getByRole("button", { name: /^모은 정보/ });
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+    await page.getByRole("button", { name: "요청 내려놓기" }).click();
+    await page.getByRole("button", { name: "돌려놓기" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
   });
 
   test("리서치만 경로: 사진 칸·첨부 없음, 필수 3칸", async ({ page }) => {
@@ -445,8 +537,15 @@ test.describe("대화형 리서치 챗 · 1024", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(count(page)).toBeVisible();
     await expectFits(page);
+    // 내려놓기 확인 묶음: 눌린 버튼이 사라져도 초점이 body로 떨어지지 않는다.
+    await page.getByRole("button", { name: "요청 내려놓기" }).click();
+    await expect(page.getByRole("button", { name: "취소" })).toBeFocused();
+    await page.getByRole("button", { name: "취소" }).click();
+    await expect(page.getByRole("button", { name: "요청 내려놓기" })).toBeFocused();
+    // 패널 안에서 Esc: 패널이 닫히고 초점은 열었던 버튼으로 돌아간다.
     await page.keyboard.press("Escape");
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeFocused();
     await expect(count(page)).toBeHidden();
   });
 });
