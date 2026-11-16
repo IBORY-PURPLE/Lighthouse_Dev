@@ -91,8 +91,14 @@ export async function POST(
         tail = logTail({ kind: "review", ai: label, up: written.text ? null : written.upstream, usage: written.usage });
       }
 
-      const saved = await store.setReview({ ...actor, baseVersion: null, text, status: "draft" });
-      if (saved.outcome === "bad_request" || saved.outcome === "stale") return fail(500, "internal_error");
+      // AI를 기다리는 동안 칸이 바뀌었으면 옛 칸으로 만든 초안을 저장하지 않는다.
+      // 저장소가 읽은 시점의 version을 저장 조건으로 대조한다(원격 함수가 아직 옛 버전이어도 막히도록 한 번 더 읽어 본다).
+      const again = await loadSession(id, volunteerId, sessionId);
+      if (!again.ok) return again.response;
+      if (again.view.version !== view.version) return failWith(409, "stale", { version: again.view.version });
+      const saved = await store.setReview({ ...actor, baseVersion: view.version, text, status: "draft" });
+      if (saved.outcome === "stale") return failWith(409, "stale", { version: saved.version });
+      if (saved.outcome === "bad_request") return fail(500, "internal_error");
       if (saved.outcome !== "ok") return guardResponse(saved.outcome);
       return succeed({ review: publicReview(saved.review), version: view.version, ai: label });
     },

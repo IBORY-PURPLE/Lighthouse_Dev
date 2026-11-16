@@ -652,9 +652,10 @@ export function createMemoryResearchStore(
       const guarded = await guard(input);
       if (typeof guarded === "string") return { outcome: guarded };
       const session = guarded;
+      // confirmed는 version을 꼭 대조하고, draft는 version을 주면 대조한다(AI 응답 사이 칸이 바뀐 초안을 막는다).
       if (
-        input.status === "confirmed" &&
-        (input.baseVersion === null || input.baseVersion !== session.version)
+        (input.status === "confirmed" && input.baseVersion === null) ||
+        (input.baseVersion !== null && input.baseVersion !== session.version)
       ) {
         return { outcome: "stale", version: session.version };
       }

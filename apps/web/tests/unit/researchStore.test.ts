@@ -315,6 +315,28 @@ describe("메모리 사진·리뷰·보내기", () => {
     expect(removed.outcome === "ok" && removed.session.photos).toEqual([]);
   });
 
+  it("리뷰 초안도 읽은 시점의 version과 다르면 stale이고 저장하지 않는다(null이면 대조 없음)", async () => {
+    const r = await opened(newVol());
+    const filled = await research.apply({
+      ...r.actor, clientTurnId: "a", baseVersion: 0,
+      patch: { purchase: "research", slots: { model: slot("720N"), pros: slot("가벼워요"), altReason: slot("편해요") } },
+      messages: [], next: [],
+    });
+    const version = filled.outcome === "ok" ? filled.response.version : -1;
+    // AI를 기다리는 사이 다른 탭에서 칸을 고쳤다.
+    const edited = await research.apply({
+      ...r.actor, clientTurnId: "b", baseVersion: version, patch: { slots: { pros: slot("조용해요") } }, messages: [], next: [],
+    });
+    expect(edited.outcome).toBe("ok");
+    const stale = await research.setReview({ ...r.actor, baseVersion: version, text: "옛 초안", status: "draft" });
+    expect(stale).toEqual({ outcome: "stale", version: version + 1 });
+    const open = await research.open(r.actor.requestId, r.actor.volunteerId, null);
+    expect(open.outcome === "ok" && open.view.review).toEqual({});
+    expect((await research.setReview({ ...r.actor, baseVersion: version + 1, text: "새 초안", status: "draft" })).outcome).toBe("ok");
+    expect((await research.setReview({ ...r.actor, baseVersion: null, text: "대조 없는 초안", status: "draft" })).outcome).toBe("ok");
+    expect((await research.setReview({ ...r.actor, baseVersion: null, text: "확정", status: "confirmed" })).outcome).toBe("stale");
+  });
+
   it("보내기: 필수 → review → 보냄. 세션은 지워지고 다시 보내면 existing", async () => {
     const r = await opened(newVol());
     const candidates = [{ name: "720N", url: "https://example.com", guide: "리뷰", summary: [] }];
@@ -447,7 +469,7 @@ describe("Supabase 저장소", () => {
     await store.removePhoto(actor, "p1");
     expect(calls[3]).toMatchObject({ fn: "research_remove_photo", args: { p_photo_id: "p1" } });
     await store.setReview({ ...actor, baseVersion: 2, text: "글", status: "confirmed" });
-    expect(calls[4]).toMatchObject({ fn: "research_set_review", args: { p_review: { text: "글", status: "confirmed" } } });
+    expect(calls[4]).toMatchObject({ fn: "research_set_review", args: { p_base_version: 2, p_review: { text: "글", status: "confirmed" } } });
     await store.send({ ...actor, baseVersion: 2, reviewRev: 1, candidates: [{}] });
     expect(calls[5]).toMatchObject({ fn: "research_send", args: { p_review_rev: 1 } });
   });

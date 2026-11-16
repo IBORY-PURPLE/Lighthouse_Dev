@@ -15,6 +15,7 @@ const MIGRATIONS = [
   "supabase/migrations/20261109175932_requests.sql",
   "supabase/migrations/20261112010000_volunteer_flow.sql",
   "supabase/migrations/20261117000000_research_conversation.sql",
+  "supabase/migrations/20261117010000_research_review_draft_base.sql",
 ];
 const DOWN = "supabase/rollback/20261117000000_research_conversation_down.sql";
 
@@ -144,6 +145,7 @@ beforeAll(async () => {
   for (const file of MIGRATIONS.slice(0, 2)) await db.exec(sql(file));
   before = await existingDefinitions();
   await db.exec(sql(MIGRATIONS[2]));
+  await db.exec(sql(MIGRATIONS[3]));
 }, 60_000);
 
 afterAll(async () => {
@@ -420,6 +422,25 @@ describe("begin·apply", () => {
     expect(set.review).toMatchObject({ status: "confirmed", confirmedVersion: v, rev: 1 });
     const out = await apply(r, "b", v, { slots: { pros: slot("조용해요") } }, [], []);
     expect(out.response.session.review).toMatchObject({ status: "draft", rev: 2 });
+  });
+
+  it("리뷰 초안도 version을 주면 대조한다: 읽은 뒤 칸이 바뀌었으면 stale이고 저장하지 않는다", async () => {
+    const r = await opened();
+    const v = await fillRequired(r, "a", 0);
+    const set = (base: number | null, status: string) =>
+      call("public.research_set_review($1::uuid, $2, $3::uuid, $4::int, $5::jsonb)", [
+        r.id, r.volunteerId, r.sessionId, base, JSON.stringify({ text: "리뷰 본문", status }),
+      ]);
+    // AI를 기다리는 사이 칸이 바뀐다.
+    const edited = await apply(r, "b", v, { slots: { pros: slot("조용해요") } }, [], []);
+    expect(edited.outcome).toBe("ok");
+    expect(await set(v, "draft")).toEqual({ outcome: "stale", version: v + 1 });
+    const stored = await one<{ review: Json }>("select review from public.research_sessions where request_id = $1", [r.id]);
+    expect(stored.review).toEqual({});
+    expect(await set(v + 1, "draft")).toMatchObject({ outcome: "ok", review: { status: "draft", rev: 1 } });
+    expect(await set(null, "draft")).toMatchObject({ outcome: "ok", review: { rev: 2 } });
+    expect(await set(null, "confirmed")).toMatchObject({ outcome: "stale" });
+    expect(await set(v + 1, "confirmed")).toMatchObject({ outcome: "ok", review: { status: "confirmed", confirmedVersion: v + 1 } });
   });
 
   it("검색 도중 턴이 들어와도 서로 막지 않고 seq는 겹치지 않는다", async () => {
@@ -859,11 +880,13 @@ describe("마이그레이션 되돌리기", () => {
     const c = await claimed();
     expect((await one<{ r: string }>("select public.release_request($1, $2) as r", [c.id, c.volunteerId])).r).toBe("released");
     await db.exec(sql(MIGRATIONS[2]));
+    await db.exec(sql(MIGRATIONS[3]));
     const again = await opened();
     expect(again.sessionId).toBeTruthy();
     // 한 번 더 되돌렸다 올려도 된다(멱등하게 반복 가능).
     await db.exec(sql(DOWN));
     await db.exec(sql(MIGRATIONS[2]));
+    await db.exec(sql(MIGRATIONS[3]));
     expect((await opened()).sessionId).toBeTruthy();
   });
 });
