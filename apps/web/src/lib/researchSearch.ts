@@ -158,17 +158,21 @@ const compactKey = (value: string) => value.normalize("NFKC").toUpperCase().repl
  * 첫 토큰(보통 브랜드)과 브랜드·품목(generic) 토큰을 뺀 나머지 토큰도 모두 인용에 있어야 하고, 남는 토큰이 없으면 첫 토큰이 인용에 있어야 한다.
  */
 function nameInEvidence(name: string, evidence: readonly string[], generic: readonly string[]): boolean {
-  const known = compactKey(evidence.join(" "));
+  // 인용마다 따로 대조한다(인용을 이어 붙이면 한 인용의 끝과 다른 인용의 시작이 합쳐져 없는 기종 번호가 생긴다).
+  const known = evidence.map(compactKey);
+  const found = (key: string) => known.some((text) => text.includes(key));
   const skip = compactKey(generic.join(" "));
-  const tokens = name
-    .normalize("NFKC")
-    .split(/[\s|·,/()]+/)
-    .map((token) => ({ raw: token, key: compactKey(token) }))
-    .filter((token) => token.key.length >= 2);
+  // 한 글자 토큰("버즈 3"의 3)은 앞 토큰에 붙여서 본다.
+  const raws: string[] = [];
+  for (const raw of name.normalize("NFKC").split(/[\s|·,/()]+/).filter(Boolean)) {
+    if (compactKey(raw).length < 2 && raws.length > 0) raws[raws.length - 1] += raw;
+    else raws.push(raw);
+  }
+  const tokens = raws.map((raw) => ({ raw, key: compactKey(raw) })).filter((token) => token.key.length >= 2);
   if (tokens.length === 0) return false;
-  if (tokens.some((token) => /\d/.test(token.raw) && !known.includes(token.key))) return false;
+  if (tokens.some((token) => /\d/.test(token.raw) && !found(token.key))) return false;
   const rest = tokens.slice(1).filter((token) => !skip.includes(token.key));
-  return rest.length > 0 ? rest.every((token) => known.includes(token.key)) : known.includes(tokens[0]!.key);
+  return rest.length > 0 ? rest.every((token) => found(token.key)) : found(tokens[0]!.key);
 }
 
 /**

@@ -129,6 +129,23 @@ describe("cleanProducts: 같이 고민한 제품 이름·특징·주소 검사",
     expect(items.map((item) => item.name)).toEqual(["갤럭시 버즈2 프로", "소니 WH-CH720N"]);
   });
 
+  it("떨어져 쓴 숫자(버즈 3)와 인용 두 개를 이어 붙여야 생기는 기종 번호는 근거로 치지 않는다", () => {
+    const texts = ["삼성 갤럭시 버즈2 안내", "소니 WH-1000", "XM6 후기 모음"];
+    const urls = ["https://a.example.com/1", "https://a.example.com/2", "https://a.example.com/3"];
+    const items = cleanProducts(
+      [
+        { name: "갤럭시 버즈 3", feature: "새 기종이에요", pageUrl: urls[0] },
+        { name: "소니 WH-1000XM6", feature: "이어 붙여 생긴 번호예요", pageUrl: urls[1] },
+        { name: "갤럭시 버즈 2", feature: "근거가 있어요", pageUrl: urls[2] },
+      ],
+      allowedOf(urls),
+      texts,
+      [],
+      { texts, generic: [] },
+    );
+    expect(items.map((item) => item.name)).toEqual(["갤럭시 버즈 2"]);
+  });
+
   it("특징에서 가격·재고 문장과 없는 기종 이름 문장은 버리고 60자로 자르며, 5개까지만 남긴다", () => {
     const urls = Array.from({ length: 7 }, (_, index) => `https://shop.example.com/p/${index}`);
     const raw = urls.map((pageUrl, index) => ({
