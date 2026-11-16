@@ -32,6 +32,7 @@ const SCRUB_CASES: Array<[string, string]> = [
   ["대소문자 Data:text/plain,hello DATA:image/png;base64,AAAA 끝", "대소문자   끝"],
   ["끊긴 사진 data:image/png;base64,iVBORw0KGgo\n" + "A1b+".repeat(8) + " Good 끝", "끊긴 사진  Good 끝"],
   ["영문 data:image/png;base64,AA Good", "영문  Good"],
+  ["긴 단어 data:image/png;base64,AAAA interoperability 끝", "긴 단어  interoperability 끝"],
   ["공백 없는 긴 덩어리 " + "A1b+".repeat(60) + " 끝 / 199자 " + "a".repeat(199) + " 끝", "공백 없는 긴 덩어리  끝 / 199자 " + "a".repeat(199) + " 끝"],
   ["괄호 https://shop.example/a(b)?email=a%40b.com 끝", "괄호  끝"],
   ["따옴표 https://shop.example/a'b\"c?email=a%40b.com 끝", "따옴표  끝"],
