@@ -491,7 +491,7 @@ describe("역할 분리", () => {
   it("이용자 화면 코드는 챗봇 호출을 가져오지 않는다", () => {
     const root = path.resolve(import.meta.dirname, "../../src");
     for (const file of [
-      "app/page.tsx",
+      "app/classic/page.tsx",
       "components/DemoHandoff.tsx",
       "components/SpeechInput.tsx",
       "lib/matchHandoff.ts",
