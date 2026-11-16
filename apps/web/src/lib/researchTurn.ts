@@ -57,6 +57,10 @@ const SLOT_VALUE_LIMIT = 120;
 const EDIT_MAX = 200;
 const URL_MAX = 500;
 const BODY_BYTES_MAX = 8000;
+/** 혜택 링크를 [확인했어요]로 남기는 수. 리뷰·결과에는 이 가운데 2개까지 들어간다. */
+const BENEFIT_LINKS_MAX = 4;
+const BENEFIT_LINK_VALUE = "혜택 링크를 확인했어요";
+const BENEFIT_LINK_CHECKED = "혜택 링크를 확인한 것으로 적었어요.";
 
 export const QUICK_IDS = [
   "purchase.bought",
@@ -856,8 +860,17 @@ export function planTurn(args: PlanArgs): TurnPlan {
     case "link_check": {
       messages.push(volunteerMessage("확인했어요"));
       const entry = shownLinks(session.pending).find((link) => link.url === input.url);
-      if (!entry || entry.slot !== "refs") {
+      if (!entry || (entry.slot !== "refs" && entry.slot !== "benefits")) {
         messages.push(aiNotice("확인할 링크를 찾지 못했어요."));
+        hold = true;
+      } else if (entry.slot === "benefits") {
+        // 혜택 카드 [확인했어요]: 경험 칸의 값은 그대로 두고 확인한 링크만 더한다(리뷰·결과에는 2개까지 들어간다). 다음 질문은 만들지 않는다.
+        const before = session.slots.benefits;
+        const links = [...new Set([...(before?.links ?? []), input.url])].slice(-BENEFIT_LINKS_MAX);
+        slotsPatch.benefits = before
+          ? { ...before, links }
+          : { value: BENEFIT_LINK_VALUE, links, status: "confirmed", by: "volunteer" };
+        messages.push(aiNotice(BENEFIT_LINK_CHECKED));
         hold = true;
       } else {
         slotsPatch.refs = { value: input.url, links: [input.url], status: "confirmed", by: "volunteer" };

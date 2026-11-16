@@ -132,14 +132,17 @@ export interface ResearchCaps {
   dailyAi: number;
 }
 
-/** 요청당·하루 상한(design.md 4.12). 하루 값은 환경변수로 바꿀 수 있다. */
+/**
+ * 요청당·하루 상한(design.md 4.12). 하루 값은 환경변수로 바꿀 수 있다.
+ * 하루 값은 QA 1회에 2.5만 원 안(이용자 결정 A47): 검색 1회 최대 약 60원 x 380 = 약 2.28만 원, AI 턴 1,500회는 약 0.15만 원.
+ */
 export const DEFAULT_CAPS: ResearchCaps = {
   turns: 40,
   searches: 12,
   photoUploads: 6,
   reviews: 3,
-  dailySearches: 60,
-  dailyAi: 600,
+  dailySearches: 380,
+  dailyAi: 1500,
 };
 
 export const MAX_PHOTOS = 3;

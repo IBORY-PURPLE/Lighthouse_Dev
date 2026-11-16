@@ -521,9 +521,9 @@ describe("POST …/research/search (model)", () => {
     expect((await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" })).status).toBe(202);
   });
 
-  it("model 말고 다른 종류와 잘못된 본문은 400, 쿠키 없으면 401", async () => {
+  it("model·alts·benefits 말고 다른 종류와 잘못된 본문은 400, 쿠키 없으면 401", async () => {
     const o = await opened();
-    expect((await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "alts" })).status).toBe(400);
+    expect((await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "refs" })).status).toBe(400);
     expect((await find(o.id, o.cookie, { sessionId: "nope", kind: "model" })).status).toBe(400);
     expect((await find(o.id, undefined, { sessionId: o.sessionId, kind: "model" })).status).toBe(401);
     expect((await find(o.id, o.cookie, { sessionId: randomUUID(), kind: "model" })).status).toBe(409);
@@ -581,6 +581,156 @@ describe("POST …/research/search (model)", () => {
     expect(data.messages[0]).toMatchObject({ ai: "capped" });
     expect(data.messages[0].body.text).toContain("이 요청");
     expect(logs.find((entry) => entry.includes("research/search"))).toMatch(/ai=capped cap=request/);
+  });
+});
+
+describe("POST …/research/search (alts, benefits)", () => {
+  const url = (name: string) => `https://example.com/${name}`;
+  const liveReply = (items: unknown[], urls: string[]) => ({
+    usage: { input_tokens: 200, output_tokens: 50 },
+    output: [
+      { type: "web_search_call", action: { type: "search", sources: urls.map((address) => ({ url: address })) } },
+      {
+        type: "message",
+        content: [
+          {
+            type: "output_text",
+            text: JSON.stringify({ items }),
+            annotations: urls.map((address) => ({ type: "url_citation", url: address, title: "" })),
+          },
+        ],
+      },
+    ],
+  });
+  /** 구매함으로 정하고 혜택 경험을 칸에 넣는다(고치기). 이후 version을 돌려준다. */
+  async function withExperience(text: string): Promise<Opened> {
+    const o = await opened();
+    const bought = await (await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }))).json();
+    const at = { ...o, version: bought.version };
+    const edited = await (await post(o.id, o.cookie, body(at, { type: "edit", slot: "benefits", text }))).json();
+    return { ...o, version: edited.version };
+  }
+
+  it("alts: 제품 카드 메시지(products)를 더하고 version은 올리지 않으며, 보인 이름을 shownAlts로 남겨 카드에서 고를 수 있다", async () => {
+    const o = await opened();
+    const bought = await (await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }))).json();
+    const response = await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "alts" });
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.messages).toHaveLength(1);
+    expect(data.messages[0]).toMatchObject({ role: "ai", tag: "search", slot: "alts", ai: "ok" });
+    expect(data.messages[0].body).toMatchObject({ kind: "products", noneLabel: "같이 고민한 제품 없어요", ownLabel: "직접 적을게요" });
+    const names = ["가짜 헤드셋 LH-500", "가짜 헤드셋 LH-600", "가짜 헤드셋 LH-700"];
+    expect(data.messages[0].body.items.map((item: { name: string }) => item.name)).toEqual(names);
+    const view = await (await get(o.id, o.cookie)).json();
+    expect(view.version).toBe(bought.version);
+    expect(view.pending.shownAlts).toEqual(names);
+    expect(view.pending.search).toBeUndefined();
+    const picked = await (
+      await post(o.id, o.cookie, body({ ...o, version: bought.version }, { type: "chip", slot: "alts", value: "가짜 헤드셋 LH-600" }))
+    ).json();
+    expect(picked.session.slots.alts).toMatchObject({ value: "가짜 헤드셋 LH-600", status: "confirmed", by: "volunteer" });
+  });
+
+  it("alts: 같은 검색을 다시 부르면 캐시, 처리 중이면 202", async () => {
+    const o = await opened();
+    const first = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "alts" })).json();
+    expect(await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "alts" })).json()).toEqual({
+      messages: [],
+      lastSeq: first.lastSeq,
+    });
+    const second = await opened();
+    await getResearchStore().begin({
+      requestId: second.id,
+      volunteerId: volunteerOf(second.cookie),
+      sessionId: second.sessionId,
+      kind: "search",
+      cacheKey: "alts",
+      units: 1,
+    });
+    expect((await find(second.id, second.cookie, { sessionId: second.sessionId, kind: "alts" })).status).toBe(202);
+  });
+
+  it("benefits: 갈래마다 메시지 하나(머리 줄은 첫 메시지), 열 수 없는 곳은 check, 보인 링크를 대기 상태에 남긴다", async () => {
+    const o = await withExperience("카드 할인을 받았어요");
+    const response = await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" });
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.messages).toHaveLength(3);
+    for (const message of data.messages) {
+      expect(message).toMatchObject({ role: "ai", tag: "search", slot: "benefits", ai: "ok" });
+      expect(message.body.kind).toBe("benefits");
+      expect(Buffer.byteLength(JSON.stringify(message.body), "utf8")).toBeLessThanOrEqual(8192);
+    }
+    expect(data.messages[0].body.headline).toContain("받으신 경험과 같은 종류 1개, 새 종류 2개");
+    const items = data.messages.flatMap((message: { body: { items: { mode: string; url: string }[] } }) => message.body.items);
+    expect(items.map((item: { mode: string }) => item.mode)).toEqual(["ai", "ai", "check"]);
+    const view = await (await get(o.id, o.cookie)).json();
+    expect(view.version).toBe(o.version);
+    expect(view.pending.shownLinks).toEqual(items.map((item: { url: string }) => ({ url: item.url, slot: "benefits" })));
+    // 같은 검색을 또 부르면 캐시다(검색 호출 3으로 센 사용량은 한 번만 쓴다).
+    const again = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" })).json();
+    expect(again).toEqual({ messages: [], lastSeq: data.lastSeq });
+  });
+
+  it("benefits: [확인했어요]는 경험 칸 값은 두고 링크만 더하며 다음 질문을 만들지 않는다", async () => {
+    const o = await withExperience("카드 할인을 받았어요");
+    const data = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" })).json();
+    const first: string = data.messages[0].body.items[0].url;
+    const checked = await (await post(o.id, o.cookie, body(o, { type: "link_check", url: first }))).json();
+    expect(checked.session.slots.benefits).toMatchObject({ value: "카드 할인을 받았어요", links: [first], status: "confirmed" });
+    expect(checked.messages.map((message: { role: string }) => message.role)).toEqual(["volunteer", "ai"]);
+    expect(checked.messages.some((message: { tag?: string }) => message.tag === "question")).toBe(false);
+    const stranger = await (
+      await post(o.id, o.cookie, body({ ...o, version: checked.version }, { type: "link_check", url: "https://other.example.com/x" }))
+    ).json();
+    expect(stranger.session.slots.benefits.links).toEqual([first]);
+  });
+
+  it("검색하는 동안 GET pending.search = {kind}가 보이고, 끝나면 사라진다", async () => {
+    vi.stubEnv("LLM_MODE", "");
+    const o = await withExperience("카드 할인을 받았어요");
+    const release: { current: () => void } = { current: () => {} };
+    const gate = new Promise<void>((resolve) => {
+      release.current = resolve;
+    });
+    responsesCreate.mockImplementation(async () => {
+      await gate;
+      return liveReply([{ title: "공식몰 사은품 행사", condition: "공식몰에서 주문하면 받아요", compare: "", url: url("a") }], [url("a")]);
+    });
+    const running = find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" });
+    await vi.waitFor(() => expect(responsesCreate).toHaveBeenCalledTimes(3));
+    const during = await (await get(o.id, o.cookie, "?after=0")).json();
+    expect(during.pending.search).toEqual({ kind: "benefits" });
+    // 같은 검색을 또 부르면 202(처리 중)이고 AI를 다시 부르지 않는다.
+    expect((await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" })).status).toBe(202);
+    expect(responsesCreate).toHaveBeenCalledTimes(3);
+    release.current();
+    const done = await running;
+    expect(done.status).toBe(200);
+    const after = await (await get(o.id, o.cookie)).json();
+    expect(after.pending.search).toBeUndefined();
+    const line = logs.find((entry) => entry.startsWith("POST /api/volunteer/requests/[id]/research/search") && entry.includes("kind=benefits ai=ok"))!;
+    expect(line).toMatch(/in=600 out=150 ws=3$/);
+  });
+
+  it("benefits: 웹 검색이 모두 실패하면 안내 글과 쇼핑몰 바로가기로 이어 가고, 요청당 한도에서는 capped 안내", async () => {
+    vi.stubEnv("LLM_MODE", "");
+    responsesCreate.mockRejectedValue(Object.assign(new Error("down"), { status: 500 }));
+    const o = await withExperience("없었어요");
+    const data = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" })).json();
+    expect(data.messages).toHaveLength(1);
+    expect(data.messages[0]).toMatchObject({ ai: "fallback", body: { kind: "text" } });
+    expect(data.messages[0].body.shortcuts.length).toBeGreaterThan(0);
+    expect(logs.find((entry) => entry.includes("kind=benefits"))).toMatch(/ai=fallback up=500/);
+
+    const second = await withExperience("없었어요");
+    const store = getResearchStore();
+    const actor = { requestId: second.id, volunteerId: volunteerOf(second.cookie), sessionId: second.sessionId };
+    for (let index = 0; index < 11; index += 1) await store.begin({ ...actor, kind: "search", cacheKey: `k${index}`, units: 1 });
+    const capped = await (await find(second.id, second.cookie, { sessionId: second.sessionId, kind: "benefits" })).json();
+    expect(capped.messages[0]).toMatchObject({ ai: "capped", body: { kind: "text" } });
+    expect(capped.messages[0].body.text).toContain("이 요청");
   });
 });
 

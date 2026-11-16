@@ -1,6 +1,6 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
-import { purchaseBadge, type ResearchMessage, type ResearchView } from "./researchSession";
+import { purchaseBadge, SEARCH_PENDING_MS, type ResearchMessage, type ResearchView } from "./researchSession";
 import type { GuardFail } from "./researchStore";
 import { fail } from "./volunteerApi";
 
@@ -75,6 +75,19 @@ type SessionLike = Pick<
   "lastSeq" | "purchase" | "slots" | "extras" | "pending" | "review" | "counters"
 >;
 
+/**
+ * 화면에 주는 pending. 검색 중 표시(search = {kind, at})는 시각을 떼고 {kind}만 주고,
+ * 검색이 도중에 끊겨 SEARCH_PENDING_MS(90초)보다 오래된 표시는 걸러 낸다(화면이 끝없이 기다리지 않게).
+ */
+export function visiblePending(pending: ResearchView["pending"], now = Date.now()): ResearchView["pending"] {
+  if (!("search" in pending)) return pending;
+  const { search, ...rest } = pending;
+  if (typeof search !== "object" || search === null) return rest;
+  const { kind, at } = search as { kind?: unknown; at?: unknown };
+  if (typeof kind !== "string" || typeof at !== "number" || now - at > SEARCH_PENDING_MS) return rest;
+  return { ...rest, search: { kind } };
+}
+
 /** 칸·구매·검수 상태(턴·사진 응답이 같이 준다). */
 export function sessionSnapshot(session: SessionLike) {
   return {
@@ -83,7 +96,7 @@ export function sessionSnapshot(session: SessionLike) {
     verified: purchaseBadge(session) === "verified",
     slots: session.slots,
     extras: session.extras,
-    pending: session.pending,
+    pending: visiblePending(session.pending),
     review: publicReview(session.review),
   };
 }

@@ -347,7 +347,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 
 - 필수 칸: 기종, 장점, 대안 대신 고른 이유, 구매함이면 사진, 구매 여부 정해짐. 리서치만이면 사진 칸이 없다.
 - 잠금 순서는 언제나 `requests` → `research_sessions` → `research_usage` → `ai_usage_daily`다. 세션을 쓰는 함수는 요청 행을 `for share`로, 요청을 바꾸는 `research_send`·`research_sweep`은 `for no key update`·`skip locked`로 먼저 잠근다. 그래서 내려놓기·보내기·정리와 교착이 없고, 소유 확인 뒤 내려놓기가 끝나 세션이 남는 경합도 없다.
-- 상한: 요청당 AI 턴 40, 웹 검색 12, 사진 올리기 6, 리뷰 3. 하루 웹 검색 60, AI 호출 600(환경변수 `RESEARCH_DAILY_SEARCH_CAP`·`RESEARCH_DAILY_AI_CAP`로 바꿈).
+- 상한: 요청당 AI 턴 40, 웹 검색 12, 사진 올리기 6, 리뷰 3. 하루 웹 검색 380, AI 호출 1500(QA 1회 2.5만 원 기준, 환경변수 `RESEARCH_DAILY_SEARCH_CAP`·`RESEARCH_DAILY_AI_CAP`로 바꿈).
 - 함수는 모두 `security invoker`, `set search_path = ''`, `revoke execute from public, anon, authenticated`, `grant to service_role`다. 시험은 PGlite(`tests/unit/sql/researchSql.test.ts`).
 - 되돌리기: `supabase/rollback/20261117000000_research_conversation_down.sql`을 사람이 실행하고 `supabase migration repair --status reverted 20261117000000 --linked`를 실행한다.
 - 휴대폰 사진 링크(`photo_links`)는 11/18 뒤 마이그레이션 2(`20261119000000_photo_links.sql`)에서 더한다.

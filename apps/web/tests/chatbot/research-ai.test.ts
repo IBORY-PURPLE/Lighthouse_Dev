@@ -8,13 +8,15 @@ import type { ResearchRequestBody, ResearchResponse } from "@/lib/research";
 import { answerResearch, parseJsonObject, type ResearchContext, type ResearchOutcome } from "@/lib/researchAi";
 import { cleanItems, hasForbidden, urlKey } from "@/lib/researchCheck";
 import { materialMessage, searchInstructions } from "@/lib/researchPrompt";
+import { hasNoExperience, searchBenefits, searchProducts } from "@/lib/researchSearch";
 import { judge, type Violation } from "../helpers/researchJudge";
+import { judgeBenefits, judgeProducts } from "../helpers/researchSearchJudge";
 import cases from "./research-cases.json";
 
 // 리서치 AI(POST /api/volunteer/research의 서버 함수)를 실제 OpenAI로 부르는 고정 사례 시험이다.
 // 실행: apps/web 에서 `npm run test:research-ai` (= vitest run --config vitest.chatbot.config.mts tests/chatbot/research-ai.test.ts).
 // 키가 보이지 않으면 호출 시험을 건너뛴다. 건너뛴 것은 통과가 아니다. 평소 `npm run check`와 e2e에서는 돌지 않는다.
-// 검색 종류가 5번, 그 밖의 호출이 7번이라 돈이 든다. 진단 시험(web_search 직접 호출)은 검색 1번 + 사진 1번을 더 쓰므로
+// 카드형 12개(검색 종류 5번, 그 밖 7번)와 대화형 4개(제품 목록 2번, 혜택 2번 = 검색 호출 최대 14번)라 돈이 든다. 진단 시험(web_search 직접 호출)은 검색 1번 + 사진 1번을 더 쓰므로
 // 환경 변수 RESEARCH_AI_PROBE=1 일 때만 돈다(평소 test:research-ai에서는 건너뛴다).
 // 응답 판정 함수(SUSPECT·EXEMPT·judge)는 tests/helpers/researchJudge.ts에 있고, 키 없이 도는 시험은 tests/unit/researchJudge.test.ts(npm run check)에 있다.
 // 결과는 저장소 루트 test-results/research-ai-results.json, research-ai-probe.json 에 남는다(키·페이지 본문은 담지 않는다).
@@ -28,10 +30,14 @@ const runProbe = process.env.RESEARCH_AI_PROBE === "1";
 type CaseFile = {
   id: string;
   note: string;
+  /** "chat"이면 대화형 검색(researchSearch.ts: 제품 목록 alts, 혜택 benefits 1회차). 없으면 카드형(answerResearch). */
+  flow?: "chat";
   context: ResearchContext;
   request: Record<string, unknown>;
 };
-const CASES = cases as CaseFile[];
+const ALL_CASES = cases as CaseFile[];
+const CASES = ALL_CASES.filter((entry) => entry.flow !== "chat");
+const CHAT_CASES = ALL_CASES.filter((entry) => entry.flow === "chat");
 
 /** 남은 후보·링크·줄 수. */
 function keptCount(response: ResearchResponse): number | null {
@@ -116,8 +122,16 @@ const write = (name: string, value: unknown) => {
 // ---- 시험 -----------------------------------------------------------------------
 
 describe("리서치 고정 사례", () => {
-  it("10개 안팎이고 id가 겹치지 않으며 검색 종류가 5개 이하다", () => {
-    const ids = CASES.map((entry) => entry.id);
+  it("대화형 사례 4개: 제품 목록 2개와 혜택 2개(경험 있음·없음)", () => {
+    expect(CHAT_CASES.map((entry) => entry.id)).toEqual(["r13", "r14", "r15", "r16"]);
+    expect(CHAT_CASES.map((entry) => entry.request.kind)).toEqual(["alts", "alts", "benefits", "benefits"]);
+    const experiences = CHAT_CASES.filter((entry) => entry.request.kind === "benefits").map((entry) => String(entry.request.experience));
+    expect(experiences.some((text) => hasNoExperience(text))).toBe(true);
+    expect(experiences.some((text) => !hasNoExperience(text))).toBe(true);
+  });
+
+  it("카드형은 10개 안팎이고 id가 겹치지 않으며 검색 종류가 5개 이하다", () => {
+    const ids = ALL_CASES.map((entry) => entry.id);
     expect(CASES.length).toBeGreaterThanOrEqual(10);
     expect(CASES.length).toBeLessThanOrEqual(14);
     expect(new Set(ids).size).toBe(ids.length);
@@ -129,7 +143,7 @@ describe("리서치 고정 사례", () => {
   });
 
   it("표기 변형과 가격·재고 유도, 지시 주입 사례를 포함한다", () => {
-    const products = CASES.map((entry) => entry.context.product);
+    const products = ALL_CASES.map((entry) => entry.context.product);
     for (const variant of ["sony", "소니", "SONY", "쏘니"]) {
       expect(products.some((text) => text.includes(variant))).toBe(true);
     }
@@ -214,6 +228,89 @@ describe.skipIf(!hasKey)("실제 OpenAI 리서치 응답", () => {
 
   it("실제 호출이 일어났다: 사례의 절반 이상이 fallback이 아니라 AI 응답이다", () => {
     expect(records.length).toBe(CASES.length);
+    const ok = records.filter((record) => record.ai === "ok").length;
+    expect(ok, `ai=ok ${ok}/${records.length}`).toBeGreaterThanOrEqual(Math.ceil(records.length / 2));
+  });
+});
+
+// ---- 대화형 검색(제품 목록·혜택 1회차) -----------------------------------------------------
+
+describe.skipIf(!hasKey)("실제 OpenAI 대화형 검색 응답", () => {
+  const records: CaseRecord[] = [];
+
+  afterAll(() => {
+    write("research-ai-chat-results.json", {
+      model: LLM_MODEL,
+      intervalMs: INTERVAL_MS,
+      casesRun: records.length,
+      passed: records.filter((record) => !record.error && record.violations.length === 0).length,
+      fallbacks: records.filter((record) => record.ai === "fallback").length,
+      records,
+    });
+  });
+
+  it.each(CHAT_CASES)(
+    "$id: $note",
+    async ({ id, note, context, request }) => {
+      await sleep(INTERVAL_MS);
+      const kind = String(request.kind);
+      const signal = AbortSignal.timeout(55_000);
+      const startedAt = Date.now();
+      let record: CaseRecord;
+      try {
+        if (kind === "alts") {
+          const run = await searchProducts(context, String(request.model), signal);
+          record = {
+            id,
+            kind,
+            note,
+            ai: run.ai,
+            upstream: run.upstream,
+            kept: run.data.length,
+            ms: Date.now() - startedAt,
+            violations: judgeProducts(run),
+            error: null,
+          };
+        } else {
+          const run = await searchBenefits(
+            context,
+            { model: String(request.model), experience: String(request.experience ?? "") },
+            signal,
+          );
+          record = {
+            id,
+            kind,
+            note,
+            ai: run.ai,
+            upstream: run.upstream,
+            kept: run.data.reduce((sum, group) => sum + group.items.length, 0),
+            ms: Date.now() - startedAt,
+            violations: judgeBenefits(run, request),
+            error: null,
+          };
+        }
+      } catch (caught) {
+        record = {
+          id,
+          kind,
+          note,
+          ai: null,
+          upstream: null,
+          kept: null,
+          ms: Date.now() - startedAt,
+          violations: [],
+          error: caught instanceof Error ? caught.message.slice(0, 120) : "unknown",
+        };
+      }
+      records.push(record);
+      expect(record.error).toBeNull();
+      expect(record.violations).toEqual([]);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it("실제 호출이 일어났다: 대화형 4개 가운데 절반 이상이 fallback이 아니라 AI 응답이다", () => {
+    expect(records.length).toBe(CHAT_CASES.length);
     const ok = records.filter((record) => record.ai === "ok").length;
     expect(ok, `ai=ok ${ok}/${records.length}`).toBeGreaterThanOrEqual(Math.ceil(records.length / 2));
   });
