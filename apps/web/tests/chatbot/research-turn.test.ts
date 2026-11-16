@@ -5,7 +5,7 @@ import { getLlmMode, LLM_MODEL } from "@/lib/llm";
 import type { ResearchContext } from "@/lib/researchAi";
 import { unknownModelTokens } from "@/lib/researchCheck";
 import type { NextCandidate, NextMessage, ResearchView, SlotKey, SlotState } from "@/lib/researchSession";
-import { planTurn, runTurn, type TurnPlan } from "@/lib/researchTurn";
+import { planTurn, runTurn, validateAiTurn, type AiMode, type TurnPlan } from "@/lib/researchTurn";
 import { textViolations, type Violation } from "../helpers/researchJudge";
 import cases from "./research-turn-cases.json";
 
@@ -158,6 +158,28 @@ describe("대화형 턴 고정 사례", () => {
   it("가격·재고를 유도하는 사례와 표기 변형 사례가 있다", () => {
     const texts = CASES.map((entry) => entry.text).join("\n");
     for (const word of ["최저가", "재고", "품절", "만원대", "sony", "소니", "SONY", "쏘니"]) expect(texts).toContain(word);
+  });
+
+  it("기존 20문항은 AI가 어떻게 읽어도(ask_back, 채움 없는 reply, 엉뚱한 칸 채움, AI 없음) 찾는 방법 카드가 나오고 위반이 없다", () => {
+    for (const entry of CASES.filter((candidate) => candidate.group === "ask_back")) {
+      const session = makeView(entry.session);
+      const material = [entry.text, entry.context.product, entry.context.brand ?? "", entry.context.item ?? ""];
+      const read = (json: Record<string, unknown> | null): AiMode => {
+        const turn = validateAiTurn(json, { text: entry.text, material, purchase: session.purchase }, entry.context);
+        return turn ? { state: "ok", turn } : { state: "fallback" };
+      };
+      const modes: AiMode[] = [
+        read({ intent: "ask_back", fills: [] }),
+        read({ intent: "reply", fills: [] }),
+        read({ intent: "reply", fills: [{ slot: "pros", value: entry.text.slice(0, 20), evidence: entry.text.slice(0, 20) }] }),
+        { state: "fallback" },
+        { state: "capped", cap: "request" },
+      ];
+      for (const ai of modes) {
+        const plan = planTurn({ session, input: { type: "text", text: entry.text }, context: entry.context, ai });
+        expect(judgeCase(entry, plan), `${entry.id} ${ai.state}`).toEqual([]);
+      }
+    }
   });
 
   it("AI 없음(대체 동작) 사례는 키 없이도 돈다: 묻는 말이면 기본 찾는 방법 카드와 같은 질문", () => {
