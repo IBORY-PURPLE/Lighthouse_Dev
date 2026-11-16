@@ -714,6 +714,26 @@ describe("건너뛰기·칩·고치기·링크", () => {
     expect(link.body).toMatchObject({ kind: "link", url: "https://blog.example.com/review" });
   });
 
+  it("링크 카드는 5개까지만 만들고, 6번째 주소는 카드 없이 알려서 화면에 남은 첫 카드를 계속 확인할 수 있다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    await h.step(say("WH-CH520"), replyAi(fill("model", "WH-CH520")));
+    await h.step(say("가벼워 보여요"), replyAi(fill("pros", "가벼워 보여요")));
+    await h.step({ type: "skip", slot: "alts" });
+    await h.step(say("무게가 맘에 들어요"), replyAi(fill("altReason", "무게가 맘에 들어요")));
+    await h.step({ type: "skip", slot: "benefits" });
+    const urls = [1, 2, 3, 4, 5, 6].map((n) => `https://blog.example.com/post/${n}`);
+    for (const url of urls.slice(0, 5)) {
+      const card = await h.step(say(`이 글 봤어요 ${url}`), replyAi());
+      expect(card.messages.some((message) => message.body.kind === "link")).toBe(true);
+    }
+    const sixth = await h.step(say(`이 글도 봤어요 ${urls[5]}`), replyAi());
+    expect(sixth.messages.some((message) => message.body.kind === "link")).toBe(false);
+    expect(sixth.messages.map(bodyText)).toContain(text.LINK_FULL);
+    const first = await h.step({ type: "link_check", url: urls[0] });
+    expect(first.view.slots.refs).toMatchObject({ value: urls[0], links: [urls[0]], status: "confirmed" });
+  });
+
   it("AI가 참고 글 칸을 주소로 채우려 해도 값으로 넣지 않고 링크 카드로 받는다", async () => {
     const h = await harness();
     await h.step({ type: "quick", replyId: "purchase.research" });

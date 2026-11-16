@@ -26,6 +26,7 @@ export const REVIEW_MORE = "좋아요. 더 알려 주실 내용을 적어 주세
 export const PURCHASE_FIXED = "구매 여부는 이미 정해졌어요.";
 export const NO_CONFIRM = "확인할 내용이 없어요.";
 export const LINK_NOTE = "AI가 열 수 없는 주소라 직접 확인이 필요해요. 확인했으면 눌러 주세요.";
+export const LINK_FULL = "확인을 기다리는 링크가 5개예요. 앞의 링크 카드에서 [확인했어요]를 눌러 주세요.";
 export const LINK_CHECKED = "참고 글 링크를 확인한 것으로 적었어요.";
 export const MODEL_CHIPS_CAPTION = (count: number) => `AI 제안 · 웹에서 찾은 후보 ${count}개. 확인이 필요해요.`;
 export const MODEL_CHIPS_FALLBACK = (count: number) =>

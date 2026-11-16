@@ -26,6 +26,7 @@ import {
   CONFIRM_QUICK,
   FALLBACK_NOTICE,
   LINK_CHECKED,
+  LINK_FULL,
   LINK_NOTE,
   NO_CONFIRM,
   PENDING_NOTICE,
@@ -58,6 +59,8 @@ export const TEXT_MAX = 1000;
 const SLOT_VALUE_LIMIT = 120;
 const EDIT_MAX = 200;
 const URL_MAX = 500;
+/** 한 세션에서 확인을 기다리는 링크 카드 수(pending 8,000바이트 안에 든다). */
+const SHOWN_LINKS_MAX = 5;
 const BODY_BYTES_MAX = 8000;
 
 export const QUICK_IDS = [
@@ -817,15 +820,20 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
       // 3) 참고 글에 링크를 붙여 넣음: AI 검색 없이 "직접 확인 필요" 링크 카드
       if (linkCard && url && slotsPatch.refs === undefined) {
-        messages.push({
-          role: "ai",
-          tag: "search",
-          slot: "refs",
-          body: { kind: "link", url, note: LINK_NOTE },
-          ai: "none",
-        });
+        // 화면에 남은 카드는 모두 확인할 수 있어야 하므로, 보인 링크 목록이 차면 새 카드를 만들지 않는다(앞 카드를 조용히 빼지 않는다).
         const known = shownLinks(session.pending).filter((entry) => entry.url !== url);
-        pendingPatch.shownLinks = [...known, { url, slot: "refs" }].slice(-5);
+        if (known.length >= SHOWN_LINKS_MAX) {
+          messages.push(aiNotice(LINK_FULL));
+        } else {
+          messages.push({
+            role: "ai",
+            tag: "search",
+            slot: "refs",
+            body: { kind: "link", url, note: LINK_NOTE },
+            ai: "none",
+          });
+          pendingPatch.shownLinks = [...known, { url, slot: "refs" }];
+        }
         hold = true;
         break;
       }

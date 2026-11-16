@@ -534,6 +534,14 @@ describe("nameGrounded / cleanItems(sources): 후보 이름은 그 후보가 인
     expect(nameGrounded("보스 QC45", bose)).toBe(true);
     expect(nameGrounded("Bose QC45", bose)).toBe(true);
   });
+  it("출처에 없는 영문·숫자 낱말이 붙은 변형명은 버린다(WH-CH720N Magic), 한글 일반어는 절반까지 봐 준다", () => {
+    const sony = ["Sony WH-CH720N", "https://shop.example/sony-wh-ch720n"];
+    expect(nameGrounded("Sony WH-CH720N Magic", sony)).toBe(false);
+    expect(nameGrounded("Sony WH-CH720N 2세대 Pro", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N Plus", sony)).toBe(false);
+    expect(nameGrounded("Sony WH-CH720N", sony)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N 헤드폰", sony)).toBe(true);
+  });
   it("cleanItems는 sources가 있을 때만 이름을 대조하고, 후보마다 자기 출처 글로만 대조한다", () => {
     const other = "https://shop.example/a?x=1";
     const raw = [
