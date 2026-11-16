@@ -25,6 +25,11 @@ const BENEFIT_SUSPECT: ReadonlyArray<readonly [string, RegExp]> = [
   ["혜택 글의 프로 수", /(?:\d|(?<![가-힣])[일이삼사오육칠팔구]?[십백][일이삼사오육칠팔구]?)\s?프로(?!모|그|젝|필|세)/],
   ["혜택 글의 천·만 단위 수", /\d\s*[천만]/],
   ["혜택 글의 포인트 수량", /\d[\d,.]*\s*(?:p(?![a-z])|포인트)|(?<![가-힣])[일이삼사오육칠팔구]?[십백천만][일이삼사오육칠팔구십백천만]*\s?(?:p(?![a-z])|포인트)/i],
+  // 한글 수사(오·십·이십·하나·두 …) 바로 뒤의 프로·퍼센트·퍼·포인트·P·원. 숫자 한 글자("오 프로 혜택", "오 포인트 적립")도 수량이다.
+  [
+    "혜택 글의 한글 수사 단위",
+    /(?<![가-힣])(?:[일이삼사오육칠팔구십백천만억]+|하나|한|둘|두|셋|세|넷|네|다섯|여섯|일곱|여덟|아홉|열)\s?(?:프로(?![모그젝필세])|퍼센트|퍼(?![가-힣])|포인트|p(?![a-z])|원(?![가-힣]|칙|색|소))/i,
+  ],
   ["연락처", /(?<!\d)0\d{1,2}[\s.)-]+\d{3,4}[\s.-]+\d{4}(?!\d)|(?<!\d)01\d[\s.-]?\d{7,8}(?!\d)|[a-z0-9._%+-]+@[a-z0-9-]+\.[a-z]{2,}|카카오\s?톡|카톡|오픈\s?채팅|텔레그램|open\.kakao/i],
 ];
 
@@ -56,8 +61,18 @@ export function judgeProducts(run: SearchRun<ProductItem[]>): Violation[] {
   run.data.forEach((item, index) => {
     violations.push(...textViolations(`items[${index}].name`, item.name));
     violations.push(...textViolations(`items[${index}].feature`, item.feature));
-    // 고정 후보(AI가 아닌 쇼핑몰 검색 주소)는 인용 대조 대상이 아니다.
-    if (item.pageUrl !== "" && !fixed) violations.push(...urlViolations(`items[${index}].pageUrl`, item.pageUrl, run.citations));
+    // 고정 후보는 확인된 제품 페이지가 없으므로 pageUrl이 없어야 한다(만든 쇼핑몰 검색 주소를 [공식 페이지]로 보이면 안 된다).
+    if (fixed && item.pageUrl !== null) {
+      violations.push({ rule: "고정 후보 pageUrl", field: `items[${index}].pageUrl`, snippet: String(item.pageUrl).slice(0, 40) });
+    }
+    // AI 응답의 제품은 검색 결과에 있던 주소를 가져야 한다.
+    if (!fixed) {
+      if (item.pageUrl === null || item.pageUrl === "") {
+        violations.push({ rule: "제품 주소 없음", field: `items[${index}].pageUrl`, snippet: "" });
+      } else {
+        violations.push(...urlViolations(`items[${index}].pageUrl`, item.pageUrl, run.citations));
+      }
+    }
   });
   if (run.ai === "ok" && (run.data.length < 1 || run.data.length > 5)) {
     violations.push({ rule: "제품 수", field: "items", snippet: String(run.data.length) });

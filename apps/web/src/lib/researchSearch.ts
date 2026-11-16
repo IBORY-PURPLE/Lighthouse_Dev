@@ -1,12 +1,13 @@
 import "server-only";
 import OpenAI from "openai";
 import { getLlmMode, LLM_MODEL } from "./llm";
-import { benefitShortcuts } from "./research";
+import { benefitShortcuts, type ResearchShortcut } from "./research";
 import { fallbackResponse, parseJsonObject, type ResearchContext, type Upstream } from "./researchAi";
 import { clip, hasBenefitForbidden, hasContact, hasForbidden, unknownModelTokens, urlKey, type AllowedUrls } from "./researchCheck";
 import { COMMON, materialMessage } from "./researchPrompt";
 import type { NextMessage } from "./researchSession";
 import { OWN_LABEL, SKIP_LABEL } from "./researchTurnText";
+import { candidateSearchUrl } from "./shopLinks";
 
 // 대화형 리서치 챗의 웹 검색 두 가지(design.md 4.8 같이 고민한 제품 목록, 4.9 혜택 1회차).
 // 라우트(…/research/search)가 부르고, AI가 낸 항목을 검사해 메시지 모양(contract-ui.md의 products·benefits)으로 만든다.
@@ -131,8 +132,11 @@ export function isAiClosedHost(url: string): boolean {
 export interface ProductItem {
   name: string;
   feature: string;
-  /** 검색 결과에 있던 그 제품의 페이지 주소. 다른 제품과 같은 주소를 쓰는 제품은 비워 둔다. */
-  pageUrl: string;
+  /**
+   * 검색 결과에 있던 그 제품의 페이지 주소. 고정 후보처럼 확인된 페이지가 없으면 null이다(화면은 [공식 페이지]를 그리지 않는다).
+   * 쇼핑몰 검색 주소는 pageUrl이 아니라 메시지의 shortcuts(바로가기)로만 준다.
+   */
+  pageUrl: string | null;
 }
 
 export interface BenefitItem {
@@ -174,7 +178,7 @@ const byteCount = (value: string) => Buffer.byteLength(value, "utf8");
 const compactKey = (value: string) => value.normalize("NFKC").toUpperCase().replace(/[^A-Z0-9가-힣]/g, "");
 
 /**
- * 이름이 검색 인용(evidence)에 근거가 있나. 숫자가 든 토큰(영문 기종 번호뿐 아니라 "버즈3" 같은 한글+숫자도)은 모두 인용에 있어야 한다.
+ * 이름이 그 제품의 검색 결과 항목(evidence: 같은 주소의 인용 제목과 주소)에 근거가 있나. 숫자가 든 토큰(영문 기종 번호뿐 아니라 "버즈3" 같은 한글+숫자도)은 모두 인용에 있어야 한다.
  * 첫 토큰(보통 브랜드)과 브랜드·품목(generic) 토큰을 뺀 나머지 토큰도 모두 인용에 있어야 하고, 남는 토큰이 없으면 첫 토큰이 인용에 있어야 한다.
  */
 function nameInEvidence(name: string, evidence: readonly string[], generic: readonly string[]): boolean {
@@ -198,14 +202,15 @@ function nameInEvidence(name: string, evidence: readonly string[], generic: read
 /**
  * 같이 고민한 제품 목록. 이름은 금지 표현이 없고 자료(검색 인용의 제목·주소와 요청·기종)에 없는 기종 이름이 없어야 하고,
  * 주소는 검색 결과에 있던 https 주소여야 한다(없으면 버린다). 특징은 금지 표현·없는 기종 이름이 든 문장을 버리고 60자로 자른다.
- * exclude는 뺄 이름(이미 고른 기종). evidence가 있으면 이름은 그 인용(제목·주소)에 근거가 있어야 한다(generic은 브랜드·품목). 같은 주소를 쓰는 둘째 제품은 버린다(주소는 그 제품의 인용 페이지여야 한다).
+ * exclude는 뺄 이름(이미 고른 기종). evidence가 있으면 이름은 그 제품이 내세운 주소와 같은 검색 결과 항목(sources: 주소 키 → 그 주소의 제목·주소 글)에 근거가 있어야 한다(generic은 브랜드·품목).
+ * 이름과 주소를 따로 전체 결과와 대조하면 A 이름에 B 주소를 붙인 항목이 통과하므로, 한 항목 안에서 함께 대조한다. 같은 주소를 쓰는 둘째 제품은 버린다.
  */
 export function cleanProducts(
   raw: unknown,
   allowed: AllowedUrls,
   material: readonly string[],
   exclude: readonly string[] = [],
-  evidence?: { texts: readonly string[]; generic: readonly string[] },
+  evidence?: { sources: ReadonlyMap<string, readonly string[]>; generic: readonly string[] },
 ): ProductItem[] {
   const seen = new Set(exclude.map(nameKey).filter(Boolean));
   const usedUrls = new Set<string>();
@@ -214,10 +219,10 @@ export function cleanProducts(
     if (items.length >= PRODUCTS_MAX) break;
     const name = oneLine(entry.name);
     if (name.length < 2 || charCount(name) > NAME_MAX || unsafe(name, material) || seen.has(nameKey(name))) continue;
-    if (evidence && !nameInEvidence(name, evidence.texts, evidence.generic)) continue;
     const key = urlKey(oneLine(entry.pageUrl ?? entry.url));
     const source = key === null ? undefined : allowed.get(key);
     if (key === null || source === undefined || charCount(source) > URL_MAX) continue;
+    if (evidence && !nameInEvidence(name, evidence.sources.get(key) ?? [], evidence.generic)) continue;
     if (usedUrls.has(key)) continue;
     seen.add(nameKey(name));
     usedUrls.add(key);
@@ -292,13 +297,20 @@ type SearchAi = "ok" | "fallback" | "capped";
 
 /** 같이 고민한 제품 카드 메시지(질문 4). 목록이 비면 안내 글만 있는 말풍선이다. */
 export function productsMessages(items: readonly ProductItem[], ai: SearchAi, notice?: string): NextMessage[] {
-  const wrap = (chunk: readonly ProductItem[]) => ({
-    kind: "products",
-    text: notice ?? (ai === "fallback" ? ALTS_FALLBACK_INTRO : ALTS_INTRO),
-    items: chunk,
-    noneLabel: SKIP_LABEL.alts,
-    ownLabel: OWN_LABEL,
-  });
+  const wrap = (chunk: readonly ProductItem[]) => {
+    // 확인된 페이지가 없는 제품(고정 후보)은 쇼핑몰 검색 바로가기로만 찾게 한다. 제품 페이지처럼 보이는 주소는 주지 않는다.
+    const shortcuts: ResearchShortcut[] = chunk
+      .filter((item) => item.pageUrl === null)
+      .map((item) => ({ label: `${clip(item.name, 20)} 11번가에서 찾기`, url: candidateSearchUrl(item.name) }));
+    return {
+      kind: "products",
+      text: notice ?? (ai === "fallback" ? ALTS_FALLBACK_INTRO : ALTS_INTRO),
+      items: chunk,
+      noneLabel: SKIP_LABEL.alts,
+      ownLabel: OWN_LABEL,
+      ...(shortcuts.length > 0 ? { shortcuts } : {}),
+    };
+  };
   if (items.length === 0) {
     return [{ role: "ai", tag: "search", slot: "alts", body: { kind: "text", text: notice ?? ALTS_EMPTY }, ai }];
   }
@@ -405,6 +417,8 @@ interface WebSearchResult {
   allowed: Map<string, string>;
   /** 인용 제목(기종 이름 확인 자료). */
   titles: string[];
+  /** 검색 결과 항목별 글: 주소 키 → [주소, 그 주소를 인용한 제목들]. 제품 이름을 그 제품 자신의 항목과 대조하는 자료다. */
+  sources: Map<string, string[]>;
 }
 
 /** Responses + web_search 한 번. 글과 검색 결과(소스·인용)에 나온 주소·제목을 돌려준다. */
@@ -438,9 +452,13 @@ async function callWebSearch(args: {
   );
   const allowed = new Map<string, string>();
   const titles: string[] = [];
+  const sources = new Map<string, string[]>();
   const addUrl = (value: unknown) => {
     const key = typeof value === "string" ? urlKey(value) : null;
-    if (key && typeof value === "string" && !allowed.has(key)) allowed.set(key, value.trim());
+    if (key && typeof value === "string" && !allowed.has(key)) {
+      allowed.set(key, value.trim());
+      sources.set(key, [value.trim()]);
+    }
   };
   const texts: string[] = [];
   args.usage.in += response.usage?.input_tokens ?? 0;
@@ -456,13 +474,17 @@ async function callWebSearch(args: {
         for (const note of content.annotations ?? []) {
           if (note.type !== "url_citation") continue;
           addUrl(note.url);
-          if (typeof note.title === "string") titles.push(note.title);
+          if (typeof note.title === "string") {
+            titles.push(note.title);
+            const key = urlKey(note.url);
+            if (key !== null) sources.get(key)?.push(note.title);
+          }
         }
       }
     }
   }
   const text = texts.join("\n") || (typeof response.output_text === "string" ? response.output_text : "");
-  return { text, allowed, titles };
+  return { text, allowed, titles, sources };
 }
 
 /** 모델이 낸 이름이 자료에 있는지 볼 때 쓰는 글: 검색 인용의 제목·주소와 요청·기종. */
@@ -492,7 +514,8 @@ const MOCK_PRODUCTS: ProductItem[] = [
 export function fixedProducts(context: ResearchContext, model: string): ProductItem[] {
   const body = fallbackResponse({ requestId: "", kind: "alts", model }, context);
   const items = body.kind === "alts" ? body.items : [];
-  return items.map((item) => ({ name: item.name, feature: item.note, pageUrl: item.url ?? "" }));
+  // 고정 후보의 주소는 만든 쇼핑몰 검색 주소라 제품 페이지가 아니다. pageUrl은 비우고, 검색 주소는 shortcuts로만 준다(productsMessages).
+  return items.map((item) => ({ name: item.name, feature: item.note, pageUrl: null }));
 }
 
 /** 같이 고민한 제품 3~5개(질문 4). 던지지 않는다: 실패하면 고정 후보(시연 품목)로 내려간다(ai fallback). */
@@ -525,7 +548,7 @@ export async function searchProducts(
     // 이름 대조 자료는 검색 인용(제목·주소)과 브랜드·품목뿐이다(design 4.8 "자료 = 인용"). 요청 글과 고른 기종은 넣지 않는다.
     const generic = [context.brand ?? "", context.item ?? ""];
     const texts = [...result.titles, ...result.allowed.values()];
-    const items = cleanProducts(raw, result.allowed, [...generic, ...texts], [model], { texts, generic });
+    const items = cleanProducts(raw, result.allowed, [...generic, ...texts], [model], { sources: result.sources, generic });
     const citations = [...result.allowed.values()];
     return items.length > 0
       ? { data: items, ai: "ok", upstream: null, usage, citations }
