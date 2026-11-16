@@ -1,4 +1,4 @@
-import type { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { createRateLimiter } from "@/lib/rateLimit";
 import { getRequestStore } from "@/lib/requestStore";
 import { benefitShortcuts, subjectOf, type ResearchResponse } from "@/lib/research";
@@ -69,31 +69,25 @@ export async function POST(
     request,
     "requests/[id]/research/search",
     async ({ volunteerId }) => {
-      // 분당 8회는 실제로 AI 검색을 부르는 요청만 센다. 틀린 요청·캐시 적중·처리 중(202)·권한 오류는 세지 않는다.
-      const refused = (response: NextResponse) => {
-        checkSearchLimit.refund(volunteerId);
-        return response;
-      };
-      if (!isUuid(requestId)) return refused(fail(400, "invalid_request"));
+      if (!isUuid(requestId)) return fail(400, "invalid_request");
       const id = requestId.toLowerCase();
       const raw = await readJsonBody(request, MAX_BODY_BYTES);
-      if (!raw.ok) return refused(fail(raw.status, raw.error));
+      if (!raw.ok) return fail(raw.status, raw.error);
       const value = raw.value as { sessionId?: unknown; kind?: unknown } | null;
       const sessionId = typeof value?.sessionId === "string" ? value.sessionId : "";
       // 11/18 핵심은 model만이다. 다른 종류는 A3에서 더한다.
-      if (!isUuid(sessionId) || value?.kind !== "model") return refused(fail(400, "invalid_request"));
+      if (!isUuid(sessionId) || value?.kind !== "model") return fail(400, "invalid_request");
 
       const found = await getRequestStore().getForVolunteer(id, volunteerId);
-      if (found.kind === "not_found") return refused(fail(404, "not_found"));
-      if (found.kind === "not_yours") return refused(fail(403, "not_yours"));
-      if (found.request.status !== "in_progress") return refused(fail(409, "not_in_progress"));
+      if (found.kind === "not_found") return fail(404, "not_found");
+      if (found.kind === "not_yours") return fail(403, "not_yours");
+      if (found.request.status !== "in_progress") return fail(409, "not_in_progress");
       const context = { product: found.request.product, brand: found.request.brand, item: found.request.item };
       const subject = subjectOf(context);
 
       const store = getResearchStore();
       const actor = { requestId: id, volunteerId, sessionId: sessionId.toLowerCase() };
       const begun = await store.begin({ ...actor, kind: "search", cacheKey: MODEL_CACHE_KEY, units: 1, caps: capsFromEnv() });
-      if (begun.outcome !== "ok" && begun.outcome !== "capped") checkSearchLimit.refund(volunteerId);
       if (begun.outcome === "pending") return succeed({ pending: true }, 202);
       if (begun.outcome === "cached") {
         // 이미 찾았다. 메시지는 이미 대화에 있으니 새로 주지 않고 마지막 번호만 알린다.
@@ -125,6 +119,14 @@ export async function POST(
         return guardResponse(begun.outcome);
       }
 
+      // 분당 8회는 AI 검색을 새로 부를 때만 센다(틀린 요청·캐시 적중·처리 중(202)·권한 오류·한도 응답은 세지 않는다).
+      // 제한에 닿았으면 검색 중 표시만 지워 나중에 다시 찾을 수 있게 한다.
+      const limit = checkSearchLimit(volunteerId);
+      if (!limit.allowed) {
+        await store.addMessage({ ...actor, cacheKey: MODEL_CACHE_KEY, messages: [], cacheState: "clear" });
+        return fail(429, "rate_limited", { "Retry-After": String(limit.retryAfterSeconds) });
+      }
+
       const outcome = await answerResearch(
         { requestId: id, kind: "model" },
         context,
@@ -148,7 +150,7 @@ export async function POST(
       if (added.outcome !== "ok") return guardResponse(added.outcome);
       return succeed({ messages: added.messages, lastSeq: added.lastSeq });
     },
-    checkSearchLimit,
+    undefined,
     () => tail,
   );
 }

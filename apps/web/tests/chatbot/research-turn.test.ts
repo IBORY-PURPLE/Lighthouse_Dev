@@ -36,7 +36,6 @@ interface Expect {
   fillContains?: string;
   noFill?: boolean;
   guide?: boolean;
-  guideOrFill?: boolean;
 }
 interface CaseFile {
   id: string;
@@ -113,7 +112,6 @@ function judgeCase(entry: CaseFile, plan: TurnPlan): Violation[] {
   }
   const slots = plan.patch.slots ?? {};
   const filled = Object.entries(slots).filter(([, state]) => state && state.status !== "skipped");
-  const hasGuide = plan.messages.some((message) => message.role === "ai" && message.body.kind === "guide");
   const want = entry.expect;
   const fail = (rule: string) => violations.push({ rule, field: "expect", snippet: entry.id });
   if (want.purchase && plan.patch.purchase !== want.purchase) fail(`구매 여부 ${want.purchase} 기대`);
@@ -125,8 +123,15 @@ function judgeCase(entry: CaseFile, plan: TurnPlan): Violation[] {
     }
   }
   if (want.noFill && (filled.length > 0 || plan.patch.purchase)) fail("칸을 채우지 않아야 함");
-  if (want.guide && !hasGuide) fail("찾는 방법 카드 기대");
-  if (want.guideOrFill && !hasGuide && filled.length === 0) fail("찾는 방법 카드나 칸 채움 기대");
+  if (want.guide) {
+    // chatbot-quality 합격 기준 2: 검색어, 확인할 조건, 찾는 순서가 모두 들어 있다.
+    const guide = plan.messages.find((message) => message.role === "ai" && message.body.kind === "guide");
+    const filledList = (value: unknown) => Array.isArray(value) && value.length > 0;
+    if (!guide) fail("찾는 방법 카드 기대");
+    else if (!filledList(guide.body.queries) || !filledList(guide.body.checks) || !filledList(guide.body.steps)) {
+      fail("찾는 방법 카드에 검색어·확인 조건·찾는 순서가 모두 있어야 함");
+    }
+  }
   return violations;
 }
 

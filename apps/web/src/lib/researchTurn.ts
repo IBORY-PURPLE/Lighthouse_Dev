@@ -179,7 +179,7 @@ export function evidenceMatches(evidence: string, text: string): boolean {
 }
 
 const QUESTION_END =
-  /(?:나요|까요|인가요|가요|죠|니|는지|을지|ㄹ지|어때요?|뭐예요|뭐야|뭔가요|알려\s?줘|알려\s?주세요|찾아\s?줘|찾아\s?주세요|추천해\s?줘|추천해\s?주세요|가르쳐\s?줘)[\s.!]*$/;
+  /(?:나요|까요|인가요|가요|는지|을지|ㄹ지|어때요?|뭐예요|뭐야|뭔가요|알려\s?줘요?|알려\s?주세요|찾아\s?줘요?|찾아\s?주세요|추천해\s?줘요?|추천해\s?주세요|가르쳐\s?줘요?)[\s.!]*$/;
 
 /** 의문형·부탁형이면 봉사자가 AI에게 묻는 말로 본다(칸에 넣지 않는다). */
 export function isQuestionLike(text: string): boolean {
@@ -720,22 +720,22 @@ export function planTurn(args: PlanArgs): TurnPlan {
         break;
       }
 
-      // 4) AI에게 묻는 말: 칸을 채우지 않고 찾는 방법만 준다. 같은 질문을 다시 보인다.
-      const asking =
-        filledCount === 0 && ((turn && turn.intent === "ask_back") || (isQuestionLike(input.text) && !turn?.fills.length));
-      if (asking && session.purchase !== "unset") {
+      // 4) AI에게 묻는 말(AI가 ask_back으로 읽었거나 의문형·부탁형): 찾는 방법 카드를 준다. 가격·재고에는 답하지 않는다.
+      // 칸을 채운 답과 섞여 있어도 카드는 붙인다(chatbot-quality 합격 기준 2). 채운 칸이 없으면 같은 질문을 다시 보인다.
+      const asking = turn?.intent === "ask_back" || isQuestionLike(input.text);
+      if (asking) {
         const material = [input.text, context.product, context.brand ?? "", context.item ?? "", ...shownNames(session.pending)];
         const guide = turn?.guide ?? mergeGuide(null, context, material);
         messages.push(guideMessage(lastSlot, guide, turn?.guide ? "ok" : "none"));
-        if (lastSlot) {
+        if (filledCount === 0 && lastSlot && session.purchase !== "unset") {
           messages.push(questionMessage(lastSlot, questionContext(nowPost(), subject)));
           hold = true;
+          break;
         }
-        break;
       }
 
       // 5) 직전 질문에 답이 없다: 재질문 한 번, 그다음 짧은 답, AI가 없으면 넣을지 확인
-      if (filledCount === 0 && lastSlot && session.purchase !== "unset" && isAskable(nowPost(), lastSlot)) {
+      if (!asking && filledCount === 0 && lastSlot && session.purchase !== "unset" && isAskable(nowPost(), lastSlot)) {
         const reasked = (session.counters.reasked[lastSlot] ?? 0) >= 1;
         const cleaned = oneLine(cleanText(input.text, SLOT_VALUE_LIMIT));
         if (reasked && cleaned !== "" && isShortAnswer(input.text, lastSlot)) {

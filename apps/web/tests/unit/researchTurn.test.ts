@@ -435,6 +435,31 @@ describe("묻는 말·재질문·짧은 답", () => {
     }
   });
 
+  it("묻는 말이 칸을 채운 답과 섞여 있어도 찾는 방법 카드를 붙이고 다음 질문으로 이어 간다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.bought" });
+    const result = await h.step(say("WH-CH720N이요. 그런데 가격 알려줘"), {
+      intent: "ask_back",
+      fills: [fill("model", "WH-CH720N", "WH-CH720N이요")],
+    });
+    expect(result.view.slots.model?.value).toBe("WH-CH720N");
+    const guide = result.messages.find((message) => message.body.kind === "guide")!;
+    expect(guide.body).toMatchObject({ queries: defaultGuide(CONTEXT).queries, checks: defaultGuide(CONTEXT).checks, steps: defaultGuide(CONTEXT).steps });
+    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "pros" });
+    // AI가 reply로 읽었어도 말이 부탁형이면 같다.
+    const h2 = await harness();
+    await h2.step({ type: "quick", replyId: "purchase.bought" });
+    const reply = await h2.step(say("WH-CH720N 가격 알려줘"), replyAi(fill("model", "WH-CH720N", "WH-CH720N")));
+    expect(reply.messages.some((message) => message.body.kind === "guide")).toBe(true);
+  });
+
+  it("구매 여부 전에 묻는 말이면 찾는 방법 카드 뒤에 구매 질문을 한다", async () => {
+    const h = await harness();
+    const result = await h.step(say("소니 헤드셋 어떻게 찾아요?"), { intent: "ask_back", fills: [] });
+    expect(result.messages.some((message) => message.body.kind === "guide")).toBe(true);
+    expect(result.messages.at(-1)).toMatchObject({ slot: "purchase", body: { text: text.PURCHASE_QUESTION } });
+  });
+
   it("재질문은 한 번이고, 그다음 짧은 답은 그대로 값으로 넣는다(short)", async () => {
     const h = await harness();
     await h.step({ type: "quick", replyId: "purchase.bought" });

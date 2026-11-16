@@ -22,7 +22,7 @@ export function createRateLimiter({
 }: RateLimiterOptions) {
   const windows = new Map<string, { startedAt: number; count: number }>();
 
-  function check(key: string): RateLimitResult {
+  return function check(key: string): RateLimitResult {
     const current = now();
 
     if (windows.size >= SWEEP_THRESHOLD) {
@@ -45,15 +45,7 @@ export function createRateLimiter({
     }
     window.count += 1;
     return { allowed: true };
-  }
-
-  /** 방금 센 1회를 돌려준다(새 일을 하지 않은 재전송·캐시 적중·처리 중 응답을 세지 않으려고). 창이 이미 끝났으면 아무것도 하지 않는다. */
-  check.refund = (key: string): void => {
-    const window = windows.get(key);
-    if (window && now() - window.startedAt < windowMs && window.count > 0) window.count -= 1;
   };
-
-  return check;
 }
 
 /** Vercel은 x-forwarded-for를 실제 접속 주소로 덮어쓴다. */

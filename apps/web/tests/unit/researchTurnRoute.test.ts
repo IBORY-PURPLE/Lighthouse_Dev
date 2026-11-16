@@ -346,9 +346,17 @@ describe("POST …/research/turn", () => {
     for (let index = 0; index < 19; index += 1) {
       expect((await post(o.id, o.cookie, body(o, { type: "quick", replyId: "review.more" }))).status).toBe(200);
     }
-    const limited = await post(o.id, o.cookie, body(o, { type: "quick", replyId: "review.more" }));
+    const denied = body(o, { type: "quick", replyId: "review.more" });
+    const limited = await post(o.id, o.cookie, denied);
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    // 제한에 닿은 뒤에도: 저장된 응답은 그대로 주고, 틀린 본문은 400이다.
+    expect((await post(o.id, o.cookie, first)).status).toBe(200);
+    expect((await post(o.id, o.cookie, body(o, { type: "text", text: "   " }))).status).toBe(400);
+    // 429로 거절된 턴은 처리 중 자리를 남기지 않는다(202로 갇히지 않고 다시 429), 사용량도 되돌린다.
+    expect((await post(o.id, o.cookie, denied)).status).toBe(429);
+    const view = await (await get(o.id, o.cookie)).json();
+    expect(view.messages.filter((message: { role: string }) => message.role === "volunteer")).toHaveLength(20);
   });
 
   it("본문이 틀린 요청은 분당 제한에 세지 않는다", async () => {
