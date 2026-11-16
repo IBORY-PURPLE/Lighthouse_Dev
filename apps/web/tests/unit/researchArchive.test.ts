@@ -161,6 +161,20 @@ describe("글만 뽑기(순수 함수)", () => {
   });
 });
 
+describe("SQL과 같은 보관 한도", () => {
+  it("긴 대화는 SQL(jsonb::text 크기)과 같은 개수에서 멈춘다", () => {
+    // tests/unit/sql/researchArchiveSql.test.ts의 같은 이름 시험과 같은 입력·같은 숫자(LONG_CHAT_KEPT).
+    const long = "가".repeat(1013);
+    const messages: ResearchMessage[] = [
+      { seq: 1, role: "ai", tag: "question", slot: "model", body: { text: "어떤 기종을 쓰셨나요?" } },
+      ...Array.from({ length: 120 }, (_, i): ResearchMessage => ({
+        seq: i + 2, role: i % 2 === 0 ? "ai" : "volunteer", tag: "answer", slot: null, body: { text: `${i} ${long}` },
+      })),
+    ];
+    expect(archiveMessages(messages)).toHaveLength(61);
+  });
+});
+
 describe("메모리 보내기 기록", () => {
   it("보내면 archives·reviews 각 1행이고 글만 있다. 재전송해도 1행이다", async () => {
     const { r, version, rev } = await ready();

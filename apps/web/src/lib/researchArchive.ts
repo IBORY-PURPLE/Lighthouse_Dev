@@ -216,7 +216,8 @@ export function archiveMessages(messages: ResearchMessage[]): ArchiveMessage[] {
       slot: typeof message.slot === "string" ? scrubText(message.slot) : null,
       text,
     };
-    const size = byteLength(JSON.stringify(item)) + 2;
+    // SQL은 jsonb::text로 크기를 잰다. jsonb 글자 모양은 ": "와 ", "로 구분하므로 JSON.stringify보다 키마다 1바이트씩 길다(키 5개면 9바이트).
+    const size = byteLength(JSON.stringify(item)) + (2 * Object.keys(item).length - 1) + 2;
     if (bytes + size > ARCHIVE_MESSAGES_MAX_BYTES) break;
     bytes += size;
     out.push(item);

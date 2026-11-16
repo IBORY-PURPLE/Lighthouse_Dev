@@ -65,6 +65,7 @@ async function count(text: string, params: unknown[] = []): Promise<number> {
 }
 
 const vol = () => `d-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+const LONG_CHAT_KEPT = 61; // 첫 질문 + 한글 1,013자짜리 메시지 120개를 190KB(jsonb 글자 크기) 안에 담을 때 남는 개수. JSON.stringify 크기로 재면 62개라 둘이 갈린다
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 const JPEG = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
 const BENEFIT_URL = "https://shop.example.com/event/headset";
@@ -487,6 +488,19 @@ describe("보내기", () => {
     const a = await one<Json>("select * from public.research_archives where request_id = $1", [r.id]);
     expect(a.verified).toBe(false);
     expect(a.review.draft).toBeNull();
+  });
+
+  it("긴 대화는 메모리판(archiveMessages)과 같은 개수에서 멈춘다", async () => {
+    // tests/unit/researchArchive.test.ts의 같은 이름 시험과 같은 입력·같은 숫자(LONG_CHAT_KEPT).
+    const long = "가".repeat(1013);
+    const r = await opened();
+    const messages = [
+      text("어떤 기종을 쓰셨나요?", "ai", "question", "model"),
+      ...Array.from({ length: 120 }, (_, i) => text(`${i} ${long}`, i % 2 === 0 ? "ai" : "volunteer", "answer")),
+    ];
+    expect((await apply(r, "t1", 0, { purchase: "research" }, messages)).outcome).toBe("ok");
+    const m = await one<Json>("select public.research_archive_messages($1) as m", [r.id]);
+    expect(m.m).toHaveLength(LONG_CHAT_KEPT);
   });
 
   it("대화가 아주 길어도 messages는 200KB 안으로 줄여 담고 보내기는 성공한다", async () => {
