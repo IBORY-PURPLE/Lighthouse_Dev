@@ -315,6 +315,17 @@ describe("POST …/research/turn", () => {
     expect(view.messages).toHaveLength(2);
   });
 
+  it("글 턴을 같은 clientTurnId로 다시 보내면 ai 표시도 첫 응답과 같다", async () => {
+    const o = await opened();
+    const bought = await (await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }))).json();
+    const first = body({ ...o, version: bought.version }, { type: "text", text: "LH-200" });
+    const one = await (await post(o.id, o.cookie, first)).json();
+    const two = await (await post(o.id, o.cookie, first)).json();
+    expect(one.ai).toBe("ok");
+    expect(two.ai).toBe(one.ai);
+    expect(two.messages).toEqual(one.messages);
+  });
+
   it("202: 같은 clientTurnId가 처리 중이면 기다리게 한다", async () => {
     const o = await opened();
     const store = getResearchStore();
