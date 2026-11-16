@@ -655,13 +655,22 @@ function lastQuestionSlot(pending: ResearchView["pending"]): string | null {
   return typeof slot === "string" ? slot : null;
 }
 
-function shownLinks(pending: ResearchView["pending"]): { url: string; slot: SlotKey }[] {
-  const raw = pending.shownLinks;
+function readLinks(raw: unknown): { url: string; slot: SlotKey }[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((entry) => {
     if (!isRecord(entry) || typeof entry.url !== "string" || typeof entry.slot !== "string") return [];
     return isSlotKey(entry.slot) ? [{ url: entry.url, slot: entry.slot }] : [];
   });
+}
+
+/** 참고 글 링크 카드가 쓰는 목록(턴이 쓴다). */
+function refsLinks(pending: ResearchView["pending"]): { url: string; slot: SlotKey }[] {
+  return readLinks(pending.shownLinks);
+}
+
+/** 화면이 [확인했어요]를 누를 수 있는 링크 전부. 혜택 링크(shownBenefitLinks)는 검색 라우트만 쓰고, 두 목록은 키가 달라 서로 덮어쓰지 않는다. */
+function shownLinks(pending: ResearchView["pending"]): { url: string; slot: SlotKey }[] {
+  return [...refsLinks(pending), ...readLinks(pending.shownBenefitLinks)];
 }
 
 /** 참고 글 칸에 적는 짧은 표시(호스트와 경로, 200자 이하). */
@@ -815,7 +824,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
           body: { kind: "link", url, note: LINK_NOTE },
           ai: "none",
         });
-        const known = shownLinks(session.pending).filter((entry) => entry.url !== url);
+        const known = refsLinks(session.pending).filter((entry) => entry.url !== url);
         pendingPatch.shownLinks = [...known, { url, slot: "refs" }].slice(-5);
         hold = true;
         break;

@@ -316,7 +316,7 @@ export function benefitMessages(
     : [{ role: "ai", tag: "search", slot: "benefits", body: { kind: "text", text: BENEFITS_EMPTY, shortcuts: benefitShortcuts(subject) }, ai }];
 }
 
-/** 화면이 [확인했어요]를 누를 수 있는 혜택 링크 목록(pending.shownLinks에 저장). */
+/** 화면이 [확인했어요]를 누를 수 있는 혜택 링크 목록(pending.shownBenefitLinks에 저장). */
 export function benefitLinkEntries(groups: readonly BenefitGroup[]): { url: string; slot: "benefits" }[] {
   return groups.flatMap((group) => group.items.map((item) => ({ url: item.url, slot: "benefits" as const })));
 }

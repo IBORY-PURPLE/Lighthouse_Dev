@@ -47,8 +47,6 @@ const CHIP_URL_MAX = 500;
 type SearchKind = "model" | "alts" | "benefits";
 const CACHE_KEY: Record<SearchKind, string> = { model: MODEL_CACHE_KEY, alts: ALTS_CACHE_KEY, benefits: BENEFITS_CACHE_KEY };
 const UNITS: Record<SearchKind, number> = { model: 1, alts: 1, benefits: BENEFITS_UNITS };
-/** 혜택 카드 [확인했어요]가 쓰는 보인 링크 목록의 상한(대기 상태 8,000바이트 안에 든다). */
-const SHOWN_LINKS_MAX = 8;
 
 type ModelBody = Extract<ResearchResponse, { items: unknown }>;
 
@@ -80,18 +78,6 @@ function modelMessage(body: ModelBody, subject: string, notice: string | null): 
     },
     ai: body.ai === "ok" ? "ok" : "fallback",
   });
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** 이미 보인 링크 목록에서 혜택이 아닌 것(참고 글 링크 카드)은 두고, 혜택 링크를 이번 검색 것으로 바꾼다. */
-function mergeShownLinks(pending: Record<string, unknown>, added: { url: string; slot: string }[]) {
-  const raw = pending.shownLinks;
-  const others = Array.isArray(raw)
-    ? raw.filter((entry) => isRecord(entry) && typeof entry.url === "string" && entry.slot !== "benefits")
-    : [];
-  return [...others, ...added].slice(-SHOWN_LINKS_MAX);
 }
 
 export async function POST(
@@ -212,7 +198,8 @@ export async function POST(
         const run = await searchBenefits(context, { model, experience }, signal);
         tail = logTail({ kind, ai: run.ai, up: run.upstream, usage: run.usage });
         messages = benefitMessages(run.data, experience, model || subject, run.ai);
-        pending = { shownLinks: mergeShownLinks(begun.session.pending, benefitLinkEntries(run.data)) };
+        // 혜택 링크는 턴이 쓰는 shownLinks와 다른 키에 둔다(검색 중에 다른 턴이 참고 글 링크를 더해도 덮어쓰지 않는다). 갈래 3 x 3개 = 9개 전부 담는다.
+        pending = { shownBenefitLinks: benefitLinkEntries(run.data) };
       }
       const added = await store.addMessage({
         ...actor,

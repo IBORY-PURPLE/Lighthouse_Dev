@@ -703,7 +703,7 @@ describe("POST …/research/search (alts, benefits)", () => {
     expect(items.map((item: { mode: string }) => item.mode)).toEqual(["ai", "ai", "check"]);
     const view = await (await get(o.id, o.cookie)).json();
     expect(view.version).toBe(o.version);
-    expect(view.pending.shownLinks).toEqual(items.map((item: { url: string }) => ({ url: item.url, slot: "benefits" })));
+    expect(view.pending.shownBenefitLinks).toEqual(items.map((item: { url: string }) => ({ url: item.url, slot: "benefits" })));
     // 같은 검색을 또 부르면 캐시다(검색 호출 3으로 센 사용량은 한 번만 쓴다).
     const again = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" })).json();
     expect(again).toEqual({ messages: [], lastSeq: data.lastSeq });
@@ -721,6 +721,54 @@ describe("POST …/research/search (alts, benefits)", () => {
       await post(o.id, o.cookie, body({ ...o, version: checked.version }, { type: "link_check", url: "https://other.example.com/x" }))
     ).json();
     expect(stranger.session.slots.benefits.links).toEqual([first]);
+  });
+
+  it("benefits: 갈래마다 3개씩 9개가 보여도 9개 모두 [확인했어요]로 기록할 수 있다", async () => {
+    vi.stubEnv("LLM_MODE", "");
+    let call = 0;
+    responsesCreate.mockImplementation(async () => {
+      call += 1;
+      const urls = [1, 2, 3].map((index) => url(`b${call}-${index}`));
+      return liveReply(
+        urls.map((address, index) => ({ title: `혜택 ${call}-${index}`, condition: "조건을 채우면 받아요", compare: "", url: address })),
+        urls,
+      );
+    });
+    const o = await withExperience("없었어요");
+    const data = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" })).json();
+    const shown: string[] = data.messages.flatMap((message: { body: { items?: { url: string }[] } }) => (message.body.items ?? []).map((item) => item.url));
+    expect(shown).toHaveLength(9);
+    const view = await (await get(o.id, o.cookie)).json();
+    expect(view.pending.shownBenefitLinks).toHaveLength(9);
+    // 맨 앞에 보인 링크도 확인할 수 있다(상한이 보인 개수보다 작으면 이 링크가 잘린다).
+    const checked = await (await post(o.id, o.cookie, body(o, { type: "link_check", url: shown[0] }))).json();
+    expect(checked.session.slots.benefits.links).toEqual([shown[0]]);
+  });
+
+  it("benefits: 검색하는 동안 다른 턴이 더한 참고 글 링크를 검색 결과가 덮어쓰지 않는다", async () => {
+    vi.stubEnv("LLM_MODE", "");
+    const o = await withExperience("카드 할인을 받았어요");
+    const release: { current: () => void } = { current: () => {} };
+    const gate = new Promise<void>((resolve) => {
+      release.current = resolve;
+    });
+    responsesCreate.mockImplementation(async () => {
+      await gate;
+      return liveReply([{ title: "공식몰 사은품 행사", condition: "공식몰에서 주문하면 받아요", compare: "", url: url("a") }], [url("a")]);
+    });
+    const running = find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" });
+    await vi.waitFor(() => expect(responsesCreate).toHaveBeenCalledTimes(3));
+    // 턴이 참고 글 링크 카드를 더한 상황(턴은 pending.shownLinks에 쓴다).
+    const store = getResearchStore();
+    const actor = { requestId: o.id, volunteerId: volunteerOf(o.cookie), sessionId: o.sessionId };
+    const added = await store.addMessage({ ...actor, cacheKey: null, messages: [], pending: { shownLinks: [{ url: url("ref"), slot: "refs" }] } });
+    expect(added.outcome).toBe("ok");
+    release.current();
+    expect((await running).status).toBe(200);
+    const view = await (await get(o.id, o.cookie)).json();
+    expect(view.pending.shownLinks).toEqual([{ url: url("ref"), slot: "refs" }]);
+    const checked = await (await post(o.id, o.cookie, body(o, { type: "link_check", url: url("ref") }))).json();
+    expect(checked.session.slots.refs).toMatchObject({ links: [url("ref")], status: "confirmed" });
   });
 
   it("검색하는 동안 GET pending.search = {kind}가 보이고, 끝나면 사라진다", async () => {
