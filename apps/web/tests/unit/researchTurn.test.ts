@@ -435,22 +435,29 @@ describe("묻는 말·재질문·짧은 답", () => {
     }
   });
 
-  it("묻는 말이 칸을 채운 답과 섞여 있어도 찾는 방법 카드를 붙이고 다음 질문으로 이어 간다", async () => {
+  it("묻는 말은 AI가 칸 채움을 함께 줘도 채우지 않고 찾는 방법 카드와 같은 질문을 보인다", async () => {
     const h = await harness();
     await h.step({ type: "quick", replyId: "purchase.bought" });
     const result = await h.step(say("WH-CH720N이요. 그런데 가격 알려줘"), {
       intent: "ask_back",
       fills: [fill("model", "WH-CH720N", "WH-CH720N이요")],
+      purchase: { value: "research", evidence: "WH-CH720N이요" },
     });
-    expect(result.view.slots.model?.value).toBe("WH-CH720N");
+    expect(result.view.slots.model).toBeUndefined();
     const guide = result.messages.find((message) => message.body.kind === "guide")!;
     expect(guide.body).toMatchObject({ queries: defaultGuide(CONTEXT).queries, checks: defaultGuide(CONTEXT).checks, steps: defaultGuide(CONTEXT).steps });
-    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "pros" });
-    // AI가 reply로 읽었어도 말이 부탁형이면 같다.
+    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "model" });
+    expect(result.messages.filter((message) => message.tag === "fill")).toEqual([]);
+    // AI가 reply로 읽고 pros를 채웠어도 말이 부탁형이면 같다.
     const h2 = await harness();
     await h2.step({ type: "quick", replyId: "purchase.bought" });
-    const reply = await h2.step(say("WH-CH720N 가격 알려줘"), replyAi(fill("model", "WH-CH720N", "WH-CH720N")));
+    const reply = await h2.step(say("소니 헤드셋 찾는 방법 알려줘"), {
+      intent: "reply",
+      fills: [fill("pros", "찾는 방법", "소니 헤드셋 찾는 방법")],
+    });
+    expect(reply.view.slots.pros).toBeUndefined();
     expect(reply.messages.some((message) => message.body.kind === "guide")).toBe(true);
+    expect(reply.messages.at(-1)).toMatchObject({ tag: "question", slot: "model" });
   });
 
   it("구매 여부 전에 묻는 말이면 찾는 방법 카드 뒤에 구매 질문을 한다", async () => {

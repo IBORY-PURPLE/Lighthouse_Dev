@@ -649,6 +649,10 @@ export function planTurn(args: PlanArgs): TurnPlan {
         turn = ai.turn;
       }
 
+      // AI에게 묻는 말(AI가 ask_back으로 읽었거나 의문형·부탁형)은 칸을 채우지 않는다. 구매 여부도 읽지 않는다.
+      // 아래 4)에서 찾는 방법 카드와 같은 질문을 보인다. 섞인 답은 봉사자가 질문에 다시 답하면 된다.
+      const asking = turn?.intent === "ask_back" || isQuestionLike(input.text);
+
       // 주소가 든 말: 참고 글(refs)에 해당하면 AI가 칸을 채우지 못하게 하고, 아래 3)에서 "직접 확인 필요" 링크 카드로 받는다.
       // (서버는 외부 주소를 열지 않으므로 봉사자가 확인하기 전에는 값으로 넣지 않는다. design.md 4.6, 4.10)
       const url = URL_IN_TEXT.exec(input.text)?.[0] ?? null;
@@ -661,7 +665,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
       // 1) 구매 여부와 칸 채우기(AI가 읽은 것만, evidence 검사를 통과한 것만)
       let filledCount = 0;
-      if (turn) {
+      if (turn && !asking) {
         if (session.purchase === "unset" && turn.purchase) {
           purchase = turn.purchase;
           patch.purchase = turn.purchase;
@@ -720,22 +724,21 @@ export function planTurn(args: PlanArgs): TurnPlan {
         break;
       }
 
-      // 4) AI에게 묻는 말(AI가 ask_back으로 읽었거나 의문형·부탁형): 찾는 방법 카드를 준다. 가격·재고에는 답하지 않는다.
-      // 칸을 채운 답과 섞여 있어도 카드는 붙인다(chatbot-quality 합격 기준 2). 채운 칸이 없으면 같은 질문을 다시 보인다.
-      const asking = turn?.intent === "ask_back" || isQuestionLike(input.text);
+      // 4) 묻는 말: 찾는 방법 카드(검색어·확인 조건·찾는 순서, chatbot-quality 합격 기준 2)를 주고 같은 질문을 다시 보인다.
+      // 가격·재고에는 답하지 않는다.
       if (asking) {
         const material = [input.text, context.product, context.brand ?? "", context.item ?? "", ...shownNames(session.pending)];
         const guide = turn?.guide ?? mergeGuide(null, context, material);
         messages.push(guideMessage(lastSlot, guide, turn?.guide ? "ok" : "none"));
-        if (filledCount === 0 && lastSlot && session.purchase !== "unset") {
+        if (lastSlot && session.purchase !== "unset") {
           messages.push(questionMessage(lastSlot, questionContext(nowPost(), subject)));
           hold = true;
-          break;
         }
+        break;
       }
 
       // 5) 직전 질문에 답이 없다: 재질문 한 번, 그다음 짧은 답, AI가 없으면 넣을지 확인
-      if (!asking && filledCount === 0 && lastSlot && session.purchase !== "unset" && isAskable(nowPost(), lastSlot)) {
+      if (filledCount === 0 && lastSlot && session.purchase !== "unset" && isAskable(nowPost(), lastSlot)) {
         const reasked = (session.counters.reasked[lastSlot] ?? 0) >= 1;
         const cleaned = oneLine(cleanText(input.text, SLOT_VALUE_LIMIT));
         if (reasked && cleaned !== "" && isShortAnswer(input.text, lastSlot)) {

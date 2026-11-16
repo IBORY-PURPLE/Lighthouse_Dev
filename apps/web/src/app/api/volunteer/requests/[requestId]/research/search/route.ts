@@ -85,6 +85,11 @@ export async function POST(
       const context = { product: found.request.product, brand: found.request.brand, item: found.request.item };
       const subject = subjectOf(context);
 
+      // 분당 8회는 AI 검색을 새로 부를 때만 센다. 이미 한도에 닿아 있으면 사용량을 올리는 begin 전에 막는다
+      // (거절된 재시도가 요청당·하루 검색 한도를 쓰지 않게). 캐시 적중·처리 중·한도 응답은 세지 않는다.
+      const gate = checkSearchLimit.peek(volunteerId);
+      if (!gate.allowed) return fail(429, "rate_limited", { "Retry-After": String(gate.retryAfterSeconds) });
+
       const store = getResearchStore();
       const actor = { requestId: id, volunteerId, sessionId: sessionId.toLowerCase() };
       const begun = await store.begin({ ...actor, kind: "search", cacheKey: MODEL_CACHE_KEY, units: 1, caps: capsFromEnv() });
@@ -119,8 +124,7 @@ export async function POST(
         return guardResponse(begun.outcome);
       }
 
-      // 분당 8회는 AI 검색을 새로 부를 때만 센다(틀린 요청·캐시 적중·처리 중(202)·권한 오류·한도 응답은 세지 않는다).
-      // 제한에 닿았으면 검색 중 표시만 지워 나중에 다시 찾을 수 있게 한다.
+      // 새로 AI 검색을 부르는 이 순간에 센다. 위 확인과 사이에 다른 요청이 한도를 채웠으면 검색 중 표시만 지운다.
       const limit = checkSearchLimit(volunteerId);
       if (!limit.allowed) {
         await store.addMessage({ ...actor, cacheKey: MODEL_CACHE_KEY, messages: [], cacheState: "clear" });
