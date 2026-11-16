@@ -24,6 +24,11 @@ export function candidateSearchUrl(name: string): string {
   return shopSearchUrl("11st", name);
 }
 
+/** 제품 사진 보기: 새 탭에서 열 이미지 검색 주소(design.md 3.4, 서버는 사진을 가져오지 않는다). 화면 브랜치의 researchChatView.imageSearchUrl과 같은 주소다. */
+export function imageSearchUrl(name: string): string {
+  return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(name)}`;
+}
+
 /** 직접 찾기의 검색어. 브랜드와 품목을 잇고, 품목이 없으면 제품 답을 쓴다. */
 export function searchQueryOf(request: {
   brand: string | null;

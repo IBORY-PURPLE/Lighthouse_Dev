@@ -511,6 +511,10 @@ describe("hasBenefitForbidden: 혜택 글은 퍼센트·천만 단위 수·포�
       "결제하면 2천P",
       "삼만 포인트를 받아요",
       "１０％ 혜택",
+      "10 프로 혜택",
+      "이십 프로 적립",
+      "오백 포인트 적립",
+      "삼천 포인트",
     ]) {
       expect(hasBenefitForbidden(text), text).toBe(true);
     }
@@ -533,6 +537,11 @@ describe("hasBenefitForbidden: 혜택 글은 퍼센트·천만 단위 수·포�
       "포인트 적립 혜택이 있어요",
       "공식몰에서 주문하면 사은품을 줘요",
       "2주 안에 도착해요",
+      "카드사 포인트 적립",
+      "프로모션 사은품 행사",
+      "이 포인트로 결제해요",
+      "10 프로그램 연동 혜택",
+      "프로 모델 전용 사은품",
     ]) {
       expect(hasBenefitForbidden(text), text).toBe(false);
     }
@@ -561,5 +570,12 @@ describe("hasContact: 전화번호·이메일·메신저 연락처", () => {
     for (const text of ["소니 WH-1000XM5", "배터리 5000mAh", "2023-2024 모델", "1500-2000 사이", "카카오페이 결제 혜택"]) {
       expect(hasContact(text), text).toBe(false);
     }
+  });
+});
+
+describe("imageSearchUrl", () => {
+  it("제품 이름을 인코딩한 새 탭용 이미지 검색 주소를 만든다", async () => {
+    const { imageSearchUrl } = await import("@/lib/shopLinks");
+    expect(imageSearchUrl("소니 WH-CH720N")).toBe("https://www.google.com/search?tbm=isch&q=%EC%86%8C%EB%8B%88%20WH-CH720N");
   });
 });
