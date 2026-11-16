@@ -397,6 +397,33 @@ describe("POST …/research/review", () => {
     const GOOD =
       "LH-200은 직접 구매해서 쓰는 봉사자가 사진으로 인증한 헤드셋이에요. 가벼워서 오래 써도 편하다고 해요. 같이 본 제품은 배터리가 더 오래간다고 해서 비교했어요. 구매 인증 사진은 한 장 올라와 있어요. 이 내용은 봉사자가 모은 자료를 정리한 것이라서 최신 판매 정보는 쇼핑몰에서 직접 확인해 주세요.";
 
+    it("AI를 기다리는 사이 칸이 바뀌면 옛 칸으로 만든 초안을 저장하지 않고 409 stale이다", async () => {
+      const o = await opened();
+      await fillBought(o);
+      goLive();
+      chatCreate.mockImplementationOnce(async () => {
+        // 다른 탭에서 칸을 고친 것과 같다(version이 오른다). 대화 턴은 가짜 모드로 처리한다.
+        vi.stubEnv("LLM_MODE", "mock");
+        await say(o, { type: "edit", slot: "pros", text: "소리가 아주 선명하대요" });
+        goLive();
+        return reply(GOOD);
+      });
+      const before = (await read(o)).version;
+      const response = await review(o);
+      expect(response.status).toBe(409);
+      const data = await response.json();
+      expect(data).toMatchObject({ error: "stale" });
+      expect(data.version).toBeGreaterThan(before);
+      const view = await read(o);
+      expect(view.review ?? {}).not.toHaveProperty("text");
+      expect(view.stage).not.toBe("review");
+      // 화면이 새 version으로 다시 만들면 저장된다.
+      chatCreate.mockResolvedValueOnce(reply(GOOD));
+      const again = await review(o);
+      expect(again.status).toBe(200);
+      expect((await again.json()).review).toMatchObject({ status: "draft", rev: 1 });
+    });
+
     it("AI 문단이 검사를 통과하면 ai=ok이고 AI는 한 번만 부른다(로그에 토큰 수)", async () => {
       chatCreate.mockResolvedValueOnce(reply(GOOD));
       const o = await opened();
