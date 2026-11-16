@@ -757,7 +757,7 @@ describe("POST …/research/search (model)", () => {
 
 describe("POST …/research/search (alts, benefits)", () => {
   const url = (name: string) => `https://example.com/${name}`;
-  const liveReply = (items: unknown[], urls: string[]) => ({
+  const liveReply = (items: unknown[], urls: string[], titles: string[] = []) => ({
     usage: { input_tokens: 200, output_tokens: 50 },
     output: [
       { type: "web_search_call", action: { type: "search", sources: urls.map((address) => ({ url: address })) } },
@@ -767,7 +767,7 @@ describe("POST …/research/search (alts, benefits)", () => {
           {
             type: "output_text",
             text: JSON.stringify({ items }),
-            annotations: urls.map((address) => ({ type: "url_citation", url: address, title: "" })),
+            annotations: urls.map((address, index) => ({ type: "url_citation", url: address, title: titles[index] ?? "" })),
           },
         ],
       },
@@ -869,6 +869,8 @@ describe("POST …/research/search (alts, benefits)", () => {
           { name: "소니 WH-9999XM9", feature: "새로 나온 기종이에요", pageUrl: other },
         ],
         [seen, other],
+        // 알려 둔 브랜드(소니)는 그 제품 자신의 검색 결과 항목에 있어야 하므로 제목에 브랜드를 둔다. 둘째 항목 제목에는 그 기종 번호가 없다.
+        ["소니 WH-1000XM4 헤드폰", "소니 헤드폰 안내"],
       ),
     );
     const o = await opened();

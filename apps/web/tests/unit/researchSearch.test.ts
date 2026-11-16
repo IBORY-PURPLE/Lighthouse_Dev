@@ -9,6 +9,7 @@ import {
   cleanBenefitItems,
   cleanProducts,
   experienceBranches,
+  fixedProducts,
   hasNoExperience,
   isAiClosedHost,
   productsMessages,
@@ -33,6 +34,9 @@ vi.mock("openai", async (importOriginal) => {
 });
 
 const allowedOf = (urls: string[]) => new Map(urls.map((url) => [urlKey(url)!, url]));
+/** 검색 결과 항목별 글(주소 키 → [주소, 그 주소의 제목들]): urls[i]의 항목에 titles[i]를 붙인다. */
+const sourcesOf = (urls: string[], titles: string[]) =>
+  new Map(urls.map((url, index) => [urlKey(url)!, [url, ...(titles[index] ? [titles[index]!] : [])]] as const));
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
 const OFFICIAL = BENEFIT_BRANCHES[0];
 
@@ -124,7 +128,7 @@ describe("cleanProducts: 같이 고민한 제품 이름·특징·주소 검사",
       allowedOf(urls),
       [...generic, ...texts],
       [],
-      { texts, generic },
+      { sources: sourcesOf(urls, [texts[0]!, "", "", texts[2]!]), generic },
     );
     expect(items.map((item) => item.name)).toEqual(["갤럭시 버즈2 프로", "소니 WH-CH720N"]);
   });
@@ -136,14 +140,65 @@ describe("cleanProducts: 같이 고민한 제품 이름·특징·주소 검사",
       [
         { name: "갤럭시 버즈 3", feature: "새 기종이에요", pageUrl: urls[0] },
         { name: "소니 WH-1000XM6", feature: "이어 붙여 생긴 번호예요", pageUrl: urls[1] },
-        { name: "갤럭시 버즈 2", feature: "근거가 있어요", pageUrl: urls[2] },
+        { name: "갤럭시 버즈 2", feature: "근거가 있어요", pageUrl: urls[0] },
       ],
       allowedOf(urls),
       texts,
       [],
-      { texts, generic: [] },
+      { sources: sourcesOf(urls, texts), generic: [] },
     );
     expect(items.map((item) => item.name)).toEqual(["갤럭시 버즈 2"]);
+  });
+
+  it("이름의 첫 단어(브랜드)도 그 항목의 인용에 있어야 한다: 소니 페이지에 삼성 WH-CH720N을 붙이면 버린다", () => {
+    const urls = ["https://www.sony.co.kr/headphones/wh-ch720n", "https://www.samsung.com/sec/buds3"];
+    const titles = ["소니 WH-CH720N 무선 헤드폰", "Samsung Buds3"];
+    const run = (raw: unknown[]) =>
+      cleanProducts(raw, allowedOf(urls), [...titles, ...urls], [], { sources: sourcesOf(urls, titles), generic: ["헤드폰"] });
+    expect(run([{ name: "삼성 WH-CH720N", feature: "다른 브랜드 이름", pageUrl: urls[0] }])).toEqual([]);
+    // 한글 브랜드 이름이 영문 주소·제목(sony, Samsung)으로만 근거가 있어도 별칭으로 통과한다.
+    expect(
+      run([
+        { name: "소니 WH-CH720N", feature: "가벼워요", pageUrl: urls[0] },
+        { name: "삼성 Buds3", feature: "작아요", pageUrl: urls[1] },
+      ]).map((item) => item.name),
+    ).toEqual(["소니 WH-CH720N", "삼성 Buds3"]);
+    // 요청의 브랜드(generic)가 삼성이어도 소니 페이지에 붙은 삼성 이름은 버린다.
+    const samsungAsked = cleanProducts(
+      [{ name: "삼성 WH-CH720N", feature: "다른 브랜드 이름", pageUrl: urls[0] }],
+      allowedOf(urls),
+      [...titles, ...urls],
+      [],
+      { sources: sourcesOf(urls, titles), generic: ["Samsung", "삼성", "헤드폰"] },
+    );
+    expect(samsungAsked).toEqual([]);
+    // 브랜드가 아닌 첫 단어가 인용에 없어도(지어낸 제품 이름) 버린다.
+    expect(run([{ name: "슈퍼 WH-CH720N", feature: "지어낸 이름", pageUrl: urls[0] }])).toEqual([]);
+  });
+
+  it("이름과 주소는 같은 검색 결과 항목 안에서 함께 대조한다: A 이름에 B 주소를 붙이면 버린다", () => {
+    const urls = ["https://shop.example.com/a-buds2", "https://shop.example.com/b-wh1000"];
+    const titles = ["삼성 갤럭시 버즈2 안내", "소니 WH-1000XM5 안내"];
+    const generic = ["헤드셋"];
+    const run = (raw: unknown[]) =>
+      cleanProducts(raw, allowedOf(urls), [...generic, ...titles, ...urls], [], { sources: sourcesOf(urls, titles), generic });
+    // 두 이름과 두 주소가 모두 전체 결과에 있어도, 이름이 자기 항목의 주소가 아니면 통과하지 못한다.
+    expect(
+      run([
+        { name: "갤럭시 버즈2", feature: "작아요", pageUrl: urls[1] },
+        { name: "소니 WH-1000XM5", feature: "소리가 좋아요", pageUrl: urls[0] },
+      ]),
+    ).toEqual([]);
+    // 제 주소를 붙이면 통과한다.
+    expect(
+      run([
+        { name: "갤럭시 버즈2", feature: "작아요", pageUrl: urls[0] },
+        { name: "소니 WH-1000XM5", feature: "소리가 좋아요", pageUrl: urls[1] },
+      ]).map((item) => [item.name, item.pageUrl]),
+    ).toEqual([
+      ["갤럭시 버즈2", urls[0]],
+      ["소니 WH-1000XM5", urls[1]],
+    ]);
   });
 
   it("연락처(전화번호·이메일·메신저)가 든 이름은 버리고, 특징에서는 그 문장만 버린다", () => {
@@ -221,6 +276,41 @@ describe("cleanBenefitItems: 혜택 항목 검사", () => {
     const good = base({ title: "포인트 적립 혜택", condition: "대상 카드로 결제하면 받아요", url: url("ok") });
     const items = run([...bad, good], [...bad.map((entry) => entry.url), good.url]);
     expect(items.map((item) => item.url)).toEqual([good.url]);
+  });
+
+  it("한글 수사 + 프로·퍼센트·포인트·원(오 프로 혜택, 오 포인트 적립 등)은 항목째 버리고, 낱말·수량 없는 글은 남긴다", () => {
+    const badTexts = [
+      "오 프로 혜택",
+      "오 포인트 적립",
+      "십 퍼센트 청구 할인",
+      "이십 프로 적립",
+      "삼 퍼 할인",
+      "오P 적립",
+      "하나 포인트 적립",
+      "두 프로 혜택",
+      "만 원 쿠폰",
+      "오 원 할인 쿠폰",
+      "육 프로 즉시 할인",
+      "이 프로 혜택",
+      "포인트 500 적립",
+      "포인트 약 5천 적립",
+      "포인트 오백 적립",
+    ];
+    // 갈래마다 3개까지만 남기므로, 버려져야 할 항목은 3개 넘게 한 번에 넣어도 하나도 남지 않아야 한다.
+    const bad = badTexts.map((text, index) => base({ title: text, url: url(`h${index}`) }));
+    const badCondition = base({ condition: "구매 시 오 포인트를 받아요", url: url("hc") });
+    const badCompare = base({ compare: "받으신 것보다 오 프로 더 받아요", url: url("hm") });
+    const good = [
+      base({ title: "카드사 포인트 적립", url: url("g1") }),
+      base({ title: "프로모션 사은품", url: url("g2") }),
+      base({ title: "당일 포인트 적립 혜택", url: url("g3") }),
+    ];
+    const rejected = [...bad, badCondition, badCompare];
+    expect(run(rejected, rejected.map((entry) => entry.url))).toEqual([]);
+    const items = run([...rejected, ...good], [...rejected, ...good].map((entry) => entry.url));
+    expect(items.map((item) => item.url)).toEqual(good.map((entry) => entry.url));
+    const program = base({ title: "프로그램 가입 혜택", url: url("g4") });
+    expect(run([program], [program.url]).map((item) => item.url)).toEqual([program.url]);
   });
 
   it("주소가 300바이트를 넘으면(한글이 든 주소) 버린다: 혜택 링크 9개가 pending 8,000바이트 제약 안에 든다", () => {
@@ -411,6 +501,21 @@ describe("메시지 만들기", () => {
     expect(capped!.ai).toBe("capped");
   });
 
+  it("제품 카드 메시지: 주소 없는 고정 후보는 pageUrl 없이 쇼핑몰 검색 바로가기만 준다", () => {
+    const fixed = fixedProducts({ product: "소니 헤드셋 찾아줘", brand: "Sony", item: "헤드셋" }, "소니 WH-1000XM4");
+    expect(fixed.length).toBeGreaterThan(0);
+    expect(fixed.every((item) => item.pageUrl === null)).toBe(true);
+    const [card] = productsMessages(fixed, "fallback");
+    const body = card!.body as { items: ProductItem[]; shortcuts: { label: string; url: string }[] };
+    expect(body.items.every((item) => item.pageUrl === null)).toBe(true);
+    expect(JSON.stringify(body.items)).not.toContain("11st.co.kr");
+    expect(body.shortcuts).toHaveLength(fixed.length);
+    expect(body.shortcuts.every((link) => link.url.startsWith("https://search.11st.co.kr/"))).toBe(true);
+    // AI가 찾은 제품(주소 있음)에는 바로가기를 붙이지 않는다.
+    const [ai] = productsMessages([{ name: "소니 WH-CH720N", feature: "가벼워요", pageUrl: "https://www.sony.co.kr/x" }], "ok");
+    expect(ai!.body).not.toHaveProperty("shortcuts");
+  });
+
   it("제품 카드 메시지: products 모양, 건너뛰기·직접 적기 이름표, 비면 안내 글", () => {
     const items: ProductItem[] = [{ name: "소니 WH-CH720N", feature: "가벼워요", pageUrl: "https://www.sony.co.kr/x" }];
     const [card] = productsMessages(items, "ok");
@@ -474,6 +579,25 @@ describe("AI 호출(가짜 OpenAI)", () => {
     const params = responsesCreate.mock.calls[0]![0];
     expect(params).toMatchObject({ max_tool_calls: 4, tools: [{ type: "web_search" }] });
     expect(params.input).toContain("소니 WH-1000XM4");
+  });
+
+  it("제품 목록: 검색 결과 두 제품의 이름과 주소를 엇바꾼 응답은 통과하지 못하고 고정 후보로 내려간다", async () => {
+    const urls = ["https://www.samsung.com/sec/headphones/galaxy-buds3", "https://www.bose.co.kr/qc-ultra"];
+    responsesCreate.mockResolvedValueOnce(
+      reply(
+        {
+          items: [
+            { name: "삼성 Galaxy Buds3", feature: "작아요", pageUrl: urls[1] },
+            { name: "보스 QC Ultra", feature: "소리가 좋아요", pageUrl: urls[0] },
+          ],
+        },
+        urls,
+        ["삼성 Galaxy Buds3 무선 이어폰", "보스 QC Ultra 헤드폰"],
+      ),
+    );
+    const run = await searchProducts(context, "소니 WH-1000XM4");
+    expect(run).toMatchObject({ ai: "fallback", upstream: "empty" });
+    expect(run.data.every((item) => item.pageUrl === null)).toBe(true);
   });
 
   it("제품 목록: 호출이 실패하거나 쓸 것이 없으면 고정 후보(시연 품목)로 내려가고 이유를 남긴다", async () => {
