@@ -150,6 +150,23 @@ describe("cleanProducts: 같이 고민한 제품 이름·특징·주소 검사",
     expect(items.map((item) => item.name)).toEqual(["갤럭시 버즈 2"]);
   });
 
+  it("이름의 첫 단어(브랜드)도 그 항목의 인용에 있어야 한다: 소니 페이지에 삼성 WH-CH720N을 붙이면 버린다", () => {
+    const urls = ["https://www.sony.co.kr/headphones/wh-ch720n", "https://www.samsung.com/sec/buds3"];
+    const titles = ["소니 WH-CH720N 무선 헤드폰", "Samsung Buds3"];
+    const run = (raw: unknown[]) =>
+      cleanProducts(raw, allowedOf(urls), [...titles, ...urls], [], { sources: sourcesOf(urls, titles), generic: ["헤드폰"] });
+    expect(run([{ name: "삼성 WH-CH720N", feature: "다른 브랜드 이름", pageUrl: urls[0] }])).toEqual([]);
+    // 한글 브랜드 이름이 영문 주소·제목(sony, Samsung)으로만 근거가 있어도 별칭으로 통과한다.
+    expect(
+      run([
+        { name: "소니 WH-CH720N", feature: "가벼워요", pageUrl: urls[0] },
+        { name: "삼성 Buds3", feature: "작아요", pageUrl: urls[1] },
+      ]).map((item) => item.name),
+    ).toEqual(["소니 WH-CH720N", "삼성 Buds3"]);
+    // 브랜드가 아닌 첫 단어가 인용에 없어도(지어낸 제품 이름) 버린다.
+    expect(run([{ name: "슈퍼 WH-CH720N", feature: "지어낸 이름", pageUrl: urls[0] }])).toEqual([]);
+  });
+
   it("이름과 주소는 같은 검색 결과 항목 안에서 함께 대조한다: A 이름에 B 주소를 붙이면 버린다", () => {
     const urls = ["https://shop.example.com/a-buds2", "https://shop.example.com/b-wh1000"];
     const titles = ["삼성 갤럭시 버즈2 안내", "소니 WH-1000XM5 안내"];

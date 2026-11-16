@@ -2,7 +2,7 @@ import "server-only";
 import OpenAI from "openai";
 import { getLlmMode, LLM_MODEL } from "./llm";
 import { benefitShortcuts, type ResearchShortcut } from "./research";
-import { fallbackResponse, parseJsonObject, type ResearchContext, type Upstream } from "./researchAi";
+import { brandGroupIn, fallbackResponse, knownBrandIn, parseJsonObject, type ResearchContext, type Upstream } from "./researchAi";
 import { clip, hasBenefitForbidden, hasContact, hasForbidden, unknownModelTokens, urlKey, type AllowedUrls } from "./researchCheck";
 import { COMMON, materialMessage } from "./researchPrompt";
 import type { NextMessage } from "./researchSession";
@@ -179,7 +179,9 @@ const compactKey = (value: string) => value.normalize("NFKC").toUpperCase().repl
 
 /**
  * 이름이 그 제품의 검색 결과 항목(evidence: 같은 주소의 인용 제목과 주소)에 근거가 있나. 숫자가 든 토큰(영문 기종 번호뿐 아니라 "버즈3" 같은 한글+숫자도)은 모두 인용에 있어야 한다.
- * 첫 토큰(보통 브랜드)과 브랜드·품목(generic) 토큰을 뺀 나머지 토큰도 모두 인용에 있어야 하고, 남는 토큰이 없으면 첫 토큰이 인용에 있어야 한다.
+ * 브랜드·품목(generic) 토큰을 뺀 나머지 토큰도 모두 인용에 있어야 한다.
+ * 첫 토큰(보통 브랜드)도 대조한다: 알려 둔 브랜드(소니·sony, 삼성·samsung…)면 별칭 중 하나가 인용에 있어야 하고(소니 페이지에 "삼성 WH-CH720N"을 붙이면 안 된다),
+ * 아니면 그 토큰이 인용에 있어야 한다. 남는 토큰이 없으면 첫 토큰이 인용에 꼭 있어야 하고, 남는 토큰이 있으면 첫 토큰이 generic(브랜드·품목)일 때만 인용에 없어도 된다.
  */
 function nameInEvidence(name: string, evidence: readonly string[], generic: readonly string[]): boolean {
   // 인용마다 따로 대조한다(인용을 이어 붙이면 한 인용의 끝과 다른 인용의 시작이 합쳐져 없는 기종 번호가 생긴다).
@@ -195,8 +197,12 @@ function nameInEvidence(name: string, evidence: readonly string[], generic: read
   const tokens = raws.map((raw) => ({ raw, key: compactKey(raw) })).filter((token) => token.key.length >= 2);
   if (tokens.length === 0) return false;
   if (tokens.some((token) => /\d/.test(token.raw) && !found(token.key))) return false;
+  const first = tokens[0]!;
   const rest = tokens.slice(1).filter((token) => !skip.includes(token.key));
-  return rest.length > 0 ? rest.every((token) => found(token.key)) : found(tokens[0]!.key);
+  const brandGroup = knownBrandIn(first.raw);
+  const firstFound = brandGroup ? brandGroupIn(evidence.join(" "), brandGroup) : found(first.key);
+  const firstOk = firstFound || (rest.length > 0 && skip.includes(first.key));
+  return firstOk && rest.every((token) => found(token.key));
 }
 
 /**
