@@ -30,6 +30,8 @@ const SCRUB_CASES: Array<[string, string]> = [
   ["https://shop.example/?p=010%2D1234%2D5678&q=1", ""],
   ["이중 https://shop.example/?e=a%2540b.com 끝", "이중  끝"],
   ["대소문자 Data:text/plain,hello DATA:image/png;base64,AAAA 끝", "대소문자   끝"],
+  ["끊긴 사진 data:image/png;base64,iVBORw0KGgo\nAAAANSUhEUg ZZZ+/= 끝", "끊긴 사진  끝"],
+  ["공백 없는 긴 덩어리 " + "A1b+".repeat(60) + " 끝 / 199자 " + "a".repeat(199) + " 끝", "공백 없는 긴 덩어리  끝 / 199자 " + "a".repeat(199) + " 끝"],
   ["괄호 https://shop.example/a(b)?email=a%40b.com 끝", "괄호  끝"],
   ["따옴표 https://shop.example/a'b\"c?email=a%40b.com 끝", "따옴표  끝"],
   ["덩어리 www.shop.example/?e=a%40b.com 와 연락:010%2D1234%2D5678 끝", "덩어리  와  끝"],
@@ -433,7 +435,7 @@ describe("보내기", () => {
     );
     expect(paragraph.t).toBe("혜택");
     const r = await opened();
-    expect((await apply(r, "t1", 0, { purchase: "research" }, [{ role: "ai", tag: "question", slot: null, ai: "none", body: { headline: "a".repeat(2000), text: "😀".repeat(1500) } }])).outcome).toBe("ok");
+    expect((await apply(r, "t1", 0, { purchase: "research" }, [{ role: "ai", tag: "question", slot: null, ai: "none", body: { headline: "a ".repeat(1000), text: "😀".repeat(1500) } }])).outcome).toBe("ok");
     const m = await one<Json>("select public.research_archive_messages($1) as m", [r.id]);
     expect(Array.from(m.m[0].text)).toHaveLength(3000);
     expect(m.m[0].text.endsWith("😀")).toBe(true);

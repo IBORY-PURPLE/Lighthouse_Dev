@@ -136,6 +136,8 @@ describe("글만 뽑기(순수 함수)", () => {
     ["https://shop.example/?p=010%2D1234%2D5678&q=1", ""],
     ["이중 https://shop.example/?e=a%2540b.com 끝", "이중  끝"],
     ["대소문자 Data:text/plain,hello DATA:image/png;base64,AAAA 끝", "대소문자   끝"],
+    ["끊긴 사진 data:image/png;base64,iVBORw0KGgo\nAAAANSUhEUg ZZZ+/= 끝", "끊긴 사진  끝"],
+    ["공백 없는 긴 덩어리 " + "A1b+".repeat(60) + " 끝 / 199자 " + "a".repeat(199) + " 끝", "공백 없는 긴 덩어리  끝 / 199자 " + "a".repeat(199) + " 끝"],
     ["괄호 https://shop.example/a(b)?email=a%40b.com 끝", "괄호  끝"],
     ["따옴표 https://shop.example/a'b\"c?email=a%40b.com 끝", "따옴표  끝"],
     ["덩어리 www.shop.example/?e=a%40b.com 와 연락:010%2D1234%2D5678 끝", "덩어리  와  끝"],
@@ -295,7 +297,7 @@ describe("메모리 보내기 기록", () => {
   it("리뷰·메시지는 SQL left()처럼 문자(코드 포인트) 수로 자르고, 글 속 깨질 주소는 통째로 뺀다", () => {
     expect(Array.from(finalReview("😀".repeat(1500), []))).toHaveLength(1000);
     expect(finalReview("혜택 https://shop.example/?email=a@b.com", [])).toBe("혜택");
-    const out = archiveMessages([{ seq: 1, role: "ai", tag: null, slot: null, body: { headline: "a".repeat(2000), text: "😀".repeat(1500) } }]);
+    const out = archiveMessages([{ seq: 1, role: "ai", tag: null, slot: null, body: { headline: "a ".repeat(1000), text: "😀".repeat(1500) } }]);
     expect(Array.from(out[0].text)).toHaveLength(3000);
     expect(out[0].text.endsWith("😀")).toBe(true);
   });

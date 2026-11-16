@@ -86,12 +86,12 @@ begin
 end;
 $$;
 
--- 주소를 따로 보지 않고 글자만 가린다: data URL은 빈 글, 이메일·주민등록번호(하이픈형)·카드번호(4자리 4묶음, 구분은 없거나 하이픈·공백)·전화번호는
+-- 주소를 따로 보지 않고 글자만 가린다: data URL(base64는 공백·줄바꿈으로 끊겨 이어진 조각까지)과 공백 없이 200자 넘게 이어진 base64 모양 덩어리는 빈 글, 이메일·주민등록번호(하이픈형)·카드번호(4자리 4묶음, 구분은 없거나 하이픈·공백)·전화번호는
 -- [이메일]·[주민번호]·[카드번호]·[전화번호]로 바꾼다. 집 주소나 말로 받아 적은 번호는 가리지 못한다(남는 위험, TSD 8.3).
 create or replace function public.research_scrub_plain(p_text text)
 returns text language sql immutable security invoker set search_path = '' as $$
-  select regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(p_text,
-    'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'gi'),
+  select regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(p_text,
+    'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*;base64,[A-Za-z0-9+/=]*([ \t\n\r\f\v]+[A-Za-z0-9+/=]+)*', '', 'gi'), 'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'gi'), '[A-Za-z0-9+/=]{200,}', '', 'g'),
     '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[이메일]', 'g'),
     '(?<![0-9])[0-9]{6}-[1-4][0-9]{6}(?![0-9])', '[주민번호]', 'g'),
     '(?<![0-9])[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}(?![0-9])', '[카드번호]', 'g'),
