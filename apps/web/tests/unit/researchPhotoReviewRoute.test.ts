@@ -204,6 +204,8 @@ describe("POST …/research/photos", () => {
     expect(await send({ thumb: `data:image/jpeg;base64,${"A".repeat(60_000)}` })).toEqual([413, "thumb_too_large"]);
     expect(await send({ thumb: PNG_URL })).toEqual([415, "bad_image_format"]);
     expect(await send({ thumb: "data:image/jpeg;base64,@@@" })).toEqual([415, "bad_image_format"]);
+    // 선언은 jpeg이고 base64도 맞지만 실제 JPEG 서명이 아닌 썸네일(AAAA…)은 사진을 남기지 않는다
+    expect(await send({ thumb: "data:image/jpeg;base64,AAAA" })).toEqual([415, "bad_image_format"]);
     // 거부된 요청은 사진을 남기지 않는다. PNG 이미지(서명이 맞음)는 받는다.
     expect((await read(o)).photos).toEqual([]);
     expect((await upload(o, { image: PNG_URL })).response.status).toBe(201);
@@ -509,6 +511,11 @@ describe("PUT …/research/review", () => {
     expect(await blocked(`${EDITED} WH-1000XM9도 좋아요.`)).toContain("WH-1000XM9");
     expect(await blocked("너무 짧아요.")).toContain("50자 이상");
     expect(await blocked("가".repeat(1001))).toContain("1,000자 이하");
+    // 문장 수(3~7)와 목록·기호는 AI 문단과 같이 건다
+    expect(await blocked("LH-200은 직접 구매해서 쓰는 봉사자가 사진으로 인증한 헤드셋이고 가볍고 편하다고 해요")).toContain("문장이");
+    expect(await blocked(`${EDITED}
+- 가볍다
+- 소리가 선명하다`)).toContain("목록이나 기호");
     // 막힌 문단은 저장되지 않는다.
     expect((await read(o)).review).toEqual({});
     // 가격 유도 문구가 칸에 있어도 봉사자가 고쳐 통과하면 저장된다.

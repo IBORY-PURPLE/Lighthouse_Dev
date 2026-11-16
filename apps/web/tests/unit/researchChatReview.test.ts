@@ -87,8 +87,12 @@ describe("checkReviewText", () => {
   });
 
   it("고친 문단은 50~1,000자이고 전화번호 모양을 걸러낸다", () => {
-    const edit = `LH-200은 가벼워서 오래 써도 편한 헤드셋이에요. 같이 본 LH-300은 배터리가 더 오래간대요.`;
+    const edit = `LH-200은 가벼워서 오래 써도 편한 헤드셋이에요. 같이 본 LH-300은 배터리가 더 오래간대요. 최신 판매 정보는 쇼핑몰에서 확인해 주세요.`;
     expect(checkReviewText(edit, known, "edit")).toEqual([]);
+    // 문장 수(3~7)와 목록·기호는 고친 문단에도 건다
+    expect(checkReviewText("LH-200은 가벼워서 오래 써도 편한 헤드셋이고 소리도 선명하며 같이 본 LH-300보다 착용감이 좋다고 해요", known, "edit")[0]).toContain("문장이");
+    expect(checkReviewText(`${edit}
+- 가볍다`, known, "edit").join(" ")).toContain("목록이나 기호");
     expect(checkReviewText("짧아요.", known, "edit")[0]).toContain("50자 이상");
     expect(checkReviewText("가".repeat(1001), known, "edit")[0]).toContain("1,000자 이하");
     for (const phone of ["010-1234-5678", "01012345678", "02 123 4567", "+82 10 1234 5678", "1588-1234"]) {

@@ -42,6 +42,7 @@ function notReady(view: ResearchView): { error: "missing_required"; missing: str
   // 구매함이면 칸 표시만이 아니라 실제 사진이 1장 이상 있어야 한다(저장소의 보내기 규칙과 같다).
   if (view.purchase === "bought" && view.photos.length === 0 && !missing.includes("photo")) missing.push("photo");
   if (missing.length > 0) return { error: "missing_required", missing };
+  // "질문 7을 지났다"는 A1·A2가 정한 뜻 그대로다: 물을 수 있고 아직 안 물은 칸이 없다(칸을 봉사자가 먼저 채워 물을 것이 없어도 지난 것이다).
   if (!isPastQuestionSeven(view) || hasUnresolvedCheck(view.pending)) return { error: "not_ready" };
   return null;
 }

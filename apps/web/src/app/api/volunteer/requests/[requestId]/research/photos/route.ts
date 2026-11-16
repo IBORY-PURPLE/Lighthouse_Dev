@@ -46,7 +46,8 @@ export async function POST(
       if (decodedBytes(image) > RESEARCH_LIMITS.imageMaxBytes) return fail(413, "image_too_large");
       if (!matchesImageSignature(image)) return fail(415, "bad_image_format");
       if (thumb.length > RESEARCH_LIMITS.thumbMax) return fail(413, "thumb_too_large");
-      if (!THUMB_DATA_URL.test(thumb)) return fail(415, "bad_image_format");
+      // 썸네일도 선언(jpeg)만이 아니라 실제 JPEG 바이트 서명(FF D8 FF)을 본다.
+      if (!THUMB_DATA_URL.test(thumb) || !matchesImageSignature(thumb)) return fail(415, "bad_image_format");
 
       const store = getResearchStore();
       const actor = { requestId: id, volunteerId, sessionId: sessionId.toLowerCase() };

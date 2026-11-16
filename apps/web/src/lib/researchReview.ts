@@ -133,8 +133,8 @@ function firstOffender(text: string): string {
 
 /**
  * 문단 검사. 걸린 이유를 봉사자가 읽을 문장으로 돌려준다(통과하면 빈 목록).
- * ai: AI 문단(150~700자, 3~7문장, 목록·기호 없음)을 더 본다. edit: 봉사자가 고친 문단(50~1,000자)이다.
- * 둘 다 가격·재고·할인 표현, 자료에 없는 기종 이름, 주소를 거르고 edit은 전화번호 모양도 거른다.
+ * ai: AI 문단(150~700자), edit: 봉사자가 고친 문단(50~1,000자). 둘 다 3~7문장, 목록·기호 없음,
+ * 가격·재고·할인 표현, 자료에 없는 기종 이름, 주소를 거르고 edit은 전화번호 모양도 거른다.
  */
 export function checkReviewText(text: string, material: readonly string[], mode: "ai" | "edit"): string[] {
   const reasons: string[] = [];
@@ -144,12 +144,13 @@ export function checkReviewText(text: string, material: readonly string[], mode:
     if (length < REVIEW_EDIT_MIN || length > REVIEW_EDIT_MAX) {
       reasons.push(`문단은 ${REVIEW_EDIT_MIN}자 이상 ${REVIEW_EDIT_MAX.toLocaleString("ko-KR")}자 이하로 써 주세요. 지금은 ${length}자예요.`);
     }
-  } else {
-    if (length < AI_MIN || length > AI_MAX) reasons.push(`길이가 ${AI_MIN}~${AI_MAX}자를 벗어났어요.`);
-    const count = sentencesOf(text).length;
-    if (count < SENTENCES_MIN || count > SENTENCES_MAX) reasons.push(`문장이 ${SENTENCES_MIN}~${SENTENCES_MAX}개가 아니에요.`);
-    if (/[*#`_>|]|^\s*(?:[-•]|\d+[.)])\s/m.test(text)) reasons.push("목록이나 기호가 들어 있어요.");
+  } else if (length < AI_MIN || length > AI_MAX) {
+    reasons.push(`길이가 ${AI_MIN}~${AI_MAX}자를 벗어났어요.`);
   }
+  // 문장 수와 목록·기호는 AI 문단과 봉사자가 고친 문단에 같이 건다(design.md 4.11 "같은 검사"). 길이만 모드별로 다르다.
+  const count = sentencesOf(text).length;
+  if (count < SENTENCES_MIN || count > SENTENCES_MAX) reasons.push(`문장이 ${SENTENCES_MIN}~${SENTENCES_MAX}개가 아니에요.`);
+  if (/[*#`_>|]|^\s*(?:[-•]|\d+[.)])\s/m.test(text)) reasons.push("목록이나 기호가 들어 있어요.");
   if (hasForbidden(text)) reasons.push(`가격·재고·할인으로 보이는 표현이 있어요: “${firstOffender(text)}”`);
   const unknown = unknownModelTokens(text, material);
   if (unknown.length > 0) reasons.push(`자료에 없는 기종 이름이 있어요: ${[...new Set(unknown)].slice(0, 3).join(", ")}`);
