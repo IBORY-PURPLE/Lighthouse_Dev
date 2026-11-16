@@ -477,8 +477,7 @@ begin
   end if;
 
   -- 하루 상한: 넘으면 행이 안 돌아온다.
-  -- 사진 올리기는 AI를 부르지 않아 하루 AI 상한을 쓰지 않는다(요청당 상한만).
-  if p_kind = 'search' then v_d_searches := v_units; elsif p_kind <> 'photo' then v_d_ai := 1; end if;
+  if p_kind = 'search' then v_d_searches := v_units; else v_d_ai := 1; end if;
   -- 그날 첫 사용이라 행이 없을 때도 상한을 넘으면 막는다(insert 쪽은 on conflict의 where를 안 본다).
   if v_d_searches <= v_cap_day_searches and v_d_ai <= v_cap_day_ai then
     insert into public.ai_usage_daily as d (day, searches, ai_calls) values (v_day, v_d_searches, v_d_ai)

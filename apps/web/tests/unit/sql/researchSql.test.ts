@@ -491,19 +491,6 @@ describe("상한과 사용량", () => {
     await db.exec("delete from public.ai_usage_daily");
   });
 
-  it("사진 올리기는 하루 AI 상한을 쓰지 않는다(상한이 찼어도 ok, 요청당 상한만)", async () => {
-    await db.exec("delete from public.ai_usage_daily");
-    const r = await opened();
-    await apply(r, "a", 0, { purchase: "bought" }, [], []);
-    const caps = { dailyAi: 1 };
-    expect(await begin(r, "turn", { turn: "t1", caps })).toMatchObject({ ai: "ok" });
-    expect(await begin(r, "turn", { turn: "t2", caps })).toMatchObject({ ai: "capped", cap: "daily" });
-    expect(await begin(r, "photo", { caps })).toMatchObject({ outcome: "ok" });
-    expect(await begin(r, "photo", { caps })).toMatchObject({ outcome: "ok" });
-    expect((await one<{ ai_calls: number }>("select ai_calls from public.ai_usage_daily")).ai_calls).toBe(1);
-    await db.exec("delete from public.ai_usage_daily");
-  });
-
   it("그날 첫 사용이어도 하루 상한을 넘으면 막는다", async () => {
     await db.exec("delete from public.ai_usage_daily");
     const r = await opened();
