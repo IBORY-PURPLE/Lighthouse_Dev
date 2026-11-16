@@ -359,7 +359,7 @@ describe("POST /api/volunteer/research", () => {
             ],
           },
           ["https://shop.example/a"],
-          ["https://cite.example/b"],
+          ["https://shop.example/a", "https://cite.example/b"],
           "소니 WH-CH720N 비교 · 인용에만 있는 모델 QX-1",
         ),
       );

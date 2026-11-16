@@ -118,14 +118,14 @@ function readableUrl(value: string): string {
 
 /**
  * search: Responses API + web_search. 글과, 검색 결과(소스 목록·인용)에 나온 주소(비교 키 → 검색 결과의 주소)를 돌려준다.
- * cited는 후보 이름을 대조할 자료다: 인용(url_citation)의 제목과 소스·인용 주소의 글. 모델이 쓴 본문은 넣지 않는다(지어낸 이름이 스스로 근거가 되지 않게).
+ * cited는 후보 이름을 대조할 자료다: 출처마다(비교 키) 그 출처의 주소 글과 인용(url_citation) 제목. 모델이 쓴 본문은 넣지 않는다(지어낸 이름이 스스로 근거가 되지 않게).
  */
 async function callSearch(
   card: SearchCard,
   material: Record<string, unknown>,
   signal: AbortSignal | undefined,
   tally?: Tally,
-): Promise<{ text: string; urls: AllowedUrls; cited: string[] }> {
+): Promise<{ text: string; urls: AllowedUrls; cited: Map<string, string[]> }> {
   const response = await newClient(SEARCH_TIMEOUT_MS).responses.create(
     {
       model: LLM_MODEL,
@@ -153,7 +153,14 @@ async function callSearch(
     if (key && typeof value === "string" && !urls.has(key)) urls.set(key, value.trim());
   };
   const texts: string[] = [];
-  const cited: string[] = [];
+  const cited = new Map<string, string[]>();
+  const addCited = (url: unknown, text: string) => {
+    const key = typeof url === "string" ? urlKey(url) : null;
+    if (key === null) return;
+    const list = cited.get(key);
+    if (list) list.push(text);
+    else cited.set(key, [text]);
+  };
   if (tally) {
     tally.in += response.usage?.input_tokens ?? 0;
     tally.out += response.usage?.output_tokens ?? 0;
@@ -163,7 +170,7 @@ async function callSearch(
     if (output.type === "web_search_call" && output.action?.type === "search") {
       for (const source of output.action.sources ?? []) {
         addUrl(source.url);
-        if (typeof source.url === "string") cited.push(readableUrl(source.url));
+        if (typeof source.url === "string") addCited(source.url, readableUrl(source.url));
       }
     } else if (output.type === "message") {
       for (const content of output.content) {
@@ -172,8 +179,8 @@ async function callSearch(
         for (const note of content.annotations ?? []) {
           if (note.type !== "url_citation") continue;
           addUrl(note.url);
-          if (typeof note.url === "string") cited.push(readableUrl(note.url));
-          if (typeof note.title === "string" && note.title.trim() !== "") cited.push(note.title);
+          if (typeof note.url === "string") addCited(note.url, readableUrl(note.url));
+          if (typeof note.title === "string" && note.title.trim() !== "") addCited(note.url, note.title);
         }
       }
     }
@@ -287,8 +294,8 @@ async function liveResponse(
     case "model": {
       const { text, urls, cited } = await callSearch("model", base, signal, tally);
       const raw = parseJsonObject(text)?.items;
-      // 후보 이름은 인용 제목·출처 주소나 요청 글에 나온 것만 남긴다(design.md 4.8). 대안 후보(alts)는 A3가 같은 인자를 넘겨 쓴다.
-      const items = tallied(tally, raw, cleanItems(raw, urls, undefined, [...known, ...cited]));
+      // 후보 이름은 그 후보가 인용한 출처 하나의 제목·주소에 나온 것만 남긴다(design.md 4.8). 요청 글이나 다른 출처로 채우지 않는다. 대안 후보(alts)는 A3가 같은 인자를 넘겨 쓴다.
+      const items = tallied(tally, raw, cleanItems(raw, urls, undefined, cited));
       return items.length ? { kind: "model", ai: "ok", items } : null;
     }
     case "alts": {

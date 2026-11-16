@@ -97,7 +97,7 @@ export function unknownModelTokens(text: string, material: readonly string[]): s
 }
 
 // ---- 값·이름이 자료에 근거하는지 ---------------------------------------------------------
-// AI가 낸 칸 값(봉사자 말 + evidence)과 검색 후보 이름(인용 제목·출처 주소 + 요청 글)을 같은 방법으로 자료와 대조한다.
+// AI가 낸 칸 값(봉사자 말 + evidence)과 검색 후보 이름(그 후보가 인용한 출처의 제목·주소)을 같은 방법으로 자료와 대조한다.
 // 낱말(핵심 토큰) 단위로 보고, 절반 이상이 자료에 있어야 한다. 말투가 바뀌어도(아프다고 → 아픔) 어간이 남으면 같은 말로 본다.
 
 const TOKEN_SPLIT = /[\s\p{P}\p{S}]+/u;
@@ -140,12 +140,43 @@ export function tokensCovered(value: string, haystack: readonly string[], min = 
   return found / tokens.length >= min;
 }
 
+/** 한글·영문 두 표기를 같은 브랜드로 보는 작은 목록(소니·Sony). 이름에 든 브랜드는 그 자료에도 있어야 한다. */
+const BRAND_GROUPS: readonly (readonly string[])[] = [
+  ["sony", "소니", "쏘니"],
+  ["bose", "보스"],
+  ["samsung", "삼성"],
+  ["apple", "애플"],
+  ["lg", "엘지"],
+  ["jbl", "제이비엘"],
+  ["sennheiser", "젠하이저"],
+  ["logitech", "로지텍"],
+  ["anker", "앤커"],
+  ["philips", "필립스"],
+  ["marshall", "마샬"],
+  ["xiaomi", "샤오미"],
+  ["dyson", "다이슨"],
+  ["razer", "레이저"],
+  ["panasonic", "파나소닉"],
+];
+
+/** 이름에 든 브랜드(별칭 포함) 가운데 자료에 없는 것이 있나. 요청 글에만 있는 브랜드로 다른 회사 페이지 제품을 포장하는 것을 막는다. */
+function brandMissing(name: string, parts: readonly string[]): boolean {
+  const lowerName = name.normalize("NFKC").toLowerCase();
+  const lowerParts = parts.map((part) => part.normalize("NFKC").toLowerCase());
+  return BRAND_GROUPS.some((group) => {
+    const inName = group.some((word) => (word.length <= 3 && /^[a-z]+$/.test(word) ? new RegExp(`(?<![a-z])${word}(?![a-z])`).test(lowerName) : lowerName.includes(word)));
+    if (!inName) return false;
+    return !lowerParts.some((part) => group.some((word) => part.includes(word)));
+  });
+}
+
 /**
- * 검색 후보 이름이 자료(웹 검색 인용 제목·출처 주소와 요청 글)에 근거하나. 기종 모양 토큰(WH-CH720N)은 모두 자료에 있어야 하고,
+ * 검색 후보 이름이 자료에 근거하나. 자료는 그 후보가 인용한 출처 하나의 제목·주소 글이다(다른 출처나 요청 글로 모자란 낱말을 채우지 않는다).
+ * 기종 모양 토큰(WH-CH720N)은 모두 자료에 있어야 하고, 이름에 든 브랜드도 자료에 있어야 하며(소니·Sony는 같은 말),
  * 그 밖의 낱말은 절반 이상이 자료에 있어야 한다. 모델이 지어낸 이름이나 인용에 없는 제품은 false.
  */
 export function nameGrounded(name: string, material: readonly string[]): boolean {
-  return unknownModelTokens(name, material).length === 0 && tokensCovered(name, material);
+  return unknownModelTokens(name, material).length === 0 && !brandMissing(name, material) && tokensCovered(name, material);
 }
 
 const hasUnknownModel = (text: string, material: readonly string[] | undefined) =>
@@ -212,9 +243,14 @@ export function countObjects(raw: unknown): number {
  * 화면에 보내는 주소는 검색 결과에 있던 주소다. 이미 앞 후보가 쓴 주소(분류 페이지 하나로 몰린 경우)는
  * 그 기종의 페이지가 아니므로 첫 후보만 주소를 갖고 나머지는 주소 없이(url null) 남긴다.
  * exclude는 후보에서 뺄 이름(대안 후보에서 이미 정한 기종).
- * material이 있으면 이름이 그 자료(인용 제목·출처 주소·요청 글)에 근거하는 후보만 남긴다(nameGrounded).
+ * sources가 있으면 후보 이름이 그 후보가 쓴 출처 하나의 글(제목·주소, 비교 키 → 글 목록)에 근거하는 후보만 남긴다(nameGrounded).
  */
-export function cleanItems(raw: unknown, allowed: AllowedUrls, exclude?: string, material?: readonly string[]): ResearchItem[] {
+export function cleanItems(
+  raw: unknown,
+  allowed: AllowedUrls,
+  exclude?: string,
+  sources?: ReadonlyMap<string, readonly string[]>,
+): ResearchItem[] {
   const seen = new Set<string>(exclude ? [exclude.trim().toLowerCase()] : []);
   const usedUrls = new Set<string>();
   const items: ResearchItem[] = [];
@@ -223,9 +259,9 @@ export function cleanItems(raw: unknown, allowed: AllowedUrls, exclude?: string,
     const name = typeof entry.name === "string" ? oneLine(entry.name) : "";
     const key = typeof entry.url === "string" ? urlKey(entry.url) : null;
     if (name.length < 2 || [...name].length > RESEARCH_LIMITS.nameMax || hasForbidden(name)) continue;
-    if (material !== undefined && !nameGrounded(name, material)) continue;
     const source = key === null ? undefined : allowed.get(key);
     if (key === null || source === undefined || seen.has(name.toLowerCase())) continue;
+    if (sources !== undefined && !nameGrounded(name, sources.get(key) ?? [])) continue;
     seen.add(name.toLowerCase());
     const note = typeof entry.note === "string" ? oneLine(entry.note) : "";
     const shared = usedUrls.has(key);

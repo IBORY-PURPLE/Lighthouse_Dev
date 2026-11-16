@@ -10,6 +10,7 @@ import {
   isQuestionLike,
   parseTurnBody,
   planTurn,
+  urlInText,
   validateAiTurn,
   type AiMode,
   type TurnInput,
@@ -684,6 +685,33 @@ describe("건너뛰기·칩·고치기·링크", () => {
     const checked = await h.step({ type: "link_check", url });
     expect(checked.view.slots.refs).toMatchObject({ value: url, links: [url], status: "confirmed" });
     expect(checked.chosen).toBe("propose_review");
+  });
+
+  it("문장 끝 마침표·쉼표·닫는 괄호·따옴표는 주소에 넣지 않는다", () => {
+    expect(urlInText("이 글 봤어요 https://example.com/review.")).toBe("https://example.com/review");
+    expect(urlInText("https://example.com/review, 좋아요")).toBe("https://example.com/review");
+    expect(urlInText("(https://example.com/review)")).toBe("https://example.com/review");
+    expect(urlInText('"https://example.com/review".')).toBe("https://example.com/review");
+    expect(urlInText("https://example.com/review?id=3!!")).toBe("https://example.com/review?id=3");
+    expect(urlInText("https://example.com/a。")).toBe("https://example.com/a");
+    // 짝이 맞는 괄호는 주소의 일부다.
+    expect(urlInText("https://ko.wikipedia.org/wiki/Foo_(bar)")).toBe("https://ko.wikipedia.org/wiki/Foo_(bar)");
+    expect(urlInText("https://ko.wikipedia.org/wiki/Foo_(bar).")).toBe("https://ko.wikipedia.org/wiki/Foo_(bar)");
+    expect(urlInText("주소 없어요")).toBeNull();
+    expect(urlInText("https://.")).toBeNull();
+  });
+
+  it("끝에 마침표가 붙은 주소도 그 주소로 링크 카드를 만든다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    await h.step(say("WH-CH520"), replyAi(fill("model", "WH-CH520")));
+    await h.step(say("가벼워 보여요"), replyAi(fill("pros", "가벼워 보여요")));
+    await h.step({ type: "skip", slot: "alts" });
+    await h.step(say("무게가 맘에 들어요"), replyAi(fill("altReason", "무게가 맘에 들어요")));
+    await h.step({ type: "skip", slot: "benefits" });
+    const card = await h.step(say("이 글 봤어요 https://blog.example.com/review."), replyAi());
+    const link = card.messages.find((message) => message.body.kind === "link")!;
+    expect(link.body).toMatchObject({ kind: "link", url: "https://blog.example.com/review" });
   });
 
   it("AI가 참고 글 칸을 주소로 채우려 해도 값으로 넣지 않고 링크 카드로 받는다", async () => {

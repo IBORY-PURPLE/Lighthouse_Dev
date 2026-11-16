@@ -674,6 +674,17 @@ function linkLabel(url: string): string {
 }
 
 const URL_IN_TEXT = /https:\/\/[^\s<>"'，。]+/i;
+/** 문장 끝에 붙은 구두점·닫는 괄호·따옴표는 주소가 아니다(짝이 맞는 괄호 ')'는 주소의 일부로 둔다). */
+const URL_TRAILING = /[.,;:!?'"’”」』。，、！？\]}>]$/u;
+export function urlInText(text: string): string | null {
+  let url = URL_IN_TEXT.exec(text)?.[0] ?? "";
+  for (;;) {
+    if (URL_TRAILING.test(url)) url = url.slice(0, -1);
+    else if (url.endsWith(")") && url.split(")").length > url.split("(").length) url = url.slice(0, -1);
+    else break;
+  }
+  return url === "" || url === "https://" ? null : url;
+}
 
 /** 한 턴을 계획한다. 저장소에 넘길 patch·messages·후보 목록을 만든다. 상태를 바꾸지 않는다. */
 export function planTurn(args: PlanArgs): TurnPlan {
@@ -749,7 +760,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
       // 주소가 든 말: 참고 글(refs)에 해당하면 AI가 칸을 채우지 못하게 하고, 아래 3)에서 "직접 확인 필요" 링크 카드로 받는다.
       // (서버는 외부 주소를 열지 않으므로 봉사자가 확인하기 전에는 값으로 넣지 않는다. design.md 4.6, 4.10)
-      const url = URL_IN_TEXT.exec(input.text)?.[0] ?? null;
+      const url = urlInText(input.text);
       const linkCard =
         url !== null &&
         isHttps(url) &&
