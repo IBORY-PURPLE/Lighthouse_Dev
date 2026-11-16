@@ -35,7 +35,12 @@ const CHIP_URL_MAX = 500;
 
 type ModelBody = Extract<ResearchResponse, { items: unknown }>;
 
-/** 기종 후보 메시지: 칩(이름, 주소)과 쇼핑몰 바로가기. 이름은 pending.shownModels로 따로 저장한다. */
+/**
+ * 기종 후보 메시지: 칩(이름, 주소)과 쇼핑몰 바로가기. 이름은 pending.shownModels로 따로 저장한다.
+ * 후보 이름은 웹 검색에서 온 값이라, 기존 카드형(researchCheck.cleanItems)과 같이 "출처 주소가 검색 결과(인용·소스)에 있는 후보"와
+ * 이름의 금지 표현만 거른다. 칩에는 "AI 제안 · 확인이 필요해요" 표시가 붙고, 고른 이름은 봉사자 확정으로 칸에 들어간다.
+ * 이름과 인용 내용의 대조(design.md 4.8 unknownModelTokens, 자료 = 인용)는 제품 목록 질문(블록 A3)에서 더한다.
+ */
 function modelMessage(body: ModelBody, subject: string, notice: string | null): NextMessage {
   const count = body.items.length;
   const caption =
@@ -85,8 +90,10 @@ export async function POST(
       const context = { product: found.request.product, brand: found.request.brand, item: found.request.item };
       const subject = subjectOf(context);
 
-      // 분당 8회는 AI 검색을 새로 부를 때만 센다. 이미 한도에 닿아 있으면 사용량을 올리는 begin 전에 막는다
-      // (거절된 재시도가 요청당·하루 검색 한도를 쓰지 않게). 캐시 적중·처리 중·한도 응답은 세지 않는다.
+      // 분당 8회는 AI 검색을 새로 부를 때만 센다(캐시 적중·처리 중·한도 응답·틀린 요청은 세지 않는다).
+      // 이미 한도에 닿아 있으면 검색 사용량을 올리는 begin 전에 막는다: begin이 올린 요청당·하루 검색 사용량은
+      // 되돌릴 방법이 없어서, 거절된 재시도가 한도를 쓰지 않게 하려는 것이다. 한도에 닿으려면 AI 검색을 1분에 8번 새로
+      // 불러야 하는데 대화 한 번에 모델 검색은 한 번뿐이라 정상 사용에서는 닿지 않는다.
       const gate = checkSearchLimit.peek(volunteerId);
       if (!gate.allowed) return fail(429, "rate_limited", { "Retry-After": String(gate.retryAfterSeconds) });
 

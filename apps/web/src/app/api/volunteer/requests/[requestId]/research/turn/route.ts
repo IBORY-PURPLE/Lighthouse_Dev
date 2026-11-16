@@ -103,10 +103,11 @@ export async function POST(
 
       // 분당 제한은 새 일을 시작할 때만 센다(저장 응답·처리 중·stale·권한 오류·본문 오류는 세지 않고 제한에 닿은 뒤에도 그대로 답한다).
       // 제한에 닿았으면 begin이 만든 처리 중 자리를 닫고 사용량을 되돌린다: 기준 version이 어긋난 apply는 stale 경로를 타서
-      // 두 가지를 모두 처리한다. 그래서 같은 clientTurnId로 나중에 다시 보내도 정상 처리된다.
+      // 두 가지를 모두 처리한다. 세션 version은 0 이상이라 -1은 어떤 동시 턴이 끼어들어도 항상 어긋난다.
+      // 그래서 같은 clientTurnId로 나중에 다시 보내도 정상 처리된다.
       const limit = checkTurnLimit(volunteerId);
       if (!limit.allowed) {
-        await store.apply({ ...actor, clientTurnId, baseVersion: begun.version + 1, patch: null, messages: [], next: [] });
+        await store.apply({ ...actor, clientTurnId, baseVersion: -1, patch: null, messages: [], next: [] });
         return fail(429, "rate_limited", { "Retry-After": String(limit.retryAfterSeconds) });
       }
 
