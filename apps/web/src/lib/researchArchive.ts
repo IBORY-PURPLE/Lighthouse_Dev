@@ -72,11 +72,18 @@ export function scrubText(text: string): string {
   return text.replace(DATA_URL_INLINE, "").replace(EMAIL, "[이메일]").replace(PHONE, "[전화번호]");
 }
 
-/** "data:"로 시작하는 문자열 값과 thumb 키를 지운다(사진 썸네일이 보관본에 들어가지 않게). */
+/**
+ * "data:"로 시작하는 문자열 값과 thumb 키를 지우고 나머지 글은 scrubText로 가린다(SQL `research_strip_data`).
+ * 가리면 깨지는 주소(http로 시작하는데 전화번호·이메일·data URL이 섞인 값)는 값 자체를 뺀다.
+ */
+function dropString(value: string): boolean {
+  return DATA_URL_VALUE.test(value) || (/^https?:\/\//i.test(value) && scrubText(value) !== value);
+}
+
 export function stripData<T>(value: T): T {
   if (Array.isArray(value)) {
     return value
-      .filter((entry) => !(typeof entry === "string" && DATA_URL_VALUE.test(entry)))
+      .filter((entry) => !(typeof entry === "string" && dropString(entry)))
       .map((entry) => stripData(entry)) as unknown as T;
   }
   if (typeof value === "string") return scrubText(value) as unknown as T;
@@ -84,7 +91,7 @@ export function stripData<T>(value: T): T {
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
       if (key === "thumb") continue;
-      if (typeof entry === "string" && DATA_URL_VALUE.test(entry)) continue;
+      if (typeof entry === "string" && dropString(entry)) continue;
       out[key] = stripData(entry);
     }
     return out as T;
@@ -149,8 +156,8 @@ export function archiveMessages(messages: ResearchMessage[]): ArchiveMessage[] {
     const item: ArchiveMessage = {
       seq: message.seq,
       role: message.role,
-      tag: message.tag ?? null,
-      slot: message.slot ?? null,
+      tag: typeof message.tag === "string" ? scrubText(message.tag) : null,
+      slot: typeof message.slot === "string" ? scrubText(message.slot) : null,
       text,
     };
     const size = byteLength(JSON.stringify(item)) + 2;

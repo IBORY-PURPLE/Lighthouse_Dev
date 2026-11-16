@@ -70,7 +70,8 @@ returns text language sql immutable security invoker set search_path = '' as $$
     '(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])', '[전화번호]', 'g')
 $$;
 
--- jsonb 안의 "data:" 문자열 값과 thumb 키를 지운다(사진 썸네일이 보관본에 들어가지 않게).
+-- jsonb 안의 "data:" 문자열 값과 thumb 키를 지우고, 나머지 글은 research_scrub_text로 가린다(사진 썸네일이 보관본에 들어가지 않게).
+-- 가리면 깨지는 주소(http로 시작하는데 전화번호·이메일·data URL이 섞인 값)는 값 자체를 뺀다.
 create or replace function public.research_strip_data(p_value jsonb)
 returns jsonb language plpgsql immutable security invoker set search_path = '' as $$
 declare
@@ -83,14 +84,19 @@ begin
       v_out := '{}'::jsonb;
       for v_key, v_val in select e.key, e.value from jsonb_each(p_value) as e loop
         if v_key = 'thumb' then continue; end if;
-        if jsonb_typeof(v_val) = 'string' and (v_val #>> '{}') ~* '^\s*data:' then continue; end if;
+        if jsonb_typeof(v_val) = 'string' and (
+             (v_val #>> '{}') ~* '^\s*data:'
+             or ((v_val #>> '{}') ~* '^https?://' and public.research_scrub_text(v_val #>> '{}') <> (v_val #>> '{}'))
+           ) then continue; end if;
         v_out := v_out || jsonb_build_object(v_key, public.research_strip_data(v_val));
       end loop;
       return v_out;
     when 'array' then
       select coalesce(jsonb_agg(public.research_strip_data(e.value) order by e.ord), '[]'::jsonb) into v_out
         from jsonb_array_elements(p_value) with ordinality as e(value, ord)
-        where not (jsonb_typeof(e.value) = 'string' and (e.value #>> '{}') ~* '^\s*data:');
+        where not (jsonb_typeof(e.value) = 'string' and (
+          (e.value #>> '{}') ~* '^\s*data:'
+          or ((e.value #>> '{}') ~* '^https?://' and public.research_scrub_text(e.value #>> '{}') <> (e.value #>> '{}'))));
       return v_out;
     when 'string' then
       return to_jsonb(public.research_scrub_text(p_value #>> '{}'));
@@ -183,7 +189,8 @@ begin
     v_text := public.research_scrub_text(public.research_body_text(v_m.body));
     v_text := regexp_replace(left(v_text, 3000), '^\s+|\s+$', '', 'g');
     continue when v_text = '';
-    v_item := jsonb_build_object('seq', v_m.seq, 'role', v_m.role, 'tag', v_m.tag, 'slot', v_m.slot, 'text', v_text);
+    v_item := jsonb_build_object('seq', v_m.seq, 'role', v_m.role, 'tag', public.research_scrub_text(v_m.tag),
+      'slot', public.research_scrub_text(v_m.slot), 'text', v_text);
     exit when v_bytes + octet_length(v_item::text) + 2 > 190000;
     v_bytes := v_bytes + octet_length(v_item::text) + 2;
     v_out := v_out || jsonb_build_array(v_item);

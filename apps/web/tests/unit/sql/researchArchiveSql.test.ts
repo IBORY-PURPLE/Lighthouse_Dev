@@ -391,6 +391,20 @@ describe("보내기", () => {
     expect(rv.benefit_links).toHaveLength(1);
     expect(rv.benefit_links[0]).toMatchObject({ url: BENEFIT_URL, confirmedAt: "2026-11-17T02:00:00Z [전화번호]" });
     expect(JSON.stringify(rv)).not.toContain("a@b.com");
+    // 30일 보관본의 칸에도 그 링크는 없다(깨진 주소를 남기지 않는다).
+    const a = await one<Json>("select slots from public.research_archives where request_id = $1", [r.id]);
+    expect(a.slots.benefits.links).toEqual([BENEFIT_URL]);
+    expect(JSON.stringify(a)).not.toContain("a@b.com");
+  });
+
+  it("메시지의 tag·slot에 연락처가 들어 있어도 가린다", async () => {
+    const r = await opened();
+    const out = await apply(r, "t1", 0, { purchase: "research" }, [
+      { role: "ai", tag: "q 010-1234-5678", slot: "a@b.com", ai: "none", body: { text: "글" } },
+    ]);
+    expect(out.outcome).toBe("ok");
+    const m = await one<Json>("select public.research_archive_messages($1) as m", [r.id]);
+    expect(m.m).toEqual([{ seq: 1, role: "ai", tag: "q [전화번호]", slot: "[이메일]", text: "글" }]);
   });
 
   it("같은 요청을 다시 보내면 existing이고 두 표는 1행 그대로다", async () => {

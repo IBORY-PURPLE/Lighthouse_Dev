@@ -225,8 +225,8 @@ describe("메모리 보내기 기록", () => {
     expect(research.archiveSnapshot().reviews.find((x) => x.requestId === c.r.id)?.reviewText).toBe("대체 문단");
   });
 
-  it("혜택 링크 주소에 전화번호·이메일·data URL이 섞여 있으면 영구 기록에 넣지 않는다", async () => {
-    const { r, version, rev } = await ready();
+  it("혜택 링크 주소에 전화번호·이메일·data URL이 섞여 있으면 영구 기록과 보관 칸에 넣지 않는다", async () => {
+    const { r, version } = await ready();
     const bad = "https://shop.example/?email=a@b.com&phone=010-1234-5678";
     const patched = await research.apply({
       ...r.actor, clientTurnId: "t3", baseVersion: version,
@@ -242,6 +242,15 @@ describe("메모리 보내기 기록", () => {
     expect(rv?.benefitLinks).toHaveLength(1);
     expect(rv?.benefitLinks[0]).toMatchObject({ url: BENEFIT_URL, confirmedAt: "2026-11-17T02:00:00Z [전화번호]" });
     expect(JSON.stringify(rv)).not.toContain("a@b.com");
+    // 30일 보관본의 칸에도 그 링크는 없다(깨진 주소를 남기지 않는다).
+    const a = research.archiveSnapshot().archives.find((x) => x.requestId === r.id);
+    expect((a?.slots.benefits as { links: string[] }).links).toEqual([BENEFIT_URL]);
+    expect(JSON.stringify(a)).not.toContain("a@b.com");
+  });
+
+  it("메시지의 tag·slot에 연락처가 들어 있어도 가린다", () => {
+    const out = archiveMessages([{ seq: 1, role: "ai", tag: "q 010-1234-5678", slot: "a@b.com", body: { text: "글" } }]);
+    expect(out).toEqual([{ seq: 1, role: "ai", tag: "q [전화번호]", slot: "[이메일]", text: "글" }]);
   });
 
   it("보내기가 실패하면 아무것도 남지 않는다", async () => {
