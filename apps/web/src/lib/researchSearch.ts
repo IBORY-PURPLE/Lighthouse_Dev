@@ -181,7 +181,7 @@ const compactKey = (value: string) => value.normalize("NFKC").toUpperCase().repl
  * 이름이 그 제품의 검색 결과 항목(evidence: 같은 주소의 인용 제목과 주소)에 근거가 있나. 숫자가 든 토큰(영문 기종 번호뿐 아니라 "버즈3" 같은 한글+숫자도)은 모두 인용에 있어야 한다.
  * 브랜드·품목(generic) 토큰을 뺀 나머지 토큰도 모두 인용에 있어야 한다.
  * 첫 토큰(보통 브랜드)도 대조한다: 알려 둔 브랜드(소니·sony, 삼성·samsung…)면 별칭 중 하나가 인용에 있어야 하고(소니 페이지에 "삼성 WH-CH720N"을 붙이면 안 된다),
- * 아니면 그 토큰이 인용에 있어야 한다. 남는 토큰이 없으면 첫 토큰이 인용에 꼭 있어야 하고, 남는 토큰이 있으면 첫 토큰이 generic(브랜드·품목)일 때만 인용에 없어도 된다.
+ * 아니면 그 토큰이 인용에 있어야 한다. 남는 토큰이 없으면 첫 토큰이 인용에 꼭 있어야 하고, 남는 토큰이 있으면 알려 둔 브랜드가 아닌 첫 토큰이 generic(품목 등)일 때만 인용에 없어도 된다.
  */
 function nameInEvidence(name: string, evidence: readonly string[], generic: readonly string[]): boolean {
   // 인용마다 따로 대조한다(인용을 이어 붙이면 한 인용의 끝과 다른 인용의 시작이 합쳐져 없는 기종 번호가 생긴다).
@@ -201,7 +201,8 @@ function nameInEvidence(name: string, evidence: readonly string[], generic: read
   const rest = tokens.slice(1).filter((token) => !skip.includes(token.key));
   const brandGroup = knownBrandIn(first.raw);
   const firstFound = brandGroup ? brandGroupIn(evidence.join(" "), brandGroup) : found(first.key);
-  const firstOk = firstFound || (rest.length > 0 && skip.includes(first.key));
+  // 알려 둔 브랜드는 요청의 브랜드(generic)와 같아도 건너뛰지 않는다(요청이 삼성이어도 소니 페이지에 붙은 삼성 이름은 버린다).
+  const firstOk = brandGroup ? firstFound : firstFound || (rest.length > 0 && skip.includes(first.key));
   return firstOk && rest.every((token) => found(token.key));
 }
 

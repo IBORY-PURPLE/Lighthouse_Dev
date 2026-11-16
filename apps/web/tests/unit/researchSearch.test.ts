@@ -163,6 +163,15 @@ describe("cleanProducts: 같이 고민한 제품 이름·특징·주소 검사",
         { name: "삼성 Buds3", feature: "작아요", pageUrl: urls[1] },
       ]).map((item) => item.name),
     ).toEqual(["소니 WH-CH720N", "삼성 Buds3"]);
+    // 요청의 브랜드(generic)가 삼성이어도 소니 페이지에 붙은 삼성 이름은 버린다.
+    const samsungAsked = cleanProducts(
+      [{ name: "삼성 WH-CH720N", feature: "다른 브랜드 이름", pageUrl: urls[0] }],
+      allowedOf(urls),
+      [...titles, ...urls],
+      [],
+      { sources: sourcesOf(urls, titles), generic: ["Samsung", "삼성", "헤드폰"] },
+    );
+    expect(samsungAsked).toEqual([]);
     // 브랜드가 아닌 첫 단어가 인용에 없어도(지어낸 제품 이름) 버린다.
     expect(run([{ name: "슈퍼 WH-CH720N", feature: "지어낸 이름", pageUrl: urls[0] }])).toEqual([]);
   });
