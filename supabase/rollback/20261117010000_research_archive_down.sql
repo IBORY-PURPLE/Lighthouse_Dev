@@ -99,6 +99,8 @@ drop function if exists public.research_body_text(jsonb);
 drop function if exists public.research_strip_data(jsonb);
 drop function if exists public.research_final_review(jsonb, jsonb);
 drop function if exists public.research_scrub_text(text);
+drop function if exists public.research_scrub_plain(text);
+drop function if exists public.research_url_decode(text);
 
 drop table if exists public.research_reviews;
 drop table if exists public.research_archives;

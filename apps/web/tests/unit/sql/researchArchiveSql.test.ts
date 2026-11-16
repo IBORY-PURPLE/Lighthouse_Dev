@@ -25,6 +25,12 @@ const SCRUB_CASES: Array<[string, string]> = [
   ["메일 a.b+c@example.co.kr 로", "메일 [이메일] 로"],
   ["사진 data:image/jpeg;base64,/9j/4AAQSkZJRg== 끝 data:text/plain,hello 끝", "사진  끝  끝"],
   ["720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234", "720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234"],
+  ["링크 https://shop.example/?email=a%40b.com 끝", "링크  끝"],
+  ["혜택 https://shop.example/?email=a@b.com 끝", "혜택  끝"],
+  ["https://shop.example/?p=010%2D1234%2D5678&q=1", ""],
+  ["이중 https://shop.example/?e=a%2540b.com 끝", "이중  끝"],
+  ["대문자 HTTPS://shop.example/?e=a%40b.com 끝", "대문자  끝"],
+  ["정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr 010-1234-5678", "정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr [전화번호]"],
 ];
 const NEW_FUNCTIONS = ["research_scrub_text", "research_final_review", "research_strip_data", "research_body_text", "research_archive_messages", "research_archive_put"];
 const EXISTING_FUNCTIONS = ["register_request", "claim_request", "release_request", "complete_request", "reset_demo_requests"];
@@ -380,21 +386,42 @@ describe("보내기", () => {
   it("혜택 링크 주소에 전화번호·이메일·data URL이 섞여 있으면 영구 기록에 넣지 않고 확인 날짜도 가린다", async () => {
     const { r, version, rev } = await ready();
     const bad = "https://shop.example/?email=a@b.com&phone=010-1234-5678";
+    const encoded = "https://shop.example/?email=a%40b.com";
     await db.query(
       `update public.research_sessions set slots = slots || jsonb_build_object('benefits', jsonb_build_object(
          'value', 'x', 'status', 'confirmed', 'by', 'volunteer', 'at', '2026-11-17T02:00:00Z 010-1234-5678',
-         'links', jsonb_build_array($2::text, $3::text))) where request_id = $1`,
-      [r.id, bad, BENEFIT_URL],
+         'links', jsonb_build_array($2::text, $3::text, $4::text))) where request_id = $1`,
+      [r.id, bad, encoded, BENEFIT_URL],
     );
     expect((await send(r, version, rev)).outcome).toBe("sent");
     const rv = await one<Json>("select benefit_links from public.research_reviews where request_id = $1", [r.id]);
     expect(rv.benefit_links).toHaveLength(1);
     expect(rv.benefit_links[0]).toMatchObject({ url: BENEFIT_URL, confirmedAt: "2026-11-17T02:00:00Z [전화번호]" });
     expect(JSON.stringify(rv)).not.toContain("a@b.com");
+    expect(JSON.stringify(rv)).not.toContain("a%40b.com");
     // 30일 보관본의 칸에도 그 링크는 없다(깨진 주소를 남기지 않는다).
     const a = await one<Json>("select slots from public.research_archives where request_id = $1", [r.id]);
     expect(a.slots.benefits.links).toEqual([BENEFIT_URL]);
     expect(JSON.stringify(a)).not.toContain("a@b.com");
+    expect(JSON.stringify(a)).not.toContain("a%40b.com");
+  });
+
+  it("리뷰·메시지는 SQL left()처럼 문자(코드 포인트) 수로 자르고, 글 속 깨질 주소는 통째로 뺀다", async () => {
+    const review = await one<{ n: number; t: string }>(
+      "select char_length(public.research_final_review(jsonb_build_object('text', $1::text), '[]'::jsonb)) as n, '' as t",
+      ["😀".repeat(1500)],
+    );
+    expect(review.n).toBe(1000);
+    const paragraph = await one<{ t: string }>(
+      "select public.research_final_review(jsonb_build_object('text', $1::text), '[]'::jsonb) as t",
+      ["혜택 https://shop.example/?email=a@b.com"],
+    );
+    expect(paragraph.t).toBe("혜택");
+    const r = await opened();
+    expect((await apply(r, "t1", 0, { purchase: "research" }, [{ role: "ai", tag: "question", slot: null, ai: "none", body: { headline: "a".repeat(2000), text: "😀".repeat(1500) } }])).outcome).toBe("ok");
+    const m = await one<Json>("select public.research_archive_messages($1) as m", [r.id]);
+    expect(Array.from(m.m[0].text)).toHaveLength(3000);
+    expect(m.m[0].text.endsWith("😀")).toBe(true);
   });
 
   it("메시지의 tag·slot에 연락처가 들어 있어도 가린다", async () => {

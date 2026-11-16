@@ -67,9 +67,45 @@ const DATA_URL_INLINE = /data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"')]+/g;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const PHONE = /(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])/g;
 
-/** 보관할 글에서 사진 데이터(data URL)는 지우고 이메일·전화번호는 [이메일]·[전화번호]로 바꾼다(SQL `research_scrub_text`). */
-export function scrubText(text: string): string {
+const URL_TOKEN = /([hH][tT][tT][pP][sS]?:\/\/[^\s"'<>)]+)|([^hH]+|[hH])/g;
+
+/** 주소 안의 %XX(ASCII 0x01~0x7F)를 글자로 푼다. 최대 3번(SQL `research_url_decode`). */
+export function urlDecode(text: string): string {
+  let out = text;
+  for (let pass = 0; pass < 3; pass += 1) {
+    if (!/%[0-7][0-9A-Fa-f]/.test(out)) break;
+    out = out.replace(/%([0-7][0-9A-Fa-f])/g, (whole, hex: string) =>
+      hex === "00" ? whole : String.fromCharCode(parseInt(hex, 16)),
+    );
+  }
+  return out;
+}
+
+function scrubPlain(text: string): string {
   return text.replace(DATA_URL_INLINE, "").replace(EMAIL, "[이메일]").replace(PHONE, "[전화번호]");
+}
+
+/**
+ * 보관할 글에서 사진 데이터(data URL)는 지우고 이메일·전화번호는 [이메일]·[전화번호]로 바꾼다(SQL `research_scrub_text`).
+ * 글 속 http(s) 주소에 연락처·data URL이 섞여 있으면(%40처럼 인코딩된 것도 푼 뒤 본다) 가리면 깨지므로 주소 전체를 뺀다.
+ */
+export function scrubText(text: string): string {
+  let out = "";
+  for (const match of text.matchAll(URL_TOKEN)) {
+    const url = match[1];
+    if (url === undefined) {
+      out += match[2];
+    } else if (scrubPlain(url) === url && scrubPlain(urlDecode(url)) === urlDecode(url)) {
+      out += url;
+    }
+  }
+  return scrubPlain(out);
+}
+
+/** 문자(유니코드 코드 포인트) 수로 자른다. SQL `left()`와 같다(UTF-16 코드 단위로 자르지 않는다). */
+export function cutChars(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length <= max ? text : chars.slice(0, max).join("");
 }
 
 /**
@@ -151,7 +187,7 @@ export function archiveMessages(messages: ResearchMessage[]): ArchiveMessage[] {
   let bytes = 2;
   for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
     let text = scrubText(bodyText(message.body));
-    text = text.slice(0, ARCHIVE_TEXT_MAX).trim();
+    text = trimmed(cutChars(text, ARCHIVE_TEXT_MAX));
     if (text === "") continue;
     const item: ArchiveMessage = {
       seq: message.seq,
@@ -197,9 +233,9 @@ function trimmed(text: string): string {
  * 후보 1 가이드(= 리뷰 문단)를 쓴다. 가려야 할 글은 가리고 1,000자로 자른다. 둘 다 비면 빈 글.
  */
 export function finalReview(reviewText: string | undefined, candidates: unknown[]): string {
-  const final = trimmed(scrubText((reviewText ?? "").slice(0, REVIEW_TEXT_MAX)));
+  const final = trimmed(scrubText(cutChars(reviewText ?? "", REVIEW_TEXT_MAX)));
   if (final !== "" || !isRecord(candidates[0])) return final;
-  return trimmed(scrubText(str(candidates[0].guide).slice(0, REVIEW_TEXT_MAX)));
+  return trimmed(scrubText(cutChars(str(candidates[0].guide), REVIEW_TEXT_MAX)));
 }
 
 /** 보내는 순간 만들 두 기록. 리뷰 문단이 비어 있으면 review는 null이다(영구 표에 넣지 않는다). */
@@ -214,7 +250,7 @@ export function buildArchive(
   const lastDraft = [...source.messages]
     .filter((message) => message.role === "ai" && message.tag === "review")
     .sort((a, b) => b.seq - a.seq)[0];
-  const draft = lastDraft ? scrubText(bodyText(lastDraft.body)).slice(0, 2500) : null;
+  const draft = lastDraft ? cutChars(scrubText(bodyText(lastDraft.body)), 2500) : null;
 
   const request: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(source.request)) {
@@ -241,11 +277,11 @@ export function buildArchive(
     .slice(1)
     .map((candidate) => (isRecord(candidate) ? str(candidate.name) : ""))
     .filter((name) => name !== "")
-    .map((name) => scrubText(name).slice(0, 100));
+    .map((name) => cutChars(scrubText(name), 100));
   const firstName = isRecord(source.candidates[0]) ? str(source.candidates[0].name) : "";
   const model = scrubText((session.slots.model?.value ?? "").trim() || firstName);
 
-  const confirmedAt = scrubText(session.slots.benefits?.at ?? createdAt).slice(0, 40);
+  const confirmedAt = cutChars(scrubText(session.slots.benefits?.at ?? createdAt), 40);
   const benefitLinks: BenefitLink[] = [];
   const links = Array.isArray(session.slots.benefits?.links) ? session.slots.benefits.links : [];
   links.slice(0, BENEFIT_LINKS_MAX).forEach((url) => {
@@ -261,10 +297,10 @@ export function buildArchive(
       }
     }
     benefitLinks.push({
-      title: scrubText(str(card?.title)).slice(0, 60),
-      url: url.slice(0, 500),
-      kind: scrubText(str(card?.kind)).slice(0, 40),
-      condition: scrubText(str(card?.condition)).slice(0, 80),
+      title: cutChars(scrubText(str(card?.title)), 60),
+      url: cutChars(url, 500),
+      kind: cutChars(scrubText(str(card?.kind)), 40),
+      condition: cutChars(scrubText(str(card?.condition)), 80),
       confirmedAt,
     });
   });
@@ -279,7 +315,7 @@ export function buildArchive(
       item: clean(source.request.item),
       brand: clean(source.request.brand),
       product: clean(source.request.product),
-      model: model === "" ? null : model.slice(0, 200),
+      model: model === "" ? null : cutChars(model, 200),
       purchase: session.purchase,
       verified,
       reviewText: final,

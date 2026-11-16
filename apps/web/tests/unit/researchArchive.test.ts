@@ -6,6 +6,7 @@ import {
   ARCHIVE_KEEP_MS,
   ARCHIVE_MESSAGES_MAX_BYTES,
   bodyText,
+  finalReview,
   scrubText,
   stripData,
 } from "@/lib/researchArchive";
@@ -123,6 +124,12 @@ describe("글만 뽑기(순수 함수)", () => {
       ["메일 a.b+c@example.co.kr 로", "메일 [이메일] 로"],
       ["사진 data:image/jpeg;base64,/9j/4AAQSkZJRg== 끝 data:text/plain,hello 끝", "사진  끝  끝"],
       ["720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234", "720N WH-1000XM5 2026-11-17 10만 원 1,000,000원 12345678901234"],
+    ["링크 https://shop.example/?email=a%40b.com 끝", "링크  끝"],
+    ["혜택 https://shop.example/?email=a@b.com 끝", "혜택  끝"],
+    ["https://shop.example/?p=010%2D1234%2D5678&q=1", ""],
+    ["이중 https://shop.example/?e=a%2540b.com 끝", "이중  끝"],
+    ["대문자 HTTPS://shop.example/?e=a%40b.com 끝", "대문자  끝"],
+    ["정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr 010-1234-5678", "정상 https://e.com/a?x=1%20y&z=%EA%B0%80 와 HTTPS://E.COM/%2F 와 http://x.kr [전화번호]"],
     ];
     for (const [input, expected] of cases) expect(scrubText(input), input).toBe(expected);
   });
@@ -228,9 +235,10 @@ describe("메모리 보내기 기록", () => {
   it("혜택 링크 주소에 전화번호·이메일·data URL이 섞여 있으면 영구 기록과 보관 칸에 넣지 않는다", async () => {
     const { r, version } = await ready();
     const bad = "https://shop.example/?email=a@b.com&phone=010-1234-5678";
+    const encoded = "https://shop.example/?email=a%40b.com";
     const patched = await research.apply({
       ...r.actor, clientTurnId: "t3", baseVersion: version,
-      patch: { slots: { benefits: slot("x", { status: "confirmed", links: [bad, BENEFIT_URL], at: "2026-11-17T02:00:00Z 010-1234-5678" }) } },
+      patch: { slots: { benefits: slot("x", { status: "confirmed", links: [bad, encoded, BENEFIT_URL], at: "2026-11-17T02:00:00Z 010-1234-5678" }) } },
       messages: [], next: [],
     });
     if (patched.outcome !== "ok") throw new Error(patched.outcome);
@@ -242,10 +250,20 @@ describe("메모리 보내기 기록", () => {
     expect(rv?.benefitLinks).toHaveLength(1);
     expect(rv?.benefitLinks[0]).toMatchObject({ url: BENEFIT_URL, confirmedAt: "2026-11-17T02:00:00Z [전화번호]" });
     expect(JSON.stringify(rv)).not.toContain("a@b.com");
+    expect(JSON.stringify(rv)).not.toContain("a%40b.com");
     // 30일 보관본의 칸에도 그 링크는 없다(깨진 주소를 남기지 않는다).
     const a = research.archiveSnapshot().archives.find((x) => x.requestId === r.id);
     expect((a?.slots.benefits as { links: string[] }).links).toEqual([BENEFIT_URL]);
     expect(JSON.stringify(a)).not.toContain("a@b.com");
+    expect(JSON.stringify(a)).not.toContain("a%40b.com");
+  });
+
+  it("리뷰·메시지는 SQL left()처럼 문자(코드 포인트) 수로 자르고, 글 속 깨질 주소는 통째로 뺀다", () => {
+    expect(Array.from(finalReview("😀".repeat(1500), []))).toHaveLength(1000);
+    expect(finalReview("혜택 https://shop.example/?email=a@b.com", [])).toBe("혜택");
+    const out = archiveMessages([{ seq: 1, role: "ai", tag: null, slot: null, body: { headline: "a".repeat(2000), text: "😀".repeat(1500) } }]);
+    expect(Array.from(out[0].text)).toHaveLength(3000);
+    expect(out[0].text.endsWith("😀")).toBe(true);
   });
 
   it("메시지의 tag·slot에 연락처가 들어 있어도 가린다", () => {

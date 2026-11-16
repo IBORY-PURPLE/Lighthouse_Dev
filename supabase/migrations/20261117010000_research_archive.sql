@@ -60,14 +60,61 @@ grant select, insert, update, delete on table public.research_archives, public.r
 
 -- ---------- 보조 함수(research_send 안에서만 쓴다. 호출자의 잠금 안에서 돈다) ----------
 
--- 보관할 글에서 사진 데이터(data URL), 이메일, 전화번호를 지운다(data URL은 빈 글, 나머지는 [이메일]·[전화번호]로 바꾼다).
--- 대화 글 30일 보관본과 영구 리뷰에 사진 조각이나 연락처가 남지 않게 하는 마지막 안전망이다.
-create or replace function public.research_scrub_text(p_text text)
+-- 주소 안의 %XX(ASCII 0x01~0x7F)를 글자로 푼다. %2540처럼 두 번 감싼 것도 풀도록 최대 3번 돈다. 연락처를 %40·%2B로 숨긴 주소를 가려내는 데 쓴다.
+create or replace function public.research_url_decode(p_text text)
+returns text language plpgsql immutable security invoker set search_path = '' as $$
+declare
+  v text := p_text;
+  v_pass int;
+begin
+  if v is null then return null; end if;
+  for v_pass in 1..3 loop
+    exit when v !~ '%[0-7][0-9A-Fa-f]';
+    select string_agg(
+        case when t.m[1] ~ '^%[0-7][0-9A-Fa-f]$' and t.m[1] <> '%00'
+          then chr(get_byte(decode(substr(t.m[1], 2), 'hex'), 0)) else t.m[1] end, '' order by t.ord)
+      into v from regexp_matches(v, '(%[0-7][0-9A-Fa-f]|[^%]+|%)', 'g') with ordinality as t(m, ord);
+  end loop;
+  return v;
+end;
+$$;
+
+-- 주소를 따로 보지 않고 글자만 가린다: data URL은 빈 글, 이메일·전화번호는 [이메일]·[전화번호]로 바꾼다.
+create or replace function public.research_scrub_plain(p_text text)
 returns text language sql immutable security invoker set search_path = '' as $$
   select regexp_replace(regexp_replace(regexp_replace(p_text,
     'data:[A-Za-z0-9.+/-]*(;[A-Za-z0-9=._+-]+)*,[^\s"'')]+', '', 'g'),
     '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[이메일]', 'g'),
     '(?<![0-9])(?:\+82[- ]?0?|0)[0-9]{1,2}[- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])', '[전화번호]', 'g')
+$$;
+
+-- 보관할 글에서 사진 데이터(data URL), 이메일, 전화번호를 지운다(data URL은 빈 글, 나머지는 [이메일]·[전화번호]로 바꾼다).
+-- 글 속 http(s) 주소에 연락처·data URL이 섞여 있으면(%40처럼 인코딩된 것도 푼 뒤 본다) 가리면 깨지므로 주소 전체를 뺀다.
+-- 대화 글 30일 보관본과 영구 리뷰에 사진 조각이나 연락처가 남지 않게 하는 마지막 안전망이다.
+create or replace function public.research_scrub_text(p_text text)
+returns text language plpgsql immutable security invoker set search_path = '' as $$
+declare
+  v_out text := '';
+  v_tok text[];
+  v_dec text;
+begin
+  if p_text is null then return null; end if;
+  for v_tok in
+    select m from regexp_matches(p_text,
+      '([hH][tT][tT][pP][sS]?://[^\s"''<>)]+)|([^hH]+|[hH])', 'g') as m
+  loop
+    if v_tok[1] is not null then
+      v_dec := public.research_url_decode(v_tok[1]);
+      if public.research_scrub_plain(v_tok[1]) <> v_tok[1] or public.research_scrub_plain(v_dec) <> v_dec then
+        continue;
+      end if;
+      v_out := v_out || v_tok[1];
+    else
+      v_out := v_out || v_tok[2];
+    end if;
+  end loop;
+  return public.research_scrub_plain(v_out);
+end;
 $$;
 
 -- jsonb 안의 "data:" 문자열 값과 thumb 키를 지우고, 나머지 글은 research_scrub_text로 가린다(사진 썸네일이 보관본에 들어가지 않게).
@@ -396,7 +443,7 @@ begin
     select p.oid::regprocedure from pg_proc as p
       join pg_namespace as n on n.oid = p.pronamespace
       where n.nspname = 'public'
-        and p.proname in ('research_scrub_text', 'research_final_review', 'research_strip_data', 'research_body_text',
+        and p.proname in ('research_url_decode', 'research_scrub_plain', 'research_scrub_text', 'research_final_review', 'research_strip_data', 'research_body_text',
           'research_archive_messages',
           'research_archive_put', 'research_send', 'research_sweep')
   loop
