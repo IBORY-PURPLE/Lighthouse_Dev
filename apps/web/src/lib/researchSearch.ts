@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import { getLlmMode, LLM_MODEL } from "./llm";
 import { benefitShortcuts } from "./research";
 import { fallbackResponse, parseJsonObject, type ResearchContext, type Upstream } from "./researchAi";
-import { clip, hasForbidden, unknownModelTokens, urlKey, type AllowedUrls } from "./researchCheck";
+import { clip, hasBenefitForbidden, hasContact, hasForbidden, unknownModelTokens, urlKey, type AllowedUrls } from "./researchCheck";
 import { COMMON, materialMessage } from "./researchPrompt";
 import type { NextMessage } from "./researchSession";
 import { OWN_LABEL, SKIP_LABEL } from "./researchTurnText";
@@ -74,11 +74,14 @@ export const BENEFIT_BRANCHES: readonly BenefitBranch[] = [
 ];
 
 const NO_EXPERIENCE = /^(?:받은\s?)?(?:혜택(?:은|이)?\s?)?(?:없|안\s?받|못\s?받)/;
+// "아니요 딱히 없었어요", "특별한 건 없었어요", "별로 못 받았어요"처럼 앞에 말이 붙은 변형. 갈래 낱말이 함께 있으면(카드는 안 받았고 쿠폰은 받았어요) 경험이 있는 답으로 본다.
+const NO_EXPERIENCE_ANYWHERE = /없(?:었|어|음|다|네|는|고|습|었던)|없$|안\s?받|못\s?받/;
 
-/** 받은 혜택이 없다는 답("없었어요", "혜택은 없었어요")이거나 비어 있나. */
+/** 받은 혜택이 없다는 답("없었어요", "혜택은 없었어요", "아니요 딱히 없었어요")이거나 비어 있나. */
 export function hasNoExperience(experience: string): boolean {
   const text = experience.normalize("NFKC").trim();
-  return text === "" || NO_EXPERIENCE.test(text);
+  if (text === "" || NO_EXPERIENCE.test(text)) return true;
+  return NO_EXPERIENCE_ANYWHERE.test(text) && !BENEFIT_BRANCHES.some((branch) => branch.experience.test(text));
 }
 
 /** 봉사자의 혜택 경험이 어느 갈래들인지. 없다는 답은 빈 목록이다. */
@@ -102,6 +105,16 @@ const AI_CLOSED_HOSTS: readonly string[] = [
   "tmon.co.kr",
   "wemakeprice.com",
   "ssg.com",
+  "interpark.com",
+  "lotteon.com",
+  "hmall.com",
+  "gsshop.com",
+  "cjonstyle.com",
+  "kurly.com",
+  "musinsa.com",
+  "29cm.co.kr",
+  "danawa.com",
+  "enuri.com",
 ];
 
 export function isAiClosedHost(url: string): boolean {
@@ -146,10 +159,17 @@ const charCount = (value: string) => [...value].length;
 const nameKey = (value: string) => value.normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
 const bytesOf = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
 
-/** 글에 금지 표현이나 자료에 없는 기종 이름이 있나. */
+/** 글에 금지 표현, 연락처 모양, 자료에 없는 기종 이름이 있나. */
 function unsafe(text: string, material: readonly string[]): boolean {
-  return hasForbidden(text) || unknownModelTokens(text, material).length > 0;
+  return hasForbidden(text) || hasContact(text) || unknownModelTokens(text, material).length > 0;
 }
+
+/** 혜택 글 전용: unsafe에 더해 퍼센트·천만 단위 수·포인트 수량도 버린다(researchCheck.hasBenefitForbidden). */
+function unsafeBenefit(text: string, material: readonly string[]): boolean {
+  return hasBenefitForbidden(text) || hasContact(text) || unknownModelTokens(text, material).length > 0;
+}
+
+const byteCount = (value: string) => Buffer.byteLength(value, "utf8");
 
 const compactKey = (value: string) => value.normalize("NFKC").toUpperCase().replace(/[^A-Z0-9가-힣]/g, "");
 
@@ -231,10 +251,11 @@ export function cleanBenefitItems(
     const condition = oneLine(entry.condition);
     const compare = oneLine(entry.compare);
     if (title === "" || condition === "") continue;
-    if ([title, condition, compare].some((text) => unsafe(text, material))) continue;
+    if ([title, condition, compare].some((text) => unsafeBenefit(text, material))) continue;
     const key = urlKey(oneLine(entry.url));
     const source = key === null ? undefined : allowed.get(key);
-    if (key === null || source === undefined || charCount(source) > URL_MAX || context.seenUrls.has(key)) continue;
+    // 혜택 주소 9개가 pending(8,000바이트 제약)에 모두 들어가야 해서 글자 수가 아니라 바이트로 300을 넘기면 버린다.
+    if (key === null || source === undefined || byteCount(source) > URL_MAX || context.seenUrls.has(key)) continue;
     context.seenUrls.add(key);
     items.push({
       id: `${branch.id}-${items.length + 1}`,
@@ -296,6 +317,7 @@ export function benefitsHeadline(groups: readonly BenefitGroup[], experience: st
     if (same.has(group.branch)) n += group.items.length;
     else m += group.items.length;
   }
+  if (hasNoExperience(experience)) return `받은 혜택이 없으셨으니 새로 찾은 혜택 ${n + m}개예요.`;
   return `혜택 ${n + m}개를 찾았어요. 받으신 경험과 같은 종류 ${n}개, 새 종류 ${m}개예요.`;
 }
 
@@ -519,7 +541,7 @@ function benefitTask(branch: BenefitBranch): string {
   return [
     `이 카드에서 할 일: 자료의 기종을 살 때 받을 수 있는 ${branch.task}를 웹 검색으로 찾아 최대 3개 알려 준다. 자료의 "봉사자경험"은 봉사자가 이미 받은 혜택이다.`,
     '출력 모양: {"items":[{"title":"혜택 이름(40자 안쪽)","condition":"받는 조건 한 줄(60자 안쪽)","compare":"봉사자가 받은 경험과 같은 종류인지 다른지 한 줄(60자 안쪽)","url":"검색에서 실제로 본 안내 페이지 주소"}]}',
-    "- 금액, 할인율, 퍼센트 숫자, 최저가는 쓰지 않는다. 혜택의 종류와 받는 조건만 쓴다.",
+    "- 금액, 할인율, 퍼센트 숫자, 포인트·적립금 수량, 최저가는 쓰지 않는다. 혜택의 종류와 받는 조건만 쓴다. 전화번호·이메일·메신저 연락처도 쓰지 않는다.",
     "- 자료의 오늘 날짜 기준으로 이미 끝난 행사는 쓰지 않는다. 확인하지 못한 조건을 지어내지 않는다.",
     "- url은 그 혜택을 안내하는 페이지 주소다. 못 찾으면 items를 빈 배열로 둔다.",
   ].join("\n");
@@ -608,6 +630,7 @@ export async function searchBenefits(
     groups.push({ branch: branch.id, label: branch.label, items });
   }
   const kept = groups.reduce((sum, group) => sum + group.items.length, 0);
-  if (kept > 0) return { data: groups, ai: "ok", upstream: null, usage, citations };
+  // 갈래 일부가 실패했으면 ai는 ok여도 up에 실패 이유를 남긴다(끊긴 갈래의 토큰·검색 수는 usage에 못 들어가 로그 값이 실제보다 적을 수 있다).
+  if (kept > 0) return { data: groups, ai: "ok", upstream: failure, usage, citations };
   return empty(failure ?? "empty", usage, citations);
 }

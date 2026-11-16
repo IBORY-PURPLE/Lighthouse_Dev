@@ -146,6 +146,23 @@ describe("cleanProducts: 같이 고민한 제품 이름·특징·주소 검사",
     expect(items.map((item) => item.name)).toEqual(["갤럭시 버즈 2"]);
   });
 
+  it("연락처(전화번호·이메일·메신저)가 든 이름은 버리고, 특징에서는 그 문장만 버린다", () => {
+    const urls = ["https://shop.example.com/p/1", "https://shop.example.com/p/2", "https://shop.example.com/p/3"];
+    const items = cleanProducts(
+      [
+        { name: "제품 1호 문의 010-1234-5678", feature: "가벼워요", pageUrl: urls[0] },
+        { name: "제품 2호", feature: "가벼워요. 카카오톡으로 문의하세요. help@example.com", pageUrl: urls[1] },
+        { name: "제품 3호", feature: "오래 써도 편해요", pageUrl: urls[2] },
+      ],
+      allowedOf(urls),
+      [],
+    );
+    expect(items.map((item) => [item.name, item.feature])).toEqual([
+      ["제품 2호", "가벼워요."],
+      ["제품 3호", "오래 써도 편해요"],
+    ]);
+  });
+
   it("특징에서 가격·재고 문장과 없는 기종 이름 문장은 버리고 60자로 자르며, 5개까지만 남긴다", () => {
     const urls = Array.from({ length: 7 }, (_, index) => `https://shop.example.com/p/${index}`);
     const raw = urls.map((pageUrl, index) => ({
@@ -187,6 +204,34 @@ describe("cleanBenefitItems: 혜택 항목 검사", () => {
     );
     expect(items.map((item) => item.url)).toEqual([url("d")]);
     expect(items.every((item) => ![item.title, item.condition, item.compare].some(hasForbidden))).toBe(true);
+  });
+
+  it("혜택 글의 퍼센트·천만 단위 수·포인트 수량·연락처는 금액 낱말이 없어도 항목째 버린다", () => {
+    const bad = [
+      base({ title: "20% 포인트 추가 적립", url: url("p1") }),
+      base({ condition: "즉시 5% 혜택을 받아요", url: url("p2") }),
+      base({ compare: "상당 10% 수준이에요", url: url("p3") }),
+      base({ title: "최대 3천 포인트", url: url("p4") }),
+      base({ condition: "5,000P를 받아요", url: url("p5") }),
+      base({ title: "최대 3만 혜택", url: url("p6") }),
+      base({ condition: "문의 010-1234-5678", url: url("p7") }),
+      base({ condition: "help@example.com 으로 문의", url: url("p8") }),
+      base({ condition: "카카오톡 채널로 신청", url: url("p9") }),
+    ];
+    const good = base({ title: "포인트 적립 혜택", condition: "대상 카드로 결제하면 받아요", url: url("ok") });
+    const items = run([...bad, good], [...bad.map((entry) => entry.url), good.url]);
+    expect(items.map((item) => item.url)).toEqual([good.url]);
+  });
+
+  it("주소가 300바이트를 넘으면(한글이 든 주소) 버린다: 혜택 링크 9개가 pending 8,000바이트 제약 안에 든다", () => {
+    const wide = `https://example.com/${"혜".repeat(120)}`;
+    expect(wide.length).toBeLessThan(300);
+    const items = run([base({ url: wide }), base({ url: url("a") })], [wide, url("a")]);
+    expect(items.map((item) => item.url)).toEqual([url("a")]);
+    const nine = BENEFIT_BRANCHES.flatMap((branch) =>
+      Array.from({ length: 3 }, (_, index) => ({ url: `https://example.com/${"혜".repeat(90)}${branch.id}${index}`, slot: "benefits" })),
+    );
+    expect(bytes(nine)).toBeLessThan(8000);
   });
 
   it("인용에 없는 주소와 https가 아닌 주소는 버리고, 같은 주소는 한 번만 남긴다(다른 갈래가 쓴 주소 포함)", () => {
@@ -267,6 +312,14 @@ describe("경험 알아보기와 AI가 열 수 없는 곳", () => {
     expect(hasNoExperience("없었어요")).toBe(true);
     expect(hasNoExperience("혜택은 없었어요")).toBe(true);
     expect(hasNoExperience("카드 할인을 받았어요")).toBe(false);
+    // 앞에 말이 붙은 변형
+    for (const text of ["아니요 없었어요", "아니요, 딱히 없었어요", "특별한 혜택은 없었어요", "별다른 건 없었어요", "그런 건 없었어요", "별로 못 받았어요", "딱히 안 받았어요", "혜택 받은 게 없어요"]) {
+      expect(hasNoExperience(text), text).toBe(true);
+    }
+    // 갈래 낱말이 같이 있으면 경험이 있는 답이다.
+    for (const text of ["카드는 안 받았고 쿠폰은 받았어요", "무료 배송은 못 받았어요"]) {
+      expect(hasNoExperience(text), text).toBe(false);
+    }
     expect(experienceBranches("없었어요")).toEqual([]);
     expect(experienceBranches("카드 할인과 무료 배송을 받았어요")).toEqual(["card", "market"]);
     expect(experienceBranches("공식몰 사은품을 받았어요")).toEqual(["official"]);
@@ -281,6 +334,9 @@ describe("경험 알아보기와 AI가 열 수 없는 곳", () => {
       "https://smartstore.naver.com/x",
       "not a url",
     ]) {
+      expect(isAiClosedHost(closed), closed).toBe(true);
+    }
+    for (const closed of ["https://www.interpark.com/x", "https://www.lotteon.com/p/1", "https://www.musinsa.com/a", "https://www.kurly.com/goods/1"]) {
       expect(isAiClosedHost(closed), closed).toBe(true);
     }
     for (const open of ["https://www.sony.co.kr/event", "https://www.shinhancard.com/x", "https://notcoupang.com.example.org/"]) {
@@ -310,7 +366,9 @@ describe("메시지 만들기", () => {
     expect(benefitsHeadline(groups, "카드 할인을 받았어요")).toBe(
       "혜택 6개를 찾았어요. 받으신 경험과 같은 종류 1개, 새 종류 5개예요.",
     );
-    expect(benefitsHeadline(groups, "없었어요")).toContain("같은 종류 0개, 새 종류 6개");
+    // 받은 혜택이 없다는 답에는 "같은 종류 0개"라고 하지 않고 없으셨다고 말한다.
+    expect(benefitsHeadline(groups, "없었어요")).toBe("받은 혜택이 없으셨으니 새로 찾은 혜택 6개예요.");
+    expect(benefitsHeadline(groups, "")).toBe("받은 혜택이 없으셨으니 새로 찾은 혜택 6개예요.");
     expect(hasForbidden(benefitsHeadline(groups, "카드"))).toBe(false);
   });
 
@@ -494,6 +552,8 @@ describe("AI 호출(가짜 OpenAI)", () => {
     const partial = await searchBenefits(context, { model: "소니 WH-CH720N", experience: "" });
     expect(partial.ai).toBe("ok");
     expect(partial.data.map((group) => group.branch)).toEqual(["card", "market"]);
+    // 갈래 일부가 실패했으면 로그의 up에 이유가 남는다.
+    expect(partial.upstream).toBe(500);
 
     responsesCreate.mockReset();
     responsesCreate.mockRejectedValue(Object.assign(new Error("down"), { status: 500 }));

@@ -910,3 +910,126 @@ describe("queue 라우트의 6시간 정리", () => {
   });
 });
 
+
+describe("POST …/research/turn followUp (alts, benefits)", () => {
+  interface Step {
+    o: Opened;
+    state: { version: number; followUp?: { search: string }; messages: { tag: string | null; slot: string | null }[]; session: { slots: Record<string, unknown> } };
+  }
+  async function begin(replyId: "purchase.research" | "purchase.bought"): Promise<Step> {
+    const o = await opened();
+    const state = await (await post(o.id, o.cookie, body(o, { type: "quick", replyId }))).json();
+    return { o, state };
+  }
+  async function say(step: Step, input: unknown, extra: Record<string, unknown> = {}): Promise<Step> {
+    const state = await (await post(step.o.id, step.o.cookie, body({ ...step.o, version: step.state.version }, input, extra))).json();
+    return { o: step.o, state };
+  }
+  /** 리서치만 → 기종 → 장점 → 질문 4(alts)까지. */
+  async function toAlts(): Promise<Step> {
+    let step = await begin("purchase.research");
+    step = await say(step, { type: "text", text: "LH-200" });
+    return say(step, { type: "text", text: "가볍고 귀가 편해요" });
+  }
+  const lastQuestion = (step: Step) => step.state.messages.filter((message) => message.tag === "question").at(-1)?.slot;
+  /** 질문 4를 건너뛰고(이유 질문에 답하고) 혜택 질문(질문 6)까지. */
+  async function toBenefits(): Promise<Step> {
+    let step = await toAlts();
+    step = await say(step, { type: "skip", slot: "alts" });
+    if (lastQuestion(step) === "altReason") step = await say(step, { type: "text", text: "이미 정했어요" });
+    return step;
+  }
+
+  it("기종 질문 다음은 model, 장점 답 뒤 질문 4가 나오면 alts", async () => {
+    let step = await begin("purchase.research");
+    expect(step.state.followUp).toEqual({ search: "model" });
+    step = await say(step, { type: "text", text: "LH-200" });
+    expect(step.state.followUp).toBeUndefined();
+    step = await say(step, { type: "text", text: "가볍고 귀가 편해요" });
+    expect(lastQuestion(step)).toBe("alts");
+    expect(step.state.followUp).toEqual({ search: "alts" });
+  });
+
+  it("혜택 질문이 나온 턴에는 followUp이 없고, 혜택 경험을 답하면 benefits", async () => {
+    let step = await toBenefits();
+    expect(lastQuestion(step)).toBe("benefits");
+    expect(step.state.followUp).toBeUndefined();
+    step = await say(step, { type: "text", text: "카드 할인을 받았어요" });
+    expect(step.state.session.slots.benefits).toMatchObject({ status: "filled" });
+    expect(step.state.followUp).toEqual({ search: "benefits" });
+  });
+
+  it("혜택은 없었어요(건너뛰기)도 benefits, 같은 clientTurnId를 다시 보내도 같은 followUp", async () => {
+    let step = await toBenefits();
+    const same = { clientTurnId: "replay-skip-benefits" };
+    step = await say(step, { type: "skip", slot: "benefits" }, same);
+    expect(step.state.session.slots.benefits).toMatchObject({ status: "skipped" });
+    expect(step.state.followUp).toEqual({ search: "benefits" });
+    const again = await (
+      await post(step.o.id, step.o.cookie, { ...body(step.o, { type: "skip", slot: "benefits" }), ...same })
+    ).json();
+    expect(again.followUp).toEqual({ search: "benefits" });
+  });
+
+  it("혜택 칸을 패널에서 고쳐도(edit) benefits, [확인했어요](link_check)와 다른 칸을 고칠 때는 없다", async () => {
+    let step = await toAlts();
+    const edited = await say(step, { type: "edit", slot: "benefits", text: "무료 배송을 받았어요" });
+    expect(edited.state.followUp).toEqual({ search: "benefits" });
+    const other = await say(step, { type: "edit", slot: "pros", text: "가볍고 튼튼해요" });
+    expect(other.state.followUp).toBeUndefined();
+    step = edited;
+    const checked = await say(step, { type: "link_check", url: "https://example.com/nothing" });
+    expect(checked.state.followUp).toBeUndefined();
+  });
+});
+
+describe("POST …/research/search (benefits 준비, capped alts)", () => {
+  it("혜택 경험 칸이 비어 있으면 409 not_ready이고 검색 단위를 쓰지 않는다(캐시도 안 남는다)", async () => {
+    const o = await opened();
+    await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }));
+    const response = await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ ok: false, error: "not_ready" });
+    expect(responsesCreate).not.toHaveBeenCalled();
+    const view = await (await get(o.id, o.cookie)).json();
+    expect(view.pending.search).toBeUndefined();
+    // 한도 계산에도 안 들어갔으니 이어서 모델 검색이 정상으로 돈다.
+    expect((await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "model" })).status).toBe(200);
+  });
+
+  it("혜택은 없었어요(건너뛰기)로 정해졌으면 검색하고 비교 줄은 '받은 혜택이 없었다'다", async () => {
+    const o = await opened();
+    let state = await (await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }))).json();
+    state = await (await post(o.id, o.cookie, body({ ...o, version: state.version }, { type: "skip", slot: "benefits" }))).json();
+    expect(state.session.slots.benefits).toMatchObject({ status: "skipped" });
+    const response = await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" });
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.messages[0].body.headline).toContain("받은 혜택이 없으셨으니 새로 찾은 혜택 3개예요");
+    expect(data.messages[0].body.items[0].compare).toContain("없었다고");
+  });
+
+  it("한도로 고정 후보를 보일 때도 봉사자가 고른 기종은 같이 고민한 제품에서 뺀다", async () => {
+    const o = await opened();
+    const bought = await (await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }))).json();
+    // 고정 후보(시연 품목 표)에서 첫 후보 이름을 먼저 알아낸 뒤, 그 이름을 기종 칸에 넣는다.
+    const probe = await opened();
+    await post(probe.id, probe.cookie, body(probe, { type: "quick", replyId: "purchase.bought" }));
+    const store = getResearchStore();
+    const actor = { requestId: probe.id, volunteerId: volunteerOf(probe.cookie), sessionId: probe.sessionId };
+    for (let index = 0; index < 12; index += 1) await store.begin({ ...actor, kind: "search", cacheKey: `k${index}`, units: 1 });
+    const fixed = await (await find(probe.id, probe.cookie, { sessionId: probe.sessionId, kind: "alts" })).json();
+    const names: string[] = fixed.messages[0].body.items.map((item: { name: string }) => item.name);
+    expect(names.length).toBeGreaterThan(1);
+
+    const target = await opened();
+    const state = await (await post(target.id, target.cookie, body(target, { type: "quick", replyId: "purchase.bought" }))).json();
+    await post(target.id, target.cookie, body({ ...target, version: state.version }, { type: "edit", slot: "model", text: names[0] }));
+    const tActor = { requestId: target.id, volunteerId: volunteerOf(target.cookie), sessionId: target.sessionId };
+    for (let index = 0; index < 12; index += 1) await store.begin({ ...tActor, kind: "search", cacheKey: `k${index}`, units: 1 });
+    const data = await (await find(target.id, target.cookie, { sessionId: target.sessionId, kind: "alts" })).json();
+    const shown: string[] = data.messages[0].body.items.map((item: { name: string }) => item.name);
+    expect(shown).not.toContain(names[0]);
+    expect(bought.version).toBeGreaterThan(0);
+  });
+});

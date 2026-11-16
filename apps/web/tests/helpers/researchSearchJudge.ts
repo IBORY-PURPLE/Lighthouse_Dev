@@ -16,6 +16,28 @@ import { textViolations, type Violation } from "./researchJudge";
 const MESSAGE_BYTES_MAX = 8192;
 const bytesOf = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
 
+/**
+ * 혜택 글 전용 독립 의심 목록(서버 hasBenefitForbidden과 따로 가진다). 혜택 카드는 종류와 조건만 말하므로
+ * 퍼센트 기호는 낱말과 상관없이 모두, 천·만 단위 수와 포인트 수량도 의심한다. 전화번호·이메일·메신저 연락처도 본다.
+ */
+const BENEFIT_SUSPECT: ReadonlyArray<readonly [string, RegExp]> = [
+  ["혜택 글의 퍼센트", /[%％]|퍼센트|percent/i],
+  ["혜택 글의 천·만 단위 수", /\d\s*[천만]/],
+  ["혜택 글의 포인트 수량", /\d[\d,.]*\s*(?:p(?![a-z])|포인트)|[천만]\s?(?:p(?![a-z])|포인트)/i],
+  ["연락처", /(?<!\d)0\d{1,2}[\s.)-]+\d{3,4}[\s.-]+\d{4}(?!\d)|(?<!\d)01\d[\s.-]?\d{7,8}(?!\d)|[a-z0-9._%+-]+@[a-z0-9-]+\.[a-z]{2,}|카카오\s?톡|카톡|오픈\s?채팅|텔레그램|open\.kakao/i],
+];
+
+/** 혜택 카드 글 하나의 판정: 일반 의심 목록에 혜택 전용 목록을 더한다. */
+export function benefitTextViolations(field: string, raw: string): Violation[] {
+  const found = textViolations(field, raw);
+  const text = raw.normalize("NFKC");
+  for (const [rule, pattern] of BENEFIT_SUSPECT) {
+    const match = pattern.exec(text);
+    if (match) found.push({ rule, field, snippet: text.slice(Math.max(0, match.index - 10), match.index + match[0].length + 20).replace(/\s+/g, " ") });
+  }
+  return found;
+}
+
 /** 주소가 https이고 검색 결과(인용·소스)에 있던 것인가. */
 function urlViolations(field: string, value: string, citations: readonly string[]): Violation[] {
   const key = urlKey(value);
@@ -54,7 +76,7 @@ export function judgeBenefits(run: SearchRun<BenefitGroup[]>, request: Record<st
     group.items.forEach((item, index) => {
       const field = `${group.branch}[${index}]`;
       for (const key of ["title", "kind", "condition", "compare"] as const) {
-        violations.push(...textViolations(`${field}.${key}`, item[key]));
+        violations.push(...benefitTextViolations(`${field}.${key}`, item[key]));
       }
       violations.push(...urlViolations(`${field}.url`, item.url, run.citations));
       const key = urlKey(item.url);
@@ -69,7 +91,7 @@ export function judgeBenefits(run: SearchRun<BenefitGroup[]>, request: Record<st
   for (const message of benefitMessages(run.data, experience, "소니 헤드셋", run.ai)) {
     if (bytesOf(message.body) > MESSAGE_BYTES_MAX) violations.push({ rule: "메시지 크기", field: "body", snippet: String(bytesOf(message.body)) });
     const headline = typeof message.body.headline === "string" ? message.body.headline : "";
-    violations.push(...textViolations("headline", headline));
+    violations.push(...benefitTextViolations("headline", headline));
   }
   return violations;
 }

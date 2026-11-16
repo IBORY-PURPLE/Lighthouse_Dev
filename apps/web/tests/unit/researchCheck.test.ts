@@ -6,6 +6,8 @@ import {
   cleanQuestion,
   cleanText,
   dropForbiddenSentences,
+  hasBenefitForbidden,
+  hasContact,
   hasForbidden,
   modelTokens,
   unknownModelTokens,
@@ -491,5 +493,73 @@ describe("F3: 자료에 없는 기종 이름이 든 문장은 버린다", () => 
     expect(cleanQuestion("소니 WH-CH720N의 장점을 알려 주세요.", "기본 질문", ["소니 WH-CH720N"], material)).toBe(
       "소니 WH-CH720N의 장점을 알려 주세요.",
     );
+  });
+});
+
+describe("hasBenefitForbidden: 혜택 글은 퍼센트·천만 단위 수·포인트 수량을 낱말과 상관없이 막는다", () => {
+  it("hasForbidden이 놓치는 표현을 막는다(돈 낱말이 6자 밖, 돈 낱말이 아닌 이웃, 원 없는 포인트)", () => {
+    for (const text of [
+      "20% 포인트 추가 적립을 받아요",
+      "즉시 5% 혜택",
+      "상당 10%의 혜택이 있어요",
+      "카드 결제 시 최대 15 % 를 돌려받아요",
+      "청구 할인 30퍼센트",
+      "최대 3천 포인트",
+      "5,000P 적립",
+      "5000 포인트를 줘요",
+      "최대 3만",
+      "결제하면 2천P",
+      "삼만 포인트를 받아요",
+      "１０％ 혜택",
+    ]) {
+      expect(hasBenefitForbidden(text), text).toBe(true);
+    }
+    // 이 가운데 일부는 일반 검사로는 통과한다(그래서 혜택 전용 검사가 따로 있다).
+    expect(hasForbidden("20% 포인트 추가 적립을 받아요")).toBe(false);
+    expect(hasForbidden("최대 3천 포인트")).toBe(false);
+  });
+
+  it("일반 금지 표현도 그대로 막는다", () => {
+    expect(hasBenefitForbidden("19,900원 이상 주문하면")).toBe(true);
+    expect(hasBenefitForbidden("최저가 보장")).toBe(true);
+  });
+
+  it("종류와 조건만 말하는 혜택 글은 통과한다", () => {
+    for (const text of [
+      "제휴 카드 청구 할인",
+      "대상 카드로 결제하면 받아요",
+      "12개월 무이자 할부",
+      "멤버십 회원이면 무료 배송",
+      "포인트 적립 혜택이 있어요",
+      "공식몰에서 주문하면 사은품을 줘요",
+      "2주 안에 도착해요",
+    ]) {
+      expect(hasBenefitForbidden(text), text).toBe(false);
+    }
+  });
+});
+
+describe("hasContact: 전화번호·이메일·메신저 연락처", () => {
+  it("걸리는 것", () => {
+    for (const text of [
+      "문의 010-1234-5678",
+      "전화 02 123 4567",
+      "031-123-4567로 연락",
+      "01012345678",
+      "help@example.com 으로 보내 주세요",
+      "카카오톡으로 문의하세요",
+      "카톡 상담",
+      "오픈채팅방에서 받아요",
+      "https://open.kakao.com/o/abc",
+      "텔레그램으로 연락",
+    ]) {
+      expect(hasContact(text), text).toBe(true);
+    }
+  });
+
+  it("기종 번호·사양·연도 범위는 안 걸린다", () => {
+    for (const text of ["소니 WH-1000XM5", "배터리 5000mAh", "2023-2024 모델", "1500-2000 사이", "카카오페이 결제 혜택"]) {
+      expect(hasContact(text), text).toBe(false);
+    }
   });
 });

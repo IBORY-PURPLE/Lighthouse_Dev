@@ -48,6 +48,9 @@ type SearchKind = "model" | "alts" | "benefits";
 const CACHE_KEY: Record<SearchKind, string> = { model: MODEL_CACHE_KEY, alts: ALTS_CACHE_KEY, benefits: BENEFITS_CACHE_KEY };
 const UNITS: Record<SearchKind, number> = { model: 1, alts: 1, benefits: BENEFITS_UNITS };
 
+/** 혜택 경험 칸이 정해졌나(채움·확인·건너뛰기). 건너뛰기는 "혜택은 없었어요"라는 답이다. */
+const benefitsDecided = (status: string | undefined) => status === "filled" || status === "confirmed" || status === "skipped";
+
 type ModelBody = Extract<ResearchResponse, { items: unknown }>;
 
 /**
@@ -119,6 +122,16 @@ export async function POST(
       const store = getResearchStore();
       const actor: ResearchActor = { requestId: id, volunteerId, sessionId: sessionId.toLowerCase() };
       const cacheKey = CACHE_KEY[kind];
+
+      // 혜택 검색은 경험 칸이 정해진 뒤에만 한다(채움·확인·건너뛰기). 칸이 비어 있으면 검색 3단위를 쓰기 전에 돌려보낸다.
+      // begin은 사용량을 올리고 되돌릴 방법이 없어서 begin보다 먼저 읽는다. 세션이 바뀐 경우는 begin이 session_changed로 답한다.
+      if (kind === "benefits") {
+        const view = await store.open(id, volunteerId, 2_147_483_647);
+        if (view.outcome !== "ok") return guardResponse(view.outcome);
+        if (view.view.sessionId === actor.sessionId && !benefitsDecided(view.view.slots.benefits?.status)) {
+          return fail(409, "not_ready");
+        }
+      }
       const begun = await store.begin({
         ...actor,
         kind: "search",
@@ -147,7 +160,10 @@ export async function POST(
           messages = [{ ...modelMessage(body, subject, notice), ai: "capped" as const }];
           pending = { shownModels: body.items.map((item) => item.name) };
         } else if (kind === "alts") {
-          const items = fixedProducts(context, "");
+          // 봉사자가 이미 고른 기종은 같이 고민한 제품에서 뺀다(capped 결과에는 세션이 없어 칸을 따로 읽는다).
+          const view = await store.open(id, volunteerId, 2_147_483_647);
+          const chosen = view.outcome === "ok" ? (view.view.slots.model?.value.trim() ?? "") : "";
+          const items = fixedProducts(context, chosen);
           messages = productsMessages(items, "capped", notice);
           pending = { shownAlts: items.map((item) => item.name) };
         } else {
@@ -210,13 +226,20 @@ export async function POST(
         // 혜택 링크는 턴이 쓰는 shownLinks와 다른 키에 둔다(검색 중에 다른 턴이 참고 글 링크를 더해도 덮어쓰지 않는다). 갈래 3 x 3개 = 9개 전부 담는다.
         pending = { shownBenefitLinks: benefitLinkEntries(run.data) };
       }
-      const added = await store.addMessage({
-        ...actor,
-        cacheKey,
-        messages,
-        pending: { ...pending, search: null },
-        cacheState: "done",
-      });
+      let added;
+      try {
+        added = await store.addMessage({
+          ...actor,
+          cacheKey,
+          messages,
+          pending: { ...pending, search: null },
+          cacheState: "done",
+        });
+      } catch (error) {
+        // 저장에 실패하면(예: pending 크기 제약) 생각 중 표시와 처리 중 자리가 90초 남아 다시 부를 때마다 검색 단위를 또 쓴다. 자리를 닫고 다시 던진다.
+        await store.addMessage({ ...actor, cacheKey, messages: [], pending: { search: null }, cacheState: "clear" }).catch(() => undefined);
+        throw error;
+      }
       if (added.outcome !== "ok") return guardResponse(added.outcome);
       return succeed({ messages: added.messages, lastSeq: added.lastSeq });
     },
