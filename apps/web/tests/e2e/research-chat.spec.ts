@@ -415,6 +415,33 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     expect(benefitsCalls).toBe(2);
   });
 
+  test("검색을 기다리는 사이 다른 탭에서 요청을 내려놓으면, 기다리던 탭이 폴링에서 바로 알아채고 화면을 바꾼다", async ({ page }) => {
+    test.setTimeout(60_000);
+    // 기종 검색 호출은 "이미 처리 중"(202)으로만 답하게 해 화면이 상태를 폴링하는 중이 되게 하고, 그 사이 다른 탭이 요청을 내려놓는다.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/research/search", async (route) => {
+      await gate;
+      await route.fulfill({ status: 202, contentType: "application/json", body: "{}" });
+    });
+    await begin(page);
+    await sendText(page, "소니 헤드셋 샀어요.");
+    await expect(page.getByTestId("thinking")).toBeVisible();
+
+    const second = await page.context().newPage();
+    await second.goto(page.url());
+    await expect(second.getByTestId("research-stage")).toBeVisible();
+    await second.getByRole("button", { name: "요청 내려놓기" }).click();
+    await second.getByRole("button", { name: "돌려놓기" }).click();
+    await expect(second.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+
+    release();
+    // 폴링 간격(2초) 안팎에 알아챈다. 알아채지 못하면 폴링이 90초 돌고 화면이 그대로다.
+    await expect(page.getByText(/내 담당이 아니에요/)).toBeVisible({ timeout: 15_000 });
+  });
+
   test("혜택 검색이 실패해도 안내하고 질문 7이 제자리에 나오며 다음 턴이 막히지 않는다", async ({ page }) => {
     test.setTimeout(120_000);
     // 서버의 한도(CAP) 응답은 환경 변수로 0에 맞출 수 없어(양의 정수만 받는다) 혜택 검색 호출만 네트워크 단계에서 끊는다.

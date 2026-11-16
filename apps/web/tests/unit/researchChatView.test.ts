@@ -263,7 +263,7 @@ describe("질문 7 보류(holdsRefsQuestion)", () => {
   it("혜택 검색을 부른 중이거나 서버가 혜택 검색 진행을 알리면 보류한다", () => {
     const empty = { slots: {}, messages: [], pending: idle };
     expect(holdsRefsQuestion(empty, "benefits", false)).toBe(true);
-    expect(holdsRefsQuestion({ ...empty, pending: { search: { kind: "benefits" } } }, null, true)).toBe(true);
+    expect(holdsRefsQuestion({ ...empty, pending: { search: { kind: "benefits" } } }, null, false)).toBe(true);
     expect(holdsRefsQuestion({ ...empty, pending: { search: { kind: "model" } } }, null, false)).toBe(false);
   });
 
@@ -272,5 +272,8 @@ describe("질문 7 보류(holdsRefsQuestion)", () => {
     expect(holdsRefsQuestion({ slots: { benefits: filled }, messages: [], pending: idle }, null, true)).toBe(false);
     expect(holdsRefsQuestion({ slots: {}, messages: [], pending: idle }, "model", false)).toBe(false);
     expect(holdsRefsQuestion(null, null, false)).toBe(false);
+    // 새로 고친 뒤 진행 중이던 혜택 검색의 폴링이 카드 없이 끝나면(시간 초과) 서버 pending이 남아도 보류가 풀린다.
+    const stuck = { slots: { benefits: filled }, messages: [question(1, "refs")], pending: { search: { kind: "benefits" } } };
+    expect(holdsRefsQuestion(stuck, null, true)).toBe(false);
   });
 });

@@ -345,7 +345,7 @@ export function needsBenefitsSearch(view: { slots: SlotMap; messages: readonly C
  * 질문 7을 보류해야 하는가(혜택 검색이 진행 중이거나 곧 불릴 때).
  * 진행 중: 이 화면이 부른 검색(thinkingKind) 또는 서버가 알린 진행(pending.search).
  * 곧 불림: 혜택 칸은 찼는데 카드가 없고 혜택 검색이 아직 끝난 적 없다(benefitsEnded가 false). 다른 검색이 도는 동안 대기열에서 기다리는 때와
- * 새로 고친 직후 호출 전이 여기에 든다. 혜택 검색이 한 번 끝나면(성공·실패) 카드가 안 와도 보류하지 않는다.
+ * 새로 고친 직후 호출 전이 여기에 든다. 혜택 검색이 한 번 끝나면(성공·실패·폴링 시간 초과) 카드가 안 와도, 서버 pending이 남아 있어도 보류하지 않는다.
  */
 export function holdsRefsQuestion(
   view: { slots: SlotMap; messages: readonly ChatMessage[]; pending: { search?: { kind: string } | null } } | null,
@@ -353,9 +353,9 @@ export function holdsRefsQuestion(
   benefitsEnded: boolean,
 ): boolean {
   if (thinkingKind === "benefits") return true;
-  if (!view) return false;
+  if (!view || benefitsEnded) return false;
   if (view.pending.search?.kind === "benefits") return true;
-  return !benefitsEnded && needsBenefitsSearch(view);
+  return needsBenefitsSearch(view);
 }
 
 /**

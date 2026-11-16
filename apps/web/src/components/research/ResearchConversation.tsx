@@ -164,6 +164,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const drainRef = useRef<() => Promise<void>>(async () => undefined);
   /** 혜택 칸은 찼는데 혜택 카드가 없으면 혜택 검색을 대기열에 넣는다(처음 읽기·각 검색이 끝날 때·턴 뒤). */
   const ensureBenefitsRef = useRef<() => void>(() => undefined);
+  /** 폴링처럼 leftProgress보다 먼저 정의되는 곳이 쓴다(409 not_in_progress면 요청 상세를 다시 읽는다). */
+  const leftProgressRef = useRef<(outcome: Outcome<unknown>) => boolean>(() => false);
   const panelToggleRef = useRef<HTMLButtonElement>(null);
   const focusSend = useRef(false);
   /** 맨 아래를 보던 중인가. 스크롤을 직접 올리면 false가 되고, 새 말풍선이 붙어 맨 아래로 가면 true가 된다. */
@@ -222,6 +224,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         toList();
         return false;
       }
+      if (result.kind === "failed" && leftProgressRef.current(result)) return false;
       if (result.kind !== "ok") continue;
       const incoming = result.data;
       if (viewRef.current) updateView((prev) => mergeView(prev, incoming));
@@ -263,6 +266,14 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         toList();
         return;
       }
+      if (result.kind === "failed" && result.error === "not_in_progress") {
+        // 읽는 사이 다른 곳에서 보냈거나 내려놓았다. 요청 상세로 보냈으면 완료 화면, 아니면 접근 불가.
+        const again = await fetchRequest(requestId);
+        if (cancelled) return;
+        if (again.kind === "ok" && again.data.result) setLoad({ kind: "done", detail: again.data });
+        else setLoad({ kind: "denied" });
+        return;
+      }
       if (result.kind === "failed") {
         setLoad(
           [403, 404, 409].includes(result.status)
@@ -283,14 +294,14 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         searching.current = true;
         runningSearch.current = pending.kind;
         setThinking({ kind: pending.kind, startedAt: Date.now() });
-        const finished = await pollSearch();
+        await pollSearch();
         searching.current = false;
         runningSearch.current = null;
         if (!cancelled) {
           setThinking(null);
           if (pending.kind === "benefits") {
             benefitsAsked.current = true;
-            if (!finished) setBenefitsEnded(true);
+            setBenefitsEnded(true);
           }
         }
       }
@@ -438,6 +449,10 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     },
     [finishSent],
   );
+
+  useEffect(() => {
+    leftProgressRef.current = leftProgress;
+  }, [leftProgress]);
 
   /** 검색 한 번. 같은 검색이 이미 처리 중이면(202) 서버 상태를 기다린다. */
   const searchOnce = useCallback(
