@@ -89,7 +89,7 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 - v2의 "이미지 조각·글자 읽기 원문·요약 초안·근거 원문은 탭 메모리"와 "대체 경로 이미지는 Storage 비공개 버킷" 행은 v2.1에서 없앴다.
 - 이미지와 상세페이지 원문을 서버에 남기지 않는 이유: 상세페이지 보관은 멘토가 지적한 법적 위험이다. 리서치 챗에서도 서버는 사진을 저장하지 않고, 결과에는 사진 장수와 설명 글만 들어간다.
 - DB는 서버 라우트만 서버 키(secret 또는 service_role)로 SQL 함수(RPC)를 호출해 다룬다. 표는 RLS를 켜고 정책을 두지 않아 브라우저 직접 접근을 막는다. 브라우저에는 Supabase 키를 내보내지 않고 Realtime도 쓰지 않는다.
-- 봉사자 식별: 입장하면 기기 열쇠 쿠키(`lh_vol`)를 받고, 서버는 그 열쇠에서 뽑은 봉사자 ID를 쓴다(`volunteerSession.ts`). 실제 로그인은 범위 밖이다.
+- 봉사자 식별: 입장하면 기기 열쇠 쿠키(`lh_vol`)를 받고, 서버는 그 열쇠에서 뽑은 봉사자 ID를 쓴다(`volunteerSession.ts`). 시연에서는 이용자가 받은 접근 코드와 봉사자 입장 코드(`VOLUNTEER_ENTRY_CODE`)를 나눈다. 실제 로그인은 범위 밖이다.
 
 ## 3. 기술 선택
 
@@ -156,6 +156,7 @@ apps/web/                                   Vercel Root Directory
 | `UPSTAGE_API_KEY` | 같음(사람이 등록, 선택) | v2.1에서 글자 읽기를 없앴다. 코드는 더 이상 이 키를 읽지 않는다(Vercel에 남아 있으면 지워도 된다) |
 | Supabase 연동 변수 | Vercel(Supabase 연동이 넣음) | 코드는 URL `SUPABASE_URL ?? NEXT_PUBLIC_SUPABASE_URL`, 키 `SUPABASE_SECRET_KEY ?? SUPABASE_SERVICE_ROLE_KEY`를 읽는다. 값은 보지 않는다 |
 | `DEMO_ACCESS_CODE` | Vercel, 로컬은 시험 설정 | v1 그대로 |
+| `VOLUNTEER_ENTRY_CODE` | Vercel(사람이 등록, 선택) | 봉사자 전용 입장 코드. 설정하면 `/api/volunteer/enter`가 접근 쿠키가 있어도 이 코드를 늘 요구하고, 기기 열쇠(`lh_vol`) 서명 비밀에도 섞는다. 없으면 예전처럼 접근 쿠키가 있는 기기는 코드 없이 입장한다 |
 | `LLM_MODE` | 시험 설정 | `mock`이면 가짜 응답 |
 | `STORE_MODE` | 시험 설정 | `memory`면 서버 메모리 가짜 저장소 |
 | `EXTRACT_MODE` | 시험 설정 | v2에서는 글자 읽기·요약 가짜 응답. v2.1부터는 `/api/health`의 `extractEngine` 값에만 영향. 리서치 AI의 가짜 응답은 `LLM_MODE=mock`이다 |

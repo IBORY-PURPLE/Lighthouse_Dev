@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
+import { volunteerEntryCode } from "./access";
 
 // 봉사자 기기 열쇠. 계정 없이 이 기기를 구분한다(와이어프레임 v1 화면 1).
 // 쿠키 lh_vol = v1.<열쇠>.<서명>. 서버·DB·로그에는 열쇠에서 뽑은 봉사자 ID(d-+16자리)만 남긴다.
@@ -14,12 +15,17 @@ const VERSION = "v1";
 const KEY_LENGTH = 43;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
-/** 입장 코드에서 서명 비밀을 만든다. 코드가 설정되지 않았으면 null(늘 무효). */
+/**
+ * 입장 코드에서 서명 비밀을 만든다. 코드가 설정되지 않았으면 null(늘 무효).
+ * 봉사자 입장 코드(VOLUNTEER_ENTRY_CODE)가 있으면 비밀에 함께 섞는다. 접근 링크의 코드(DEMO_ACCESS_CODE)만
+ * 아는 이용자가 lh_vol을 직접 만들어 봉사자로 들어오지 못하게 하려는 것이다.
+ */
 function signingSecret(): Buffer | null {
   const code = process.env.DEMO_ACCESS_CODE?.trim();
   if (!code) return null;
+  const entry = volunteerEntryCode();
   return createHash("sha256")
-    .update(`lighthouse/volunteer-device/${VERSION}|${code}`)
+    .update(`lighthouse/volunteer-device/${VERSION}|${code}${entry ? `|${entry}` : ""}`)
     .digest();
 }
 

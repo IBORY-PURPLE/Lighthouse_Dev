@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
+import { ACCESS_COOKIE, hasAccess, hasVolunteerEntryCode } from "@/lib/access";
 import { logLine, refreshAccessCookie, succeed } from "@/lib/volunteerApi";
 import { requireVolunteer } from "@/lib/volunteerSession";
 
@@ -12,7 +12,10 @@ export function GET(request: NextRequest) {
   const entered = requireVolunteer(request) !== null;
   const response = succeed({
     entered,
-    needsCode: !hasAccess(request.cookies.get(ACCESS_COOKIE)?.value),
+    // 봉사자 입장 코드가 따로 있으면 접근 쿠키와 상관없이 입장하지 않은 기기는 코드를 넣는다.
+    needsCode: hasVolunteerEntryCode()
+      ? !entered
+      : !hasAccess(request.cookies.get(ACCESS_COOKIE)?.value),
   });
   // 입장한 기기는 접근 쿠키(7일)가 끝났어도 여기서 다시 받는다(AI 질문이 401이 되지 않게).
   if (entered) refreshAccessCookie(request, response);
