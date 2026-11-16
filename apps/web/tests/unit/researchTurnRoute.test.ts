@@ -723,6 +723,25 @@ describe("POST …/research/search (alts, benefits)", () => {
     expect(stranger.session.slots.benefits.links).toEqual([first]);
   });
 
+  it("alts: 기종 이름은 검색 인용(제목·주소)에 있는 것만 남기고, 요청 글에만 있는 이름·인용에 없는 이름은 버린다", async () => {
+    vi.stubEnv("LLM_MODE", "");
+    const seen = url("p/wh-1000xm4");
+    const other = url("p/other");
+    responsesCreate.mockResolvedValue(
+      liveReply(
+        [
+          { name: "소니 WH-1000XM4", feature: "목에 편해요", pageUrl: seen },
+          { name: "소니 WH-9999XM9", feature: "새로 나온 기종이에요", pageUrl: other },
+        ],
+        [seen, other],
+      ),
+    );
+    const o = await opened();
+    await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }));
+    const data = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "alts" })).json();
+    expect(data.messages[0].body.items.map((item: { name: string }) => item.name)).toEqual(["소니 WH-1000XM4"]);
+  });
+
   it("benefits: 갈래마다 3개씩 9개가 보여도 9개 모두 [확인했어요]로 기록할 수 있다", async () => {
     vi.stubEnv("LLM_MODE", "");
     let call = 0;
@@ -743,6 +762,18 @@ describe("POST …/research/search (alts, benefits)", () => {
     // 맨 앞에 보인 링크도 확인할 수 있다(상한이 보인 개수보다 작으면 이 링크가 잘린다).
     const checked = await (await post(o.id, o.cookie, body(o, { type: "link_check", url: shown[0] }))).json();
     expect(checked.session.slots.benefits.links).toEqual([shown[0]]);
+  });
+
+  it("link_check: 같은 주소가 참고 글 카드와 혜택 카드에 함께 보이면 두 칸 모두에 기록한다", async () => {
+    const o = await withExperience("카드 할인을 받았어요");
+    const data = await (await find(o.id, o.cookie, { sessionId: o.sessionId, kind: "benefits" })).json();
+    const first: string = data.messages[0].body.items[0].url;
+    const store = getResearchStore();
+    const actor = { requestId: o.id, volunteerId: volunteerOf(o.cookie), sessionId: o.sessionId };
+    await store.addMessage({ ...actor, cacheKey: null, messages: [], pending: { shownLinks: [{ url: first, slot: "refs" }] } });
+    const checked = await (await post(o.id, o.cookie, body(o, { type: "link_check", url: first }))).json();
+    expect(checked.session.slots.benefits.links).toEqual([first]);
+    expect(checked.session.slots.refs).toMatchObject({ links: [first], status: "confirmed" });
   });
 
   it("benefits: 검색하는 동안 다른 턴이 더한 참고 글 링크를 검색 결과가 덮어쓰지 않는다", async () => {

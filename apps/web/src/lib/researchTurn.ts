@@ -961,23 +961,30 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
     case "link_check": {
       messages.push(volunteerMessage("확인했어요"));
-      const entry = shownLinks(session.pending).find((link) => link.url === input.url);
-      if (!entry || (entry.slot !== "refs" && entry.slot !== "benefits")) {
+      // 같은 주소가 참고 글 카드와 혜택 카드에 함께 보일 수 있다. 어느 카드를 눌렀는지는 알 수 없으므로 보인 칸 모두에 기록한다.
+      const slots = new Set(shownLinks(session.pending).filter((link) => link.url === input.url).map((link) => link.slot));
+      const toBenefits = slots.has("benefits");
+      const toRefs = slots.has("refs");
+      if (!toBenefits && !toRefs) {
         messages.push(aiNotice("확인할 링크를 찾지 못했어요."));
         hold = true;
-      } else if (entry.slot === "benefits") {
-        // 혜택 카드 [확인했어요]: 경험 칸의 값은 그대로 두고 확인한 링크만 더한다(리뷰·결과에는 2개까지 들어간다). 다음 질문은 만들지 않는다.
-        const before = session.slots.benefits;
-        const links = [...new Set([...(before?.links ?? []), input.url])].slice(-BENEFIT_LINKS_MAX);
-        slotsPatch.benefits = before
-          ? { ...before, links }
-          : { value: BENEFIT_LINK_VALUE, links, status: "confirmed", by: "volunteer" };
-        messages.push(aiNotice(BENEFIT_LINK_CHECKED));
-        hold = true;
       } else {
-        // 칸 값은 200자 이하라서 200자를 넘는 주소는 줄여 적는다. 전체 주소는 links에만 둔다.
-        slotsPatch.refs = { value: [...input.url].length <= SLOT_VALUE_MAX ? input.url : linkLabel(input.url), links: [input.url], status: "confirmed", by: "volunteer" };
-        messages.push(aiNotice(LINK_CHECKED));
+        if (toBenefits) {
+          // 혜택 카드 [확인했어요]: 경험 칸의 값은 그대로 두고 확인한 링크만 더한다(리뷰·결과에는 2개까지 들어간다). 다음 질문은 만들지 않는다.
+          const before = session.slots.benefits;
+          const links = [...new Set([...(before?.links ?? []), input.url])].slice(-BENEFIT_LINKS_MAX);
+          slotsPatch.benefits = before
+            ? { ...before, links }
+            : { value: BENEFIT_LINK_VALUE, links, status: "confirmed", by: "volunteer" };
+          messages.push(aiNotice(BENEFIT_LINK_CHECKED));
+        }
+        if (toRefs) {
+          // 칸 값은 200자 이하라서 200자를 넘는 주소는 줄여 적는다. 전체 주소는 links에만 둔다.
+          slotsPatch.refs = { value: [...input.url].length <= SLOT_VALUE_MAX ? input.url : linkLabel(input.url), links: [input.url], status: "confirmed", by: "volunteer" };
+          messages.push(aiNotice(LINK_CHECKED));
+        } else {
+          hold = true;
+        }
       }
       break;
     }

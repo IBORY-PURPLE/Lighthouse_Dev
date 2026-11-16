@@ -474,7 +474,9 @@ export async function searchProducts(
       usage,
     });
     const raw = parseJsonObject(result.text)?.items;
-    const items = cleanProducts(raw, result.allowed, materialOf(context, [model], result), [model]);
+    // 이름 대조 자료는 검색 인용(제목·주소)과 브랜드·품목뿐이다(design 4.8 "자료 = 인용"). 요청 글과 고른 기종은 넣지 않는다.
+    const material = [context.brand ?? "", context.item ?? "", ...result.titles, ...result.allowed.values()];
+    const items = cleanProducts(raw, result.allowed, material, [model]);
     const citations = [...result.allowed.values()];
     return items.length > 0
       ? { data: items, ai: "ok", upstream: null, usage, citations }
