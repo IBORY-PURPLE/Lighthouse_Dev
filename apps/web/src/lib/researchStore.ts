@@ -341,6 +341,8 @@ export function createMemoryResearchStore(
     const day = kstDate(now());
     const row = daily.get(day);
     if (!row) {
+      // 그날 첫 사용이어도 상한을 넘으면 막는다.
+      if (searches > caps.dailySearches || aiCalls > caps.dailyAi) return false;
       daily.set(day, { searches, aiCalls });
       return true;
     }
@@ -391,6 +393,7 @@ export function createMemoryResearchStore(
       }
       if (!session) {
         const created = now();
+        // 소유 확인을 기다리는 사이 내려놓기가 끝났을 수 있어, 만든 뒤 한 번 더 확인한다(아래).
         session = {
           requestId,
           sessionId: randomUUID(),
@@ -408,7 +411,15 @@ export function createMemoryResearchStore(
       } else if (session.volunteerId !== volunteerId) {
         return { outcome: "session_changed" };
       }
-      return { outcome: "ok", view: view(session, null, true) };
+      // 세션을 만든 뒤에도 여전히 내 in_progress 요청인지 다시 본다. 그 사이 내려놓았으면 세션을 지운다.
+      const recheck = await requests.getForVolunteer(requestId, volunteerId);
+      if (recheck.kind !== "ok" || recheck.request.status !== "in_progress") {
+        sessions.delete(requestId);
+        return { outcome: "not_in_progress" };
+      }
+      const current = sessions.get(requestId);
+      if (!current || current.volunteerId !== volunteerId) return { outcome: "session_changed" };
+      return { outcome: "ok", view: view(current, null, true) };
     },
     async begin(input) {
       const guarded = await guard(input);
@@ -645,6 +656,10 @@ export function createMemoryResearchStore(
       const session = guarded;
       if (input.baseVersion !== session.version) return { outcome: "stale", version: session.version };
       const missing = requiredMissing(session);
+      // 구매함이면 칸 표시만이 아니라 실제 사진이 1장 이상 있어야 한다.
+      if (session.purchase === "bought" && session.photos.length === 0 && !missing.includes("photo")) {
+        missing.push("photo");
+      }
       if (missing.length > 0) return { outcome: "missing_required", missing };
       if (
         session.review.status !== "confirmed" ||

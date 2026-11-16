@@ -469,13 +469,16 @@ begin
 
   -- 하루 상한: 넘으면 행이 안 돌아온다.
   if p_kind = 'search' then v_d_searches := v_units; else v_d_ai := 1; end if;
-  insert into public.ai_usage_daily as d (day, searches, ai_calls) values (v_day, v_d_searches, v_d_ai)
-    on conflict (day) do update
-      set searches = d.searches + excluded.searches, ai_calls = d.ai_calls + excluded.ai_calls,
-          updated_at = now()
-      where d.searches + excluded.searches <= v_cap_day_searches
-        and d.ai_calls + excluded.ai_calls <= v_cap_day_ai
-    returning d.day into v_taken;
+  -- 그날 첫 사용이라 행이 없을 때도 상한을 넘으면 막는다(insert 쪽은 on conflict의 where를 안 본다).
+  if v_d_searches <= v_cap_day_searches and v_d_ai <= v_cap_day_ai then
+    insert into public.ai_usage_daily as d (day, searches, ai_calls) values (v_day, v_d_searches, v_d_ai)
+      on conflict (day) do update
+        set searches = d.searches + excluded.searches, ai_calls = d.ai_calls + excluded.ai_calls,
+            updated_at = now()
+        where d.searches + excluded.searches <= v_cap_day_searches
+          and d.ai_calls + excluded.ai_calls <= v_cap_day_ai
+      returning d.day into v_taken;
+  end if;
   if v_taken is null then
     if p_kind = 'turn' then
       insert into public.research_turns (request_id, client_turn_id) values (p_request_id, p_client_turn_id);
@@ -565,11 +568,18 @@ begin
   v_slots := v_s.slots;
   if jsonb_typeof(p_patch->'slots') = 'object' then
     for v_key, v_val in select e.key, e.value from jsonb_each(p_patch->'slots') as e loop
-      if not (v_key = any(v_q)) then return jsonb_build_object('outcome', 'bad_patch'); end if;
+      -- photo 칸은 research_add_photo·research_remove_photo만 바꾼다(사진 행과 어긋나지 않게).
+      if not (v_key = any(v_q)) or v_key = 'photo' then return jsonb_build_object('outcome', 'bad_patch'); end if;
       if jsonb_typeof(v_val) = 'null' then
         v_slots := v_slots - v_key;
       else
         if jsonb_typeof(v_val) <> 'object' or coalesce(v_val->>'status', '') not in ('filled', 'confirmed', 'skipped') then
+          return jsonb_build_object('outcome', 'bad_patch');
+        end if;
+        -- 채운 칸(filled·confirmed)은 값이 비어 있으면 안 된다. 값은 200자 이하.
+        if jsonb_typeof(v_val->'value') is distinct from 'string'
+           or char_length(v_val->>'value') > 200
+           or (v_val->>'status' <> 'skipped' and btrim(v_val->>'value') = '') then
           return jsonb_build_object('outcome', 'bad_patch');
         end if;
         v_slots := v_slots || jsonb_build_object(v_key, v_val);
@@ -895,6 +905,11 @@ begin
     return jsonb_build_object('outcome', 'stale', 'version', v_s.version);
   end if;
   v_missing := public.research_required_missing(v_s);
+  -- 구매함이면 칸 표시만이 아니라 실제 사진 행이 1장 이상 있어야 한다.
+  if v_s.purchase = 'bought' and not ('photo' = any(v_missing))
+     and not exists (select 1 from public.research_photos as p where p.request_id = p_request_id) then
+    v_missing := array_append(v_missing, 'photo');
+  end if;
   if array_length(v_missing, 1) is not null then
     return jsonb_build_object('outcome', 'missing_required', 'missing', to_jsonb(v_missing));
   end if;

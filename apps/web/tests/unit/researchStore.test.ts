@@ -85,6 +85,33 @@ describe("메모리 열기", () => {
     if (first.outcome === "ok") expect(first.view).toMatchObject({ purchase: "unset", version: 0, lastSeq: 0, messages: [], photos: [] });
   });
 
+  it("소유 확인을 기다리는 사이 내려놓기가 끝나면 세션을 남기지 않는다", async () => {
+    const c = await claimed(newVol());
+    let calls = 0;
+    const racing: RequestStore = new Proxy(requests, {
+      get(target, prop, receiver) {
+        if (prop === "getForVolunteer") {
+          return async (requestId: string, volunteerId: string) => {
+            calls += 1;
+            // 세션을 만든 뒤 확인하는 호출(둘째) 직전에 내려놓기가 끝난 상황
+            if (calls === 2) await target.release(requestId, volunteerId);
+            return target.getForVolunteer(requestId, volunteerId);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const racy = createMemoryResearchStore(racing, { now: () => clock, listenLeave: false });
+    expect((await racy.open(c.id, c.volunteerId)).outcome).toBe("not_in_progress");
+    // 알림을 안 받는 저장소여도 세션이 남지 않는다: 다시 맡아 열면 새 세션이다.
+    expect(await requests.claim(c.id, c.volunteerId)).toBe("claimed");
+    const reopened = await racy.open(c.id, c.volunteerId);
+    expect(reopened.outcome).toBe("ok");
+    expect(reopened.outcome === "ok" && reopened.view).toMatchObject({ purchase: "unset", lastSeq: 0, messages: [] });
+    racy.close();
+  });
+
   it("afterSeq가 있으면 읽기만 하고 세션을 만들지 않는다", async () => {
     const c = await claimed(newVol());
     expect((await research.open(c.id, c.volunteerId, 0)).outcome).toBe("session_changed");
@@ -132,6 +159,16 @@ describe("메모리 begin·apply", () => {
     await research.apply({ ...r.actor, clientTurnId: "other", baseVersion: 1, patch: { slots: { model: slot("x") } }, messages: [], next: [] });
     expect(await research.apply({ ...r.actor, clientTurnId: "race", baseVersion: 1, messages: [], next: [] })).toEqual({ outcome: "stale", version: 2 });
     expect((await research.begin({ ...r.actor, kind: "turn", baseVersion: 2, clientTurnId: "race" })).outcome).toBe("ok");
+  });
+
+  it("photo 칸 patch와 빈 값 채움은 bad_patch다", async () => {
+    const r = await opened(newVol());
+    const apply = (clientTurnId: string, slots: Record<string, SlotState>) =>
+      research.apply({ ...r.actor, clientTurnId, baseVersion: 0, patch: { slots }, messages: [], next: [] });
+    expect((await apply("p", { photo: slot("1장") })).outcome).toBe("bad_patch");
+    expect((await apply("e1", { model: slot("  ") })).outcome).toBe("bad_patch");
+    expect((await apply("e3", { model: slot("x".repeat(201)) })).outcome).toBe("bad_patch");
+    expect((await apply("ok", { alts: { value: "", status: "skipped", by: "volunteer" } })).outcome).toBe("ok");
   });
 
   it("잘못된 patch는 bad_patch다", async () => {
@@ -182,6 +219,12 @@ describe("메모리 상한과 사용량", () => {
     expect((await search("b1x", 1)).outcome).toBe("pending");
     clock += 91_000;
     expect((await search("b1x", 1)).outcome).toBe("ok");
+  });
+
+  it("그날 첫 사용이어도 하루 상한을 넘으면 막는다", async () => {
+    const r = await opened(newVol());
+    const caps = { turns: 40, searches: 12, photoUploads: 6, reviews: 3, dailySearches: 1, dailyAi: 600 };
+    expect(await research.begin({ ...r.actor, kind: "search", cacheKey: "big", units: 3, caps })).toEqual({ outcome: "capped", cap: "daily" });
   });
 
   it("하루 상한은 서울 날짜에서 센다", async () => {

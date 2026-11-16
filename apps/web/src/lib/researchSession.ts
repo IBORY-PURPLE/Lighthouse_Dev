@@ -143,6 +143,7 @@ export const DEFAULT_CAPS: ResearchCaps = {
 };
 
 export const MAX_PHOTOS = 3;
+export const SLOT_VALUE_MAX = 200;
 export const MAX_EXTRAS = 3;
 /** 이 시간 동안 활동이 없으면 요청을 대기열로 돌린다(결정 ③). */
 export const IDLE_RETURN_MS = 6 * 60 * 60 * 1000;
@@ -303,13 +304,17 @@ export function applyPatch(session: SessionLike, patch: ResearchPatch | null | u
   if (purchase !== "unset" && purchase !== "bought" && purchase !== "research") return { ok: false };
   const slots: Slots = { ...session.slots };
   for (const [key, value] of Object.entries(patch?.slots ?? {})) {
-    if (!isSlotKey(key)) return { ok: false };
+    // photo 칸은 사진 넣기·지우기만 바꾼다(사진 행과 어긋나지 않게).
+    if (!isSlotKey(key) || key === "photo") return { ok: false };
     if (value === null) {
       delete slots[key];
     } else {
       if (typeof value !== "object" || !["filled", "confirmed", "skipped"].includes(value.status)) {
         return { ok: false };
       }
+      // 채운 칸은 값이 비면 안 되고, 값은 200자 이하다.
+      if (typeof value.value !== "string" || value.value.length > SLOT_VALUE_MAX) return { ok: false };
+      if (value.status !== "skipped" && value.value.trim() === "") return { ok: false };
       slots[key] = { ...value };
     }
   }

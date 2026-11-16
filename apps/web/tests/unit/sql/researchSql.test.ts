@@ -19,6 +19,26 @@ const DOWN = "supabase/rollback/20261117000000_research_conversation_down.sql";
 const sql = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
 
 let db: PGlite;
+let before: { functions: Record<string, string>; columns: string };
+
+const EXISTING_FUNCTIONS = ["register_request", "claim_request", "release_request", "complete_request", "reset_demo_requests"];
+
+/** 기존 함수 5개의 정의 전문과 requests·results 열 목록. 새 마이그레이션이 이것을 바꾸지 않는지 비교한다. */
+async function existingDefinitions() {
+  const functions: Record<string, string> = {};
+  for (const name of EXISTING_FUNCTIONS) {
+    const row = await db.query<{ d: string }>(
+      "select pg_get_functiondef(p.oid) as d from pg_proc p where p.proname = $1 and p.pronamespace = 'public'::regnamespace",
+      [name],
+    );
+    functions[name] = row.rows[0].d;
+  }
+  const columns = await db.query<{ c: string }>(
+    `select string_agg(table_name || '.' || column_name || ':' || data_type || ':' || is_nullable, ',' order by table_name, ordinal_position) as c
+       from information_schema.columns where table_schema = 'public' and table_name in ('requests', 'results')`,
+  );
+  return { functions, columns: columns.rows[0].c };
+}
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -119,7 +139,9 @@ beforeAll(async () => {
     alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
     alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
   `);
-  for (const file of MIGRATIONS) await db.exec(sql(file));
+  for (const file of MIGRATIONS.slice(0, 2)) await db.exec(sql(file));
+  before = await existingDefinitions();
+  await db.exec(sql(MIGRATIONS[2]));
 }, 60_000);
 
 afterAll(async () => {
@@ -177,8 +199,14 @@ describe("권한과 구조", () => {
     await db.exec("reset role");
   });
 
-  it("기존 함수 5개 정의는 그대로다(이름·권한)", async () => {
-    for (const fn of ["register_request", "claim_request", "release_request", "complete_request", "reset_demo_requests"]) {
+  it("기존 함수 5개의 정의 전문과 requests·results 열은 새 마이그레이션 전후로 같다", async () => {
+    const after = await existingDefinitions();
+    expect(after.functions).toEqual(before.functions);
+    expect(after.columns).toBe(before.columns);
+  });
+
+  it("기존 함수 5개 권한은 그대로다(anon 못 부름, service_role 부름)", async () => {
+    for (const fn of EXISTING_FUNCTIONS) {
       const row = await one<{ anon: boolean; svc: boolean }>(
         `select has_function_privilege('anon', p.oid, 'execute') as anon,
                 has_function_privilege('service_role', p.oid, 'execute') as svc
@@ -340,6 +368,15 @@ describe("begin·apply", () => {
     expect(await begin(r, "turn", { base: 2, turn: "race" })).toMatchObject({ outcome: "ok" });
   });
 
+  it("photo 칸은 patch로 못 바꾸고, 채운 칸의 값은 비면 안 된다(건너뜀은 빈 값 가능)", async () => {
+    const r = await opened();
+    expect(await apply(r, "p", 0, { slots: { photo: slot("1장") } }, [], [])).toMatchObject({ outcome: "bad_patch" });
+    expect(await apply(r, "e1", 0, { slots: { model: slot("   ") } }, [], [])).toMatchObject({ outcome: "bad_patch" });
+    expect(await apply(r, "e2", 0, { slots: { model: { status: "filled", by: "volunteer" } } }, [], [])).toMatchObject({ outcome: "bad_patch" });
+    expect(await apply(r, "e3", 0, { slots: { model: slot("x".repeat(201)) } }, [], [])).toMatchObject({ outcome: "bad_patch" });
+    expect(await apply(r, "ok", 0, { slots: { alts: { value: "", status: "skipped", by: "volunteer" } } }, [], [])).toMatchObject({ outcome: "ok" });
+  });
+
   it("잘못된 patch는 거부한다", async () => {
     const r = await opened();
     expect(await apply(r, "a", 0, { slots: { nope: slot("x") } }, [], [])).toMatchObject({ outcome: "bad_patch" });
@@ -425,6 +462,16 @@ describe("상한과 사용량", () => {
     expect(day).toEqual({ searches: 3, ai_calls: 2, ok: true });
     // 요청당 usage도 하루 상한에 막힌 호출은 늘리지 않는다.
     expect((await one<{ turns: number; searches: number }>("select turns, searches from public.research_usage where request_id = $1", [r.id]))).toEqual({ turns: 2, searches: 3 });
+    await db.exec("delete from public.ai_usage_daily");
+  });
+
+  it("그날 첫 사용이어도 하루 상한을 넘으면 막는다", async () => {
+    await db.exec("delete from public.ai_usage_daily");
+    const r = await opened();
+    expect(await begin(r, "search", { key: "big", units: 3, caps: { dailySearches: 1 } })).toMatchObject({ outcome: "capped", cap: "daily" });
+    expect(await one("select day from public.ai_usage_daily")).toBeUndefined();
+    expect((await one<{ searches: number }>("select searches from public.research_usage where request_id = $1", [r.id]))?.searches ?? 0).toBe(0);
+    expect(await begin(r, "turn", { turn: "z", caps: { dailyAi: 0 } })).toMatchObject({ ai: "capped", cap: "daily" });
     await db.exec("delete from public.ai_usage_daily");
   });
 
@@ -567,6 +614,17 @@ describe("리뷰·보내기", () => {
     expect(confirmed.review).toMatchObject({ status: "confirmed", rev: 2 });
     expect((await send(r, v2, 1)).outcome).toBe("review_not_confirmed"); // rev 불일치
     expect((await send(r, v2 - 1, 2)).outcome).toBe("stale");
+  });
+
+  it("구매함인데 사진 행이 없으면(칸 표시만 있어도) 보낼 수 없다", async () => {
+    const r = await opened();
+    const v = await fillRequired(r, "a", 0, true);
+    await db.query(
+      `update public.research_sessions set slots = slots || jsonb_build_object('photo', jsonb_build_object('value','1장','status','filled','by','volunteer')) where request_id = $1`,
+      [r.id],
+    );
+    await review(r, v, "confirmed");
+    expect(await send(r, v, 1)).toMatchObject({ outcome: "missing_required", missing: ["photo"] });
   });
 
   it("보내면 요청이 done이 되고 세션은 지워지며 usage는 남는다. 다시 보내면 existing", async () => {
