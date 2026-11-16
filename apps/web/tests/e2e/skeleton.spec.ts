@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 test("첫 화면이 열리고 접근성 위반이 없다", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/classic");
   await expect(page.getByRole("heading", { name: "LightHouse" })).toBeVisible();
 
   const results = await new AxeBuilder({ page }).analyze();

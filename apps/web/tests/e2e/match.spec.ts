@@ -78,7 +78,7 @@ async function openUserScreen(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": nextClient() });
   await installFakeSpeech(page);
-  await page.goto("/");
+  await page.goto("/classic");
 }
 
 /** 플로우 A로 세 질문에 답하고(질문 1 = sentence) 요약에서 매칭을 요청한다. */
@@ -270,7 +270,7 @@ test.describe("접수 실패 안내", () => {
       route.fulfill({ status: 401, json: { ok: false, error: "unauthorized" } }),
     );
     await installFakeSpeech(page);
-    await page.goto("/");
+    await page.goto("/classic");
     await hearAndConfirm(page, PASS_SENTENCE);
 
     await expect(status(page)).toHaveText(
@@ -386,7 +386,7 @@ test.describe("접수 실패 안내", () => {
     );
     await expect(handoffButton(page)).toBeFocused();
     await expect(queuedHeading(page)).toBeVisible();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(/\/classic$/);
   });
 });
 
@@ -450,11 +450,10 @@ test.describe("봉사자 화면(시연)", () => {
     const box = await link.boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(44);
     await link.click();
+    // /는 이제 apps/user-voice-ui 화면이다(고정 질문 화면은 /classic).
     await expect(page).toHaveURL(/\/$/);
-    await expect(
-      page.getByRole("heading", { name: "LightHouse 상품 요청" }),
-    ).toBeFocused();
-    await expect(page).toHaveTitle("상품 요청 - LightHouse");
+    await expect(page.getByRole("button", { name: "상품 요청", exact: true })).toBeVisible();
+    await expect(page).toHaveTitle("LightHouse MVP");
   });
 
   test("깨진 저장값은 매칭 정보 없음으로 처리한다", async ({ page }) => {
