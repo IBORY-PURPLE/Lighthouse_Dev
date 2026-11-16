@@ -135,6 +135,26 @@ describe("서버 틀 문단", () => {
     expect(text).not.toContain("(");
   });
 
+  it("칸 값에 기호·도메인 이름이 있어도 틀 문단은 edit 검사를 통과한다", () => {
+    const view = makeView({
+      slots: {
+        model: filled("LH-200"),
+        pros: filled("가볍고 좋아요 # 추천해요 * 최고 | 조용해요 `코드` shop.com에서 봤어요"),
+        photo: filled("1장"),
+        altReason: filled("> 인용처럼 썼어요 _강조_"),
+      },
+    });
+    const text = buildTemplateReview(buildReviewMaterial(sourceOf(view)));
+    expect(checkReviewText(text, reviewKnownMaterial(sourceOf(view)), "edit")).toEqual([]);
+    expect(text).toContain("가볍고 좋아요");
+  });
+
+  it("AI 문단에도 전화번호 모양은 걸린다", () => {
+    const known = ["LH-200"];
+    const text = `${GOOD_AI.replace("LH-300이고", "LH-200이고")} 문의는 010-1234-5678이에요.`;
+    expect(checkReviewText(text, known, "ai").join(" ")).toContain("전화번호");
+  });
+
   it("틀 문단이 7문장·1,000자를 넘으려 하면 선택 문장부터 뺀다", () => {
     const long = "가".repeat(110);
     const view = makeView({

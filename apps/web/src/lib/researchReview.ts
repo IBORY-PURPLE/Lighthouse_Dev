@@ -7,7 +7,7 @@ import { COMMON, materialMessage } from "./researchPrompt";
 import { purchaseBadge, type ResearchView, type SlotKey } from "./researchSession";
 
 // 검증 리뷰(design.md 4.11): 봉사자가 모은 칸으로 이용자가 VoiceOver로 듣는 한 문단을 만든다.
-// AI 한 번(요청당 3번 상한, 호출 전 begin이 센다) → 검사 → 실패하면 서버 틀 문단. 봉사자가 고친 문단은 같은 내용 검사에 전화번호 모양을 더해 거른다.
+// AI 한 번(요청당 3번 상한, 호출 전 begin이 센다) → 검사 → 실패하면 서버 틀 문단. 봉사자가 고친 문단도 같은 검사로 거른다(길이만 다르다).
 // 글·사진·ID·주소는 로그에 남기지 않는다.
 
 /** 봉사자가 고칠 때의 글자 수 범위(design.md 3.2). AI 문단은 아래 AI_* 범위를 따른다. */
@@ -50,13 +50,16 @@ export interface ReviewSource {
 }
 
 const URL_TOKEN = /https?:\/\/\S+|www\.\S+/gi;
+// 문단에 넣지 않는 것: 주소 모양(도메인 이름 포함)과 마크다운·목록 기호. 칸 값을 쓰기 전에 이것도 뺀다(틀 문단이 검사에 걸리지 않게).
+const BARE_DOMAIN = /[a-z0-9-]+\.(?:com|co\.kr|net|kr|org|io)\b/gi;
+const SYMBOLS = /[*#`_>|]/g;
 // 전화번호 모양: 휴대폰·지역번호(010-1234-5678, 02 123 4567, +82 10…), 대표번호(1588-1234).
 const PHONE = /(?<!\d)0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|\+82[-\s.]?\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|(?<!\d)1[5-9]\d{2}[-\s.]\d{4}(?!\d)/;
 
 /** 봉사자가 쓴 칸 값을 자료로 쓰기 전에 거른다: 한 줄로, 금지 표현이 든 문장·주소·전화번호를 뺀다. */
 function safeFact(value: string | undefined | null, max = FACT_MAX): string {
   if (!value) return "";
-  const stripped = oneLine(value.normalize("NFKC").replace(URL_TOKEN, " "));
+  const stripped = oneLine(value.normalize("NFKC").replace(URL_TOKEN, " ").replace(BARE_DOMAIN, " ").replace(SYMBOLS, " "));
   return oneLine(cleanText(stripped, max)).replace(new RegExp(PHONE.source, "g"), "").trim();
 }
 
@@ -135,7 +138,7 @@ function firstOffender(text: string): string {
 /**
  * 문단 검사. 걸린 이유를 봉사자가 읽을 문장으로 돌려준다(통과하면 빈 목록).
  * ai: AI 문단(150~700자), edit: 봉사자가 고친 문단(50~1,000자). 둘 다 3~7문장, 목록·기호 없음,
- * 가격·재고·할인 표현, 자료에 없는 기종 이름, 주소를 거르고 edit은 전화번호 모양도 거른다.
+ * 가격·재고·할인 표현, 자료에 없는 기종 이름, 주소, 전화번호 모양을 거른다.
  */
 export function checkReviewText(text: string, material: readonly string[], mode: "ai" | "edit"): string[] {
   const reasons: string[] = [];
@@ -153,14 +156,14 @@ export function checkReviewText(text: string, material: readonly string[], mode:
   if (count < SENTENCES_MIN || count > SENTENCES_MAX) {
     reasons.push(`문장이 지금 ${count}개예요. ${SENTENCES_MIN}~${SENTENCES_MAX}개로 써 주세요.`);
   }
-  if (/[*#`_>|]|^\s*(?:[-•]|\d+[.)])\s/m.test(text)) reasons.push("목록이나 기호가 들어 있어요.");
+  if (new RegExp(SYMBOLS.source).test(text) || /^\s*(?:[-•]|\d+[.)])\s/m.test(text)) reasons.push("목록이나 기호가 들어 있어요.");
   if (hasForbidden(text)) reasons.push(`가격·재고·할인으로 보이는 표현이 있어요: “${firstOffender(text)}”`);
   const unknown = unknownModelTokens(text, material);
   if (unknown.length > 0) reasons.push(`자료에 없는 기종 이름이 있어요: ${[...new Set(unknown)].slice(0, 3).join(", ")}`);
   if (/https?:\/\/|www\.|[a-z0-9-]+\.(?:com|co\.kr|net|kr|org|io)\b/i.test(normalized)) {
     reasons.push("주소(링크)는 문단에 넣지 않아요.");
   }
-  if (mode === "edit" && PHONE.test(normalized)) reasons.push("전화번호처럼 보이는 숫자는 넣지 않아요.");
+  if (PHONE.test(normalized)) reasons.push("전화번호처럼 보이는 숫자는 넣지 않아요.");
   return reasons;
 }
 
