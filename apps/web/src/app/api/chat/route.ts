@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import { isChatRequest, MAX_QUESTION_LENGTH } from "@/lib/chat";
 import { isLlmConfigured, LlmError, streamAnswer } from "@/lib/llm";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
@@ -99,10 +98,6 @@ async function handleChat(
   onStreamFailed: (status: number | undefined) => void,
   onUpstreamFailed: (status: number | undefined) => void,
 ): Promise<Response> {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
-    return failure(401, "unauthorized");
-  }
-
   const limit = checkRateLimit(clientKey(request.headers));
   if (!limit.allowed) {
     return failure(429, "rate_limited", {

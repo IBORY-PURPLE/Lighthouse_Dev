@@ -157,9 +157,6 @@ export const VOLUNTEER_MESSAGES = {
   notYours: "이 요청은 내 담당이 아니에요",
   notFound: "요청을 찾지 못했어요",
   notYoursAnymore: "이 요청은 더 이상 내 담당이 아니에요",
-  invalidCode: "입장 코드가 올바르지 않습니다",
-  invalidNickname: "별명은 1~12자로 넣어 주세요",
-  enterTooMany: "시도가 너무 많습니다. 10분 뒤 다시 해 주세요.",
   tempStore:
     "임시 저장소를 쓰고 있습니다. 시연 요청과 맡은 상태가 갑자기 사라질 수 있습니다(DB 적용 전).",
 } as const;

@@ -2,36 +2,33 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { StatusRegion } from "@/components/StatusRegion";
-import { VolunteerEntry } from "@/components/VolunteerEntry";
 import { VolunteerQueue } from "@/components/VolunteerQueue";
-import { fetchMe, type MeResponse } from "@/lib/volunteerClient";
+import { enterVolunteer, fetchMe } from "@/lib/volunteerClient";
 import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
 
-type Gate = { kind: "checking" } | { kind: "failed" } | { kind: "ready"; me: MeResponse };
+type Gate = { kind: "checking" } | { kind: "failed" } | { kind: "ready" };
 
-/** 입장 전에는 입장 화면, 입장 뒤에는 요청 목록. 이 기기가 입장했는지는 서버(/me)가 알려 준다. */
+/** 이 기기가 아직 기기 쿠키(lh_vol)를 받지 않았으면 스스로 입장 호출을 하고 요청 목록을 보인다. 입력 화면은 없다. */
+async function resolveGate(): Promise<Gate> {
+  const me = await fetchMe();
+  if (me.kind !== "ok") return { kind: "failed" };
+  if (me.data.entered) return { kind: "ready" };
+  const entered = await enterVolunteer();
+  return entered.kind === "ok" ? { kind: "ready" } : { kind: "failed" };
+}
+
 function VolunteerHome() {
   const [gate, setGate] = useState<Gate>({ kind: "checking" });
 
   const check = useCallback(async () => {
-    const result = await fetchMe();
-    setGate(
-      result.kind === "ok"
-        ? { kind: "ready", me: result.data }
-        : { kind: "failed" },
-    );
+    setGate(await resolveGate());
   }, []);
 
   useEffect(() => {
     // 응답이 오면 상태를 바꾼다(effect 본문에서 바로 바꾸지 않는다).
     let cancelled = false;
-    void fetchMe().then((result) => {
-      if (cancelled) return;
-      setGate(
-        result.kind === "ok"
-          ? { kind: "ready", me: result.data }
-          : { kind: "failed" },
-      );
+    void resolveGate().then((next) => {
+      if (!cancelled) setGate(next);
     });
     return () => {
       cancelled = true;
@@ -61,16 +58,8 @@ function VolunteerHome() {
       </div>
     );
   }
-  if (gate.me.entered) {
-    // 쿠키가 없어졌거나 틀리면 입장 상태를 다시 묻는다.
-    return <VolunteerQueue onUnauthorized={() => void check()} />;
-  }
-  return (
-    <VolunteerEntry
-      needsCode={gate.me.needsCode}
-      onEntered={() => setGate({ kind: "ready", me: { entered: true, needsCode: false } })}
-    />
-  );
+  // 쿠키가 없어졌거나 틀리면 다시 입장을 거친다.
+  return <VolunteerQueue onUnauthorized={() => void check()} />;
 }
 
 export default function VolunteerPage() {

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cookieSecure,
   issueDeviceCookie,
@@ -11,16 +11,9 @@ import {
 const ID_PATTERN = /^d-[0-9a-f]{16}$/;
 
 describe("봉사자 기기 열쇠 쿠키", () => {
-  beforeEach(() => {
-    vi.stubEnv("DEMO_ACCESS_CODE", "right-code");
-  });
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("만든 쿠키는 v1.<열쇠>.<서명> 세 조각이고 봉사자 ID가 d-+16자리다", () => {
+  it("만든 쿠키는 v2.<열쇠> 두 조각이고 봉사자 ID가 d-+16자리다", () => {
     const cookie = issueDeviceCookie();
-    expect(cookie).toMatch(/^v1\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]+$/);
+    expect(cookie).toMatch(/^v2\.[A-Za-z0-9_-]{43}$/);
     expect(readVolunteerId(cookie)).toMatch(ID_PATTERN);
   });
 
@@ -31,20 +24,26 @@ describe("봉사자 기기 열쇠 쿠키", () => {
     expect(readVolunteerId(first)).not.toBe(readVolunteerId(second));
   });
 
-  it("서명·열쇠·버전을 바꾸거나 조각이 모자라면 거절한다", () => {
-    const cookie = issueDeviceCookie() as string;
-    const [version, key, signature] = cookie.split(".");
-    const flip = (text: string) => `${text.slice(0, -1)}${text.endsWith("A") ? "B" : "A"}`;
+  it("입장 코드 설정과 상관없이 만들고 읽는다(QA 기간에는 코드가 없다)", () => {
+    vi.stubEnv("DEMO_ACCESS_CODE", "");
+    const cookie = issueDeviceCookie();
+    expect(readVolunteerId(cookie)).toMatch(ID_PATTERN);
+  });
+
+  it("버전·열쇠 모양이 틀리거나 조각 수가 다르면 거절한다", () => {
+    const cookie = issueDeviceCookie();
+    const [, key] = cookie.split(".");
     for (const forged of [
-      `${version}.${key}.${flip(signature)}`,
-      `${version}.${flip(key)}.${signature}`,
-      `v2.${key}.${signature}`,
-      `${version}.${key}`,
+      `v1.${key}`,
+      `v1.${key}.signature`,
+      `v3.${key}`,
+      `v2.${key.slice(1)}`,
+      `v2.${key}A`,
+      `v2.${"!".repeat(43)}`,
       `${cookie}.extra`,
-      `${version}.${key.slice(1)}.${signature}`,
-      `${version}.${key}.`,
+      "v2.",
+      "v2",
       "",
-      "v1..",
     ]) {
       expect(readVolunteerId(forged)).toBeNull();
     }
@@ -52,23 +51,8 @@ describe("봉사자 기기 열쇠 쿠키", () => {
     expect(readVolunteerId(undefined)).toBeNull();
   });
 
-  it("다른 입장 코드로 만든 쿠키는 거절한다(코드가 바뀌면 열쇠가 모두 무효)", () => {
-    const cookie = issueDeviceCookie();
-    vi.stubEnv("DEMO_ACCESS_CODE", "another-code");
-    expect(readVolunteerId(cookie)).toBeNull();
-  });
-
-  it("입장 코드가 없거나 비었으면 만들지도 읽지도 못한다", () => {
-    const cookie = issueDeviceCookie();
-    vi.stubEnv("DEMO_ACCESS_CODE", "");
-    expect(issueDeviceCookie()).toBeNull();
-    expect(readVolunteerId(cookie)).toBeNull();
-    vi.stubEnv("DEMO_ACCESS_CODE", "   ");
-    expect(issueDeviceCookie()).toBeNull();
-  });
-
   it("requireVolunteer는 요청의 lh_vol 쿠키를 읽는다", () => {
-    const cookie = issueDeviceCookie() as string;
+    const cookie = issueDeviceCookie();
     const withCookie = new NextRequest("http://localhost/api/volunteer/queue", {
       headers: { cookie: `${VOLUNTEER_COOKIE}=${cookie}` },
     });

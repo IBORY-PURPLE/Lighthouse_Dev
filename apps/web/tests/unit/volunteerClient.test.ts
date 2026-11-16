@@ -90,34 +90,19 @@ describe("volunteerClient", () => {
     expect((await sendResult("r1", candidates)).kind).toBe("failed");
   });
 
-  it("입장: 정해진 문구", async () => {
-    respond(200, { ok: true });
-    expect(await enterVolunteer("code", "민지")).toEqual({ kind: "ok" });
-    respond(401, { ok: false, error: "invalid_code" });
-    expect(await enterVolunteer("bad", "민지")).toEqual({
-      kind: "error",
-      message: "입장 코드가 올바르지 않습니다",
-    });
-    respond(400, { ok: false, error: "invalid_nickname" });
-    expect(await enterVolunteer(null, "")).toEqual({
-      kind: "error",
-      message: "별명은 1~12자로 넣어 주세요",
-    });
-    respond(429, { ok: false, error: "rate_limited" });
-    expect(await enterVolunteer("c", "민지")).toEqual({
-      kind: "error",
-      message: "시도가 너무 많습니다. 10분 뒤 다시 해 주세요.",
-    });
-    respond(503, { ok: false, error: "not_configured" });
-    expect(await enterVolunteer("c", "민지")).toMatchObject({ kind: "error" });
-  });
-
-  it("입장 요청 본문: 코드가 필요 없는 기기는 code를 보내지 않는다", async () => {
+  it("입장: 코드·별명 없이 본문 없는 POST를 보낸다. 실패하면 연결 실패 문구", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    await enterVolunteer(null, "민지");
-    await enterVolunteer("abc", "민지");
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ nickname: "민지" });
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ code: "abc", nickname: "민지" });
+    expect(await enterVolunteer()).toEqual({ kind: "ok" });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/volunteer/enter");
+    expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined();
+    respond(503, { ok: false, error: "not_configured" });
+    expect(await enterVolunteer()).toEqual({
+      kind: "error",
+      message: "서버에 연결하지 못했습니다. 다시 시도해 주세요.",
+    });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await enterVolunteer()).toMatchObject({ kind: "error" });
   });
 });

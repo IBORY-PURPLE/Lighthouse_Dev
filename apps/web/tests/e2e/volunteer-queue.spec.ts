@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
 import {
   CLAIM_NAME,
   DEMO_QUOTES,
@@ -19,40 +18,30 @@ const card = (page: import("@playwright/test").Page, quote: string) =>
   page.locator(".vol-card").filter({ hasText: quote });
 
 test.describe("봉사자 입장·목록·맡기", () => {
-  test("1. 쿠키 없이 열면 입장 화면만 나오고, 틀린 코드에는 정해진 문구 하나만 나온다", async ({
+  test("1. 링크만 열면 입장 화면 없이 바로 대기열이 나온다. 열기 전에는 봉사자용 서버 기능이 401이다", async ({
     browser,
     baseURL,
   }) => {
     const page = await openDevice(browser, baseURL);
+    // 기기 쿠키(lh_vol)를 받기 전에는 봉사자용 서버 기능이 401이다.
+    const before = await page.request.get("/api/volunteer/queue");
+    expect(before.status()).toBe(401);
+
     await page.goto("/volunteer");
     await expect(
-      page.getByRole("heading", { level: 1, name: "봉사자 입장" }),
+      page.getByRole("heading", { level: 1, name: "대기열" }),
     ).toBeVisible();
-    await expect(page.getByLabel("입장 코드")).toBeVisible();
-    await expect(page.getByLabel("별명")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "대기열" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: CLAIM_NAME })).toHaveCount(0);
-
-    // 입장 전에는 봉사자용 서버 기능이 401이다.
-    const queue = await page.request.get("/api/volunteer/queue");
-    expect(queue.status()).toBe(401);
-
-    await page.getByLabel("입장 코드").fill("틀린-코드");
-    await page.getByLabel("별명").fill("민지");
-    await page.getByRole("button", { name: "시작하기" }).click();
-    await expect(page.getByRole("status")).toHaveText(
-      "입장 코드가 올바르지 않습니다",
-    );
-    await expect(
-      page.getByRole("heading", { level: 1, name: "봉사자 입장" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "봉사자 입장" })).toHaveCount(0);
+    await expect(page.getByLabel("입장 코드")).toHaveCount(0);
+    await expect(page.getByLabel("별명")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "시작하기" })).toHaveCount(0);
 
     await expectNoBlockingAxe(page);
     await page.screenshot({ path: "test-results/volunteer-entry.png" });
     await page.context().close();
   });
 
-  test("2. 입장하면 목록이 나오고 새로 고쳐도 목록이다. 쿠키는 HttpOnly다", async ({
+  test("2. 기기 쿠키는 HttpOnly이고 접근 쿠키는 없다. 새로 고쳐도 같은 기기 쿠키다", async ({
     browser,
     baseURL,
   }) => {
@@ -62,46 +51,28 @@ test.describe("봉사자 입장·목록·맡기", () => {
     const cookies = await page.context().cookies();
     const vol = cookies.find((cookie) => cookie.name === "lh_vol");
     expect(vol?.httpOnly).toBe(true);
-    expect(
-      cookies.find((cookie) => cookie.name === "lh_access")?.httpOnly,
-    ).toBe(true);
-    // 별명은 서버 쿠키가 아니라 기기 localStorage에만 있다.
-    expect(cookies.some((cookie) => cookie.value.includes("민지"))).toBe(false);
-    expect(
-      await page.evaluate(() => window.localStorage.getItem("lh.vol.nickname.v1")),
-    ).toBe("민지");
+    expect(cookies.some((cookie) => cookie.name === "lh_access")).toBe(false);
 
     await page.reload();
     await expect(
       page.getByRole("heading", { level: 1, name: "대기열" }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "봉사자 입장" })).toHaveCount(0);
+    const after = (await page.context().cookies()).find((cookie) => cookie.name === "lh_vol");
+    expect(after?.value).toBe(vol?.value);
     await page.context().close();
   });
 
-  test("3. /enter?code= 를 거친 기기는 별명 칸만 보인다", async ({
+  test("3. 옛 링크 /enter?code= 는 이용자 화면으로 가고 쿠키를 심지 않는다. 같은 기기에서 /volunteer는 바로 열린다", async ({
     browser,
     baseURL,
   }) => {
     const page = await openDevice(browser, baseURL);
     const context = page.context();
-    await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
+    await page.goto("/enter?code=old-link-value");
     await expect(page).toHaveURL(/\/$/);
-    // Windows WebKit은 Secure 쿠키를 http://localhost로 보내지 않는다. 시험 안에서만 Secure를 뺀다(운영은 HTTPS).
-    const access = (await context.cookies()).find(
-      (cookie) => cookie.name === "lh_access",
-    );
-    expect(access).toBeDefined();
-    if (access) await context.addCookies([{ ...access, secure: false }]);
+    expect(await context.cookies()).toEqual([]);
 
     await page.goto("/volunteer");
-    await expect(
-      page.getByRole("heading", { level: 1, name: "봉사자 입장" }),
-    ).toBeVisible();
-    await expect(page.getByLabel("별명")).toBeVisible();
-    await expect(page.getByLabel("입장 코드")).toHaveCount(0);
-    await page.getByLabel("별명").fill("지후");
-    await page.getByRole("button", { name: "시작하기" }).click();
     await expect(
       page.getByRole("heading", { level: 1, name: "대기열" }),
     ).toBeVisible();
@@ -164,12 +135,12 @@ test.describe("봉사자 입장·목록·맡기", () => {
     baseURL,
   }) => {
     const watcher = await openDevice(browser, baseURL);
-    await enterAs(watcher, "관찰자");
+    await enterAs(watcher);
     await refill(watcher);
 
     // 다른 기기가 시연 요청을 다시 채운다(시연 행이 새로 만들어져 직전 목록에 없던 id가 된다).
     const other = await openDevice(browser, baseURL);
-    await enterAs(other, "다른사람");
+    await enterAs(other);
     await refill(other);
 
     await watcher.getByRole("button", { name: "새로고침" }).click();
@@ -189,11 +160,11 @@ test.describe("봉사자 입장·목록·맡기", () => {
     baseURL,
   }) => {
     const a = await openDevice(browser, baseURL);
-    await enterAs(a, "에이");
+    await enterAs(a);
     await refill(a);
 
     const b = await openDevice(browser, baseURL);
-    await enterAs(b, "비");
+    await enterAs(b);
     const bCard = card(b, FIRST_DEMO_QUOTE);
     await expect(bCard).toHaveCount(1);
 
@@ -309,7 +280,7 @@ test.describe("봉사자 입장·목록·맡기", () => {
     baseURL,
   }) => {
     const a = await openDevice(browser, baseURL);
-    await enterAs(a, "에이");
+    await enterAs(a);
     await refill(a);
     await expectNoRemaining(a);
     await card(a, FIRST_DEMO_QUOTE)
@@ -321,7 +292,7 @@ test.describe("봉사자 입장·목록·맡기", () => {
     const detailUrl = a.url();
 
     const b = await openDevice(browser, baseURL);
-    await enterAs(b, "비");
+    await enterAs(b);
     await expectNoRemaining(b);
     await b.goto(detailUrl);
     await expect(b.getByText("이 요청은 내 담당이 아니에요")).toBeVisible();

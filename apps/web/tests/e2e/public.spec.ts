@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
@@ -10,12 +10,6 @@ import { installFakeSpeech, say } from "./helpers/fakeSpeech";
 import { completeFlowA, DEFAULT_ANSWERS } from "./helpers/flowA";
 import { BOUGHT, button, next, SEND } from "./helpers/researchFlow";
 import { claimDemo, FIRST_DEMO_QUOTE, makeSyntheticDetailImage, refill } from "./helpers/volunteerFlow";
-
-// 접근 코드는 저장소 루트 .demo-access.local의 첫 줄에서만 읽는다.
-function readAccessCode(): string {
-  const file = path.resolve(__dirname, "../../../../.demo-access.local");
-  return readFileSync(file, "utf8").split(/\r?\n/)[0].trim();
-}
 
 // Playwright가 apps/web/test-results를 비우므로 기록은 저장소 루트에 둔다.
 const RECORD_DIR = path.resolve(__dirname, "../../../../test-results/public");
@@ -36,27 +30,14 @@ test("공개 주소 첫 화면과 음성 시험 페이지가 열린다", async (
   expect(probe?.status()).toBe(200);
 });
 
-test("공개 주소 접근 코드와 health", async ({ request }) => {
-  const wrong = await request.get("/enter?code=wrong", { maxRedirects: 0 });
-  expect(wrong.status()).toBe(401);
+test("공개 주소 옛 접근 링크와 health(QA 기간에는 접근 코드가 없다)", async ({ request }) => {
+  // 이미 퍼진 옛 링크는 코드를 읽지 않고 /로 보낸다. 쿠키는 심지 않는다.
+  const old = await request.get("/enter?code=old-link-value", { maxRedirects: 0 });
+  expect(old.status()).toBe(303);
+  expect(old.headers()["location"]).toBe("/");
+  expect(old.headers()["set-cookie"] ?? "").toBe("");
 
-  const noCookie = await request.get("/api/health");
-  expect(noCookie.status()).toBe(401);
-
-  const right = await request.get("/enter", {
-    params: { code: readAccessCode() },
-    maxRedirects: 0,
-  });
-  expect(right.status()).toBe(303);
-  expect(right.headers()["location"]).toBe("/");
-
-  const setCookie = right.headers()["set-cookie"] ?? "";
-  expect(setCookie).toMatch(/HttpOnly/i);
-  expect(setCookie).toMatch(/Secure/i);
-
-  const health = await request.get("/api/health", {
-    headers: { cookie: setCookie.split(";")[0] },
-  });
+  const health = await request.get("/api/health");
   expect(health.status()).toBe(200);
   const body = await health.json();
   // PR 2: health에 저장소 종류(store)를 더했다(시험 변경). 키 값은 없다.
@@ -86,11 +67,8 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
 
   await installFakeSpeech(page);
 
-  // 주소에 접근 코드가 있으므로 오류 내용과 주소 전체를 출력하지 않는다.
-  const entered = await page
-    .goto(`/enter?code=${encodeURIComponent(readAccessCode())}`)
-    .catch(() => null);
-  expect(entered?.status(), "접근 코드로 입장").toBe(200);
+  const entered = await page.goto("/");
+  expect(entered?.status(), "첫 화면").toBe(200);
   expect(new URL(page.url()).pathname).toBe("/");
   await shot("user-first-screen");
 
@@ -183,11 +161,8 @@ test("④ 입장·맡기·리서치 챗 카드 1~7·보내기 완주", async ({ 
   test.setTimeout(420_000);
   await page.context().setExtraHTTPHeaders({ "x-forwarded-for": `test-${randomUUID()}` });
 
-  // 입장(코드와 별명). 이 기기가 봉사자가 된다.
+  // 입장(코드·별명 없음). /volunteer를 열면 이 기기가 봉사자가 된다.
   await page.goto("/volunteer");
-  await page.getByLabel("입장 코드").fill(readAccessCode());
-  await page.getByLabel("별명").fill("시험");
-  await page.getByRole("button", { name: "시작하기" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
   await refill(page);
 

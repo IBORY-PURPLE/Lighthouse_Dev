@@ -13,17 +13,15 @@ import { VOLUNTEER_COOKIE } from "@/lib/volunteerSession";
 // POST /api/volunteer/requests/{id}/result: 보내기(결과 저장 + 완료).
 
 const ORIGIN = "http://localhost:3000";
-const CODE = "right-code";
 const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 
 let counter = 0;
 const freshClient = () => `203.0.113.${(counter += 1) % 250}-${randomUUID()}`;
 
-async function signIn(nickname = "민지") {
+async function signIn() {
   const response = await enter(
     new NextRequest(`${ORIGIN}/api/volunteer/enter`, {
       method: "POST",
-      body: JSON.stringify({ code: CODE, nickname }),
       headers: { "x-forwarded-for": freshClient() },
     }),
   );
@@ -82,7 +80,6 @@ async function claimFirst(cookie: string) {
 
 describe("POST /api/volunteer/requests/{id}/result", () => {
   beforeEach(() => {
-    vi.stubEnv("DEMO_ACCESS_CODE", CODE);
     vi.stubEnv("STORE_MODE", "memory");
     vi.stubEnv("VERCEL", "");
     resetRequestStoresForTest();
@@ -190,8 +187,8 @@ describe("POST /api/volunteer/requests/{id}/result", () => {
   });
 
   it("403: 남이 맡은 요청은 보낼 수 없다. 404: 없는 요청. 400: UUID가 아님", async () => {
-    const a = await signIn("가");
-    const b = await signIn("나");
+    const a = await signIn();
+    const b = await signIn();
     const id = await claimFirst(a);
     const others = await call(result, "POST", id, b, { candidates: [good()] });
     expect(others.status).toBe(403);
