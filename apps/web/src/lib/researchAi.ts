@@ -25,7 +25,7 @@ import {
   urlKey,
   type AllowedUrls,
 } from "./researchCheck";
-import { mockResponse } from "./researchMock";
+import { mockResponse, mockTurnJson } from "./researchMock";
 import {
   askInstructions,
   materialMessage,
@@ -34,6 +34,7 @@ import {
   type AskCard,
   type SearchCard,
 } from "./researchPrompt";
+import { turnInstructions, turnMessage, type TurnMaterial } from "./researchTurnPrompt";
 
 // 리서치 AI 호출 3종(search·ask·vision), 가짜 모드, fallback. 운영 모델은 llm.ts의 LLM_MODEL 하나다.
 // search는 gpt-6-luna가 web_search를 받는다(2026-11-13 실호출 확인). 실패하면 조용히 fallback으로 내려간다.
@@ -49,6 +50,8 @@ export interface ResearchOutcome {
   body: ResearchResponse;
   upstream: Upstream | null;
   detail?: string;
+  /** 로그용 사용량(숫자만). 검색 종류가 실제 호출했을 때만 있다. */
+  usage?: { in: number; out: number; ws: number };
 }
 
 /** 저장소에서 읽은 요청 값. 요청 문장·브랜드·품목은 저장소 값만 쓴다(화면이 준 값은 쓰지 않는다). */
@@ -61,6 +64,8 @@ export interface ResearchContext {
 const SEARCH_TIMEOUT_MS = 50_000;
 const ASK_TIMEOUT_MS = 25_000;
 const VISION_TIMEOUT_MS = 45_000;
+/** 대화 턴 한 번의 AI 마감(design.md 3.2). */
+const TURN_TIMEOUT_MS = 15_000;
 
 const hasKey = () => Boolean(process.env.OPENAI_API_KEY?.trim());
 
@@ -102,12 +107,25 @@ export function parseJsonObject(text: string): Record<string, unknown> | null {
 
 // ---- 호출 3종 --------------------------------------------------------------------
 
-/** search: Responses API + web_search. 글과, 검색 결과(소스 목록·인용)에 나온 주소(비교 키 → 검색 결과의 주소)를 돌려준다. */
+/** 주소를 사람이 읽는 글로 푼다(경로에 든 기종 이름을 이름 대조에 쓰려고). 풀 수 없으면 그대로. */
+function readableUrl(value: string): string {
+  try {
+    return decodeURIComponent(value.trim());
+  } catch {
+    return value.trim();
+  }
+}
+
+/**
+ * search: Responses API + web_search. 글과, 검색 결과(소스 목록·인용)에 나온 주소(비교 키 → 검색 결과의 주소)를 돌려준다.
+ * cited는 후보 이름을 대조할 자료다: 인용(url_citation)의 제목과 소스·인용 주소의 글. 모델이 쓴 본문은 넣지 않는다(지어낸 이름이 스스로 근거가 되지 않게).
+ */
 async function callSearch(
   card: SearchCard,
   material: Record<string, unknown>,
   signal: AbortSignal | undefined,
-): Promise<{ text: string; urls: AllowedUrls }> {
+  tally?: Tally,
+): Promise<{ text: string; urls: AllowedUrls; cited: string[] }> {
   const response = await newClient(SEARCH_TIMEOUT_MS).responses.create(
     {
       model: LLM_MODEL,
@@ -135,31 +153,44 @@ async function callSearch(
     if (key && typeof value === "string" && !urls.has(key)) urls.set(key, value.trim());
   };
   const texts: string[] = [];
+  const cited: string[] = [];
+  if (tally) {
+    tally.in += response.usage?.input_tokens ?? 0;
+    tally.out += response.usage?.output_tokens ?? 0;
+  }
   for (const output of response.output ?? []) {
+    if (output.type === "web_search_call" && tally) tally.ws += 1;
     if (output.type === "web_search_call" && output.action?.type === "search") {
-      for (const source of output.action.sources ?? []) addUrl(source.url);
+      for (const source of output.action.sources ?? []) {
+        addUrl(source.url);
+        if (typeof source.url === "string") cited.push(readableUrl(source.url));
+      }
     } else if (output.type === "message") {
       for (const content of output.content) {
         if (content.type !== "output_text") continue;
         texts.push(content.text);
         for (const note of content.annotations ?? []) {
-          if (note.type === "url_citation") addUrl(note.url);
+          if (note.type !== "url_citation") continue;
+          addUrl(note.url);
+          if (typeof note.url === "string") cited.push(readableUrl(note.url));
+          if (typeof note.title === "string" && note.title.trim() !== "") cited.push(note.title);
         }
       }
     }
   }
   const text = texts.join("\n") || (typeof response.output_text === "string" ? response.output_text : "");
-  return { text, urls };
+  return { text, urls, cited };
 }
 
 /** ask: Chat Completions JSON 모드(기존 요약 호출과 같은 방식). */
-async function callAsk(
-  card: AskCard,
-  material: Record<string, unknown>,
+async function callJson(
+  instructions: string,
+  userMessage: string,
+  timeoutMs: number,
   signal: AbortSignal | undefined,
-): Promise<string> {
+): Promise<{ text: string; finish: string | null; usage: { in: number; out: number } }> {
   // 추론을 끈다. 켜 두면 추론 토큰이 먼저 쓰여 글자 없이 끝날 수 있다. temperature는 추론이 none일 때만 둘 수 있다.
-  const completion = await newClient(ASK_TIMEOUT_MS).chat.completions.create(
+  const completion = await newClient(timeoutMs).chat.completions.create(
     {
       model: LLM_MODEL,
       max_completion_tokens: 1200,
@@ -167,13 +198,32 @@ async function callAsk(
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: askInstructions(card) },
-        { role: "user", content: materialMessage("자료를 읽고 출력 모양대로 답한다.", material) },
+        { role: "system", content: instructions },
+        { role: "user", content: userMessage },
       ],
     },
     { signal },
   );
-  return completion.choices[0]?.message?.content ?? "";
+  const choice = completion.choices[0];
+  return {
+    text: choice?.message?.content ?? "",
+    finish: choice?.finish_reason ?? null,
+    usage: { in: completion.usage?.prompt_tokens ?? 0, out: completion.usage?.completion_tokens ?? 0 },
+  };
+}
+
+async function callAsk(
+  card: AskCard,
+  material: Record<string, unknown>,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  const reply = await callJson(
+    askInstructions(card),
+    materialMessage("자료를 읽고 출력 모양대로 답한다.", material),
+    ASK_TIMEOUT_MS,
+    signal,
+  );
+  return reply.text;
 }
 
 /** vision: 기존 글자 읽기(OCR)와 같은 이미지 입력 모양. 출력은 설명 글이다. */
@@ -209,6 +259,10 @@ async function callVision(
 interface Tally {
   kept: number;
   total: number;
+  /** 로그용 사용량: 입력·출력 토큰과 웹 검색 호출 수(검색 종류만 채운다). */
+  in: number;
+  out: number;
+  ws: number;
 }
 
 const tallied = <T extends { length: number }>(tally: Tally, raw: unknown, kept: T): T => {
@@ -231,19 +285,20 @@ async function liveResponse(
 
   switch (request.kind) {
     case "model": {
-      const { text, urls } = await callSearch("model", base, signal);
+      const { text, urls, cited } = await callSearch("model", base, signal, tally);
       const raw = parseJsonObject(text)?.items;
-      const items = tallied(tally, raw, cleanItems(raw, urls));
+      // 후보 이름은 인용 제목·출처 주소나 요청 글에 나온 것만 남긴다(design.md 4.8). 대안 후보(alts)는 A3가 같은 인자를 넘겨 쓴다.
+      const items = tallied(tally, raw, cleanItems(raw, urls, undefined, [...known, ...cited]));
       return items.length ? { kind: "model", ai: "ok", items } : null;
     }
     case "alts": {
-      const { text, urls } = await callSearch("alts", { ...base, 기종: request.model }, signal);
+      const { text, urls } = await callSearch("alts", { ...base, 기종: request.model }, signal, tally);
       const raw = parseJsonObject(text)?.items;
       const items = tallied(tally, raw, cleanItems(raw, urls, request.model));
       return items.length ? { kind: "alts", ai: "ok", items } : null;
     }
     case "benefits": {
-      const { text, urls } = await callSearch("benefits", { ...base, 기종: request.model }, signal);
+      const { text, urls } = await callSearch("benefits", { ...base, 기종: request.model }, signal, tally);
       const raw = parseJsonObject(text)?.links;
       const links = tallied(tally, raw, cleanLinks(raw, urls));
       return links.length
@@ -251,7 +306,7 @@ async function liveResponse(
         : null;
     }
     case "refs": {
-      const { text, urls } = await callSearch("refs", { ...base, 기종: request.model }, signal);
+      const { text, urls } = await callSearch("refs", { ...base, 기종: request.model }, signal, tally);
       const json = parseJsonObject(text);
       const links = tallied(tally, json?.links, cleanLinks(json?.links, urls));
       if (!links.length) return null;
@@ -480,18 +535,50 @@ export async function answerResearch(
 ): Promise<ResearchOutcome> {
   if (getLlmMode() === "mock") return { body: mockResponse(request), upstream: null };
   if (!hasKey()) return { body: fallbackResponse(request, context), upstream: "nokey" };
-  const tally: Tally = { kept: 0, total: 0 };
+  const tally: Tally = { kept: 0, total: 0, in: 0, out: 0, ws: 0 };
   try {
     const body = await liveResponse(request, context, signal, tally);
-    if (body) return { body, upstream: null };
+    const usage = { in: tally.in, out: tally.out, ws: tally.ws };
+    if (body) return { body, upstream: null, usage };
     return {
       body: fallbackResponse(request, context),
       upstream: "empty",
       detail: `kept=${tally.kept}/${tally.total}`,
+      usage,
     };
   } catch (error) {
     const status = statusOf(error);
     const upstream: Upstream = status ?? (isTimeout(error, signal) ? "timeout" : "none");
-    return { body: fallbackResponse(request, context), upstream };
+    return { body: fallbackResponse(request, context), upstream, usage: { in: tally.in, out: tally.out, ws: tally.ws } };
+  }
+}
+
+// ---- 대화 턴 -------------------------------------------------------------------------
+
+/** 턴 AI 호출의 결과. upstream이 null이면 JSON을 받았다. 던지지 않는다(실패하면 서버가 기본 질문으로 이어 간다). */
+export interface TurnAiResult {
+  json: Record<string, unknown> | null;
+  upstream: Upstream | null;
+  usage: { in: number; out: number };
+}
+
+/**
+ * 대화 턴 한 번: Chat Completions JSON, 추론 끔, temperature 0, 15초(design.md 4.1).
+ * 가짜 모드면 researchMock의 고정 JSON, 키가 없거나 호출·길이 초과·JSON 실패면 upstream에 원인을 담아 돌려준다.
+ */
+export async function answerTurn(material: TurnMaterial, signal?: AbortSignal): Promise<TurnAiResult> {
+  const none = { in: 0, out: 0 };
+  if (getLlmMode() === "mock") {
+    return { json: parseJsonObject(mockTurnJson(material)), upstream: null, usage: none };
+  }
+  if (!hasKey()) return { json: null, upstream: "nokey", usage: none };
+  try {
+    const reply = await callJson(turnInstructions(), turnMessage(material), TURN_TIMEOUT_MS, signal);
+    if (reply.finish === "length") return { json: null, upstream: "empty", usage: reply.usage };
+    const json = parseJsonObject(reply.text);
+    return { json, upstream: json ? null : "empty", usage: reply.usage };
+  } catch (error) {
+    const status = statusOf(error);
+    return { json: null, upstream: status ?? (isTimeout(error, signal) ? "timeout" : "none"), usage: none };
   }
 }

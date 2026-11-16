@@ -18,6 +18,7 @@
     "test:e2e:desktop": "playwright test --project=e2e-desktop",
     "test:chatbot": "vitest run --config vitest.chatbot.config.mts tests/chatbot/questions.test.ts",
     "test:research-ai": "vitest run --config vitest.chatbot.config.mts tests/chatbot/research-ai.test.ts",
+    "test:research-turn": "vitest run --config vitest.chatbot.config.mts tests/chatbot/research-turn.test.ts",
     "test:public": "playwright test --project=public"
   },
   "dependencies": {

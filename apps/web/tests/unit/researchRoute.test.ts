@@ -98,7 +98,7 @@ const logs: string[] = [];
 const researchLogs = () => logs.filter((line) => line.startsWith("POST /api/volunteer/research"));
 
 /** web_search를 쓴 Responses API 응답 모양(검색 소스 + 글 + 인용). */
-function searchReply(json: unknown, sources: string[], cited: string[] = []) {
+function searchReply(json: unknown, sources: string[], cited: string[] = [], title = "t") {
   return {
     status: "completed",
     output: [
@@ -109,7 +109,7 @@ function searchReply(json: unknown, sources: string[], cited: string[] = []) {
           {
             type: "output_text",
             text: JSON.stringify(json),
-            annotations: cited.map((url) => ({ type: "url_citation", url, title: "t", start_index: 0, end_index: 1 })),
+            annotations: cited.map((url) => ({ type: "url_citation", url, title, start_index: 0, end_index: 1 })),
           },
         ],
       },
@@ -360,6 +360,7 @@ describe("POST /api/volunteer/research", () => {
           },
           ["https://shop.example/a"],
           ["https://cite.example/b"],
+          "소니 WH-CH720N 비교 · 인용에만 있는 모델 QX-1",
         ),
       );
       const response = await research({ requestId: id, kind: "model" }, cookie);
@@ -615,6 +616,8 @@ describe("POST /api/volunteer/research", () => {
         searchReply(
           { items: [{ name: "소니 WH-CH720N", note: "", url: "https://shop.example/a" }] },
           ["https://www.shop.example/a/?utm_source=openai"],
+          ["https://www.shop.example/a/?utm_source=openai"],
+          "소니 WH-CH720N 상세",
         ),
       );
       const json = await (await research({ requestId: id, kind: "model" }, cookie)).json();

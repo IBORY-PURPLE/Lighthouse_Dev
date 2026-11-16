@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { getRequestStore } from "@/lib/requestStore";
+import { getResearchStore } from "@/lib/researchStore";
 import { runVolunteerRoute, succeed } from "@/lib/volunteerApi";
 import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
 
@@ -7,8 +8,24 @@ import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** 6시간 넘게 활동이 없는 대화를 대기열로 돌리는 정리(research_sweep). 인스턴스당 1분에 1번만 부른다. */
+const SWEEP_INTERVAL_MS = 60_000;
+let lastSweepAt = 0;
+
+async function sweepIdleResearch(): Promise<void> {
+  const now = Date.now();
+  if (now - lastSweepAt < SWEEP_INTERVAL_MS) return;
+  lastSweepAt = now;
+  try {
+    await getResearchStore().sweep();
+  } catch {
+    // research 표가 아직 없거나 DB가 느려도 목록은 보여 준다. 다음 분에 다시 시도한다.
+  }
+}
+
 export function GET(request: NextRequest) {
   return runVolunteerRoute(request, "queue", async ({ volunteerId }) => {
+    await sweepIdleResearch();
     const store = getRequestStore();
     const data = await store.listQueue(volunteerId);
     // 목록을 읽다가 메모리로 떨어질 수 있으므로 읽은 뒤에 본다.

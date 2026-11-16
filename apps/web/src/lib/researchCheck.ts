@@ -96,6 +96,58 @@ export function unknownModelTokens(text: string, material: readonly string[]): s
   return modelTokens(text).filter((token) => !known.includes(compact(token)));
 }
 
+// ---- 값·이름이 자료에 근거하는지 ---------------------------------------------------------
+// AI가 낸 칸 값(봉사자 말 + evidence)과 검색 후보 이름(인용 제목·출처 주소 + 요청 글)을 같은 방법으로 자료와 대조한다.
+// 낱말(핵심 토큰) 단위로 보고, 절반 이상이 자료에 있어야 한다. 말투가 바뀌어도(아프다고 → 아픔) 어간이 남으면 같은 말로 본다.
+
+const TOKEN_SPLIT = /[\s\p{P}\p{S}]+/u;
+const TOKEN_PARTICLE = /(?:이랑|에서|으로|랑|이|가|은|는|을|를|도|요|에|의|로|과|와)$/;
+const squash = (value: string) => value.normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+
+/** 핵심 토큰: 정규화(NFKC·소문자)해 낱말로 나누고 끝 조사를 뗀 뒤 두 글자 이상인 것. */
+export function coreTokens(value: string): string[] {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(TOKEN_SPLIT)
+    .map((word) => {
+      const stripped = word.replace(TOKEN_PARTICLE, "");
+      return [...stripped].length >= 2 ? stripped : word;
+    })
+    .filter((word) => [...word].length >= 2);
+}
+
+function tokenFound(token: string, haystack: readonly string[]): boolean {
+  if (haystack.some((part) => part.includes(token))) return true;
+  const chars = [...token];
+  if (chars.length < 3) return false;
+  const stem = chars.slice(0, -1).join("");
+  return haystack.some((part) => part.includes(stem));
+}
+
+/**
+ * value의 핵심 토큰 가운데 min 이상의 비율이 haystack 글들 안에 있나. 토큰이 하나도 없으면(한 글자 낱말뿐) 값 전체가 들어 있어야 한다.
+ * 값이 비어 있으면 false.
+ */
+export function tokensCovered(value: string, haystack: readonly string[], min = 0.5): boolean {
+  const parts = haystack.map(squash).filter((part) => part !== "");
+  const tokens = coreTokens(value);
+  if (tokens.length === 0) {
+    const whole = squash(value);
+    return whole !== "" && parts.some((part) => part.includes(whole));
+  }
+  const found = tokens.filter((token) => tokenFound(token, parts)).length;
+  return found / tokens.length >= min;
+}
+
+/**
+ * 검색 후보 이름이 자료(웹 검색 인용 제목·출처 주소와 요청 글)에 근거하나. 기종 모양 토큰(WH-CH720N)은 모두 자료에 있어야 하고,
+ * 그 밖의 낱말은 절반 이상이 자료에 있어야 한다. 모델이 지어낸 이름이나 인용에 없는 제품은 false.
+ */
+export function nameGrounded(name: string, material: readonly string[]): boolean {
+  return unknownModelTokens(name, material).length === 0 && tokensCovered(name, material);
+}
+
 const hasUnknownModel = (text: string, material: readonly string[] | undefined) =>
   material !== undefined && unknownModelTokens(text, material).length > 0;
 
@@ -160,8 +212,9 @@ export function countObjects(raw: unknown): number {
  * 화면에 보내는 주소는 검색 결과에 있던 주소다. 이미 앞 후보가 쓴 주소(분류 페이지 하나로 몰린 경우)는
  * 그 기종의 페이지가 아니므로 첫 후보만 주소를 갖고 나머지는 주소 없이(url null) 남긴다.
  * exclude는 후보에서 뺄 이름(대안 후보에서 이미 정한 기종).
+ * material이 있으면 이름이 그 자료(인용 제목·출처 주소·요청 글)에 근거하는 후보만 남긴다(nameGrounded).
  */
-export function cleanItems(raw: unknown, allowed: AllowedUrls, exclude?: string): ResearchItem[] {
+export function cleanItems(raw: unknown, allowed: AllowedUrls, exclude?: string, material?: readonly string[]): ResearchItem[] {
   const seen = new Set<string>(exclude ? [exclude.trim().toLowerCase()] : []);
   const usedUrls = new Set<string>();
   const items: ResearchItem[] = [];
@@ -170,6 +223,7 @@ export function cleanItems(raw: unknown, allowed: AllowedUrls, exclude?: string)
     const name = typeof entry.name === "string" ? oneLine(entry.name) : "";
     const key = typeof entry.url === "string" ? urlKey(entry.url) : null;
     if (name.length < 2 || [...name].length > RESEARCH_LIMITS.nameMax || hasForbidden(name)) continue;
+    if (material !== undefined && !nameGrounded(name, material)) continue;
     const source = key === null ? undefined : allowed.get(key);
     if (key === null || source === undefined || seen.has(name.toLowerCase())) continue;
     seen.add(name.toLowerCase());
