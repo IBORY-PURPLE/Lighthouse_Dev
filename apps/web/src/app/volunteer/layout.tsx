@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
+import "./volunteer.css";
 
 export const metadata: Metadata = {
-  title: "시연: 봉사자 화면 - LightHouse",
+  title: "봉사자 - LightHouse",
 };
 
 export default function VolunteerLayout({

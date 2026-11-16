@@ -166,7 +166,7 @@ test.describe("매칭 흐름", () => {
       item: "헤드셋",
       raw: PASS_SENTENCE,
     });
-    await expect(page).toHaveURL(/\/volunteer$/);
+    await expect(page).toHaveURL(/\/volunteer\/demo$/);
     expect(JSON.parse((await storedMatch(page)) ?? "null")).toEqual(matchBody);
   });
 
@@ -403,7 +403,7 @@ test.describe("봉사자 화면(시연)", () => {
     await matchThroughUi(page);
     await handoffButton(page).click();
 
-    await expect(page).toHaveURL(/\/volunteer$/);
+    await expect(page).toHaveURL(/\/volunteer\/demo$/);
     expect(context.pages()).toHaveLength(1);
     await expect(heading(page)).toBeFocused();
     await expect(status(page)).toHaveText(
@@ -448,7 +448,7 @@ test.describe("봉사자 화면(시연)", () => {
   });
 
   test("저장값 없이 열면 매칭 정보 없음과 이용자 화면 링크", async ({ page }) => {
-    await page.goto("/volunteer");
+    await page.goto("/volunteer/demo");
     await expect(heading(page)).toBeFocused();
     await expect(page).toHaveTitle(/시연/);
     await expect(status(page)).toHaveText("매칭 정보가 없습니다.");
@@ -469,7 +469,7 @@ test.describe("봉사자 화면(시연)", () => {
     await page.addInitScript(() =>
       sessionStorage.setItem("lh.match.v1", "{broken"),
     );
-    await page.goto("/volunteer");
+    await page.goto("/volunteer/demo");
     await expect(status(page)).toHaveText("매칭 정보가 없습니다.");
   });
 });
