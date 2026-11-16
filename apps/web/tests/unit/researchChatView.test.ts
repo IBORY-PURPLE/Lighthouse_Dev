@@ -8,6 +8,7 @@ import {
   chipsOf,
   currentSlot,
   failureText,
+  holdsRefsQuestion,
   imageSearchUrl,
   missingText,
   needsBenefitsSearch,
@@ -245,5 +246,31 @@ describe("mergeView: GET ?after가 주지 않는 사진 썸네일을 지킨다",
     const merged = mergeView(prev, normalizeView({ sessionId: "s", lastSeq: 3, messages: [question(3, "alts")] }));
     expect(merged.messages.map((message) => message.seq)).toEqual([1, 3]);
     expect(merged.lastSeq).toBe(3);
+  });
+});
+
+describe("질문 7 보류(holdsRefsQuestion)", () => {
+  const filled = { value: "카드 할인", status: "filled" as const, by: "volunteer" as const };
+  const benefitsCard: ChatMessage = { seq: 5, role: "ai", tag: "search", slot: "benefits", body: { kind: "benefits", items: [] } };
+  const idle = { search: null };
+
+  it("혜택 칸은 찼는데 카드가 없고 혜택 검색이 끝난 적 없으면(다른 검색 뒤에서 기다리는 중·새로 고친 직후) 보류한다", () => {
+    const view = { slots: { benefits: filled }, messages: [question(1, "refs")], pending: idle };
+    expect(holdsRefsQuestion(view, "model", false)).toBe(true);
+    expect(holdsRefsQuestion(view, null, false)).toBe(true);
+  });
+
+  it("혜택 검색을 부른 중이거나 서버가 혜택 검색 진행을 알리면 보류한다", () => {
+    const empty = { slots: {}, messages: [], pending: idle };
+    expect(holdsRefsQuestion(empty, "benefits", false)).toBe(true);
+    expect(holdsRefsQuestion({ ...empty, pending: { search: { kind: "benefits" } } }, null, true)).toBe(true);
+    expect(holdsRefsQuestion({ ...empty, pending: { search: { kind: "model" } } }, null, false)).toBe(false);
+  });
+
+  it("카드가 왔거나, 혜택 검색이 한 번 끝났거나(실패 포함), 혜택 칸이 비었으면 보류하지 않는다", () => {
+    expect(holdsRefsQuestion({ slots: { benefits: filled }, messages: [benefitsCard], pending: idle }, null, false)).toBe(false);
+    expect(holdsRefsQuestion({ slots: { benefits: filled }, messages: [], pending: idle }, null, true)).toBe(false);
+    expect(holdsRefsQuestion({ slots: {}, messages: [], pending: idle }, "model", false)).toBe(false);
+    expect(holdsRefsQuestion(null, null, false)).toBe(false);
   });
 });

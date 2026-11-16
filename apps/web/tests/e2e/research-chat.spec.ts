@@ -341,6 +341,80 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(again.nth(2)).toHaveAttribute("aria-pressed", "false");
   });
 
+  test("기종 검색이 끝나기 전에 새로 고쳐 혜택 칸만 찬 채 카드가 없어도, 읽은 직후 혜택 검색을 불러 카드가 나온다", async ({ page }) => {
+    test.setTimeout(90_000);
+    // 기종·혜택 검색 호출을 처음 한 번씩만 네트워크 단계에서 끊어(서버는 못 받음) "혜택 칸은 찼는데 혜택 카드가 없는" 서버 상태를 만든다.
+    const cut = new Set<string>();
+    await page.route("**/research/search", async (route) => {
+      const kind = String((route.request().postDataJSON() as { kind?: string } | null)?.kind);
+      if ((kind === "model" || kind === "benefits") && !cut.has(kind)) {
+        cut.add(kind);
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    const calls = await begin(page);
+    await sendText(page, "소니 헤드셋 샀어요. 카드 할인 받고 무료 배송이었어요");
+    await expect.poll(() => cut.size, { timeout: 15_000 }).toBe(2);
+    await expect(page.getByRole("list", { name: "찾은 혜택" })).toHaveCount(0);
+
+    // 새로 고치면 처음 읽기만으로 혜택 검색을 부른다(턴·다른 검색 없이).
+    const before = calls.length;
+    await page.reload();
+    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    const after = calls.slice(before).filter((call) => call.method === "POST");
+    expect(after.map((call) => `${call.path}:${String(call.body?.kind ?? "")}`)).toEqual(["/research/search:benefits"]);
+  });
+
+  test("혜택 카드가 없는 채 새로 고치면 혜택 검색이 끝날 때까지 질문 7을 그리지 않고, 카드가 온 뒤 카드 아래에 나온다", async ({ page }) => {
+    test.setTimeout(120_000);
+    // 처음 혜택 검색 호출은 끊고(서버는 못 받음), 새로 고친 뒤의 호출은 붙들었다 놓는다.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let benefitsCalls = 0;
+    await page.route("**/research/search", async (route) => {
+      const kind = (route.request().postDataJSON() as { kind?: string } | null)?.kind;
+      if (kind !== "benefits") {
+        await route.continue();
+        return;
+      }
+      benefitsCalls += 1;
+      if (benefitsCalls === 1) {
+        await route.abort("failed");
+        return;
+      }
+      await gate;
+      await route.continue();
+    });
+    await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+    await answerPros(page);
+    await uploadPhoto(page);
+    await pickAlt(page);
+    await answerReason(page);
+    await sendText(page, "카드 할인 받고 무료 배송이었어요");
+    await expect(page.getByText("찾지 못했어요. 쇼핑몰에서 직접 찾아도 돼요.")).toBeVisible();
+    await expect(log(page).getByText(REFS_QUESTION)).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByTestId("thinking")).toBeVisible();
+    await page.waitForTimeout(800);
+    await expect(log(page).getByText(REFS_QUESTION)).toHaveCount(0);
+    release();
+    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    const refs = log(page).getByText(REFS_QUESTION);
+    await expect(refs).toBeVisible();
+    // 질문 7은 마지막 혜택 카드보다 아래에 있다.
+    const lastCard = await page.getByRole("list", { name: "찾은 혜택" }).last().boundingBox();
+    const refsBox = await refs.boundingBox();
+    expect(refsBox!.y).toBeGreaterThan(lastCard!.y);
+    expect(benefitsCalls).toBe(2);
+  });
+
   test("혜택 검색이 실패해도 안내하고 질문 7이 제자리에 나오며 다음 턴이 막히지 않는다", async ({ page }) => {
     test.setTimeout(120_000);
     // 서버의 한도(CAP) 응답은 환경 변수로 0에 맞출 수 없어(양의 정수만 받는다) 혜택 검색 호출만 네트워크 단계에서 끊는다.

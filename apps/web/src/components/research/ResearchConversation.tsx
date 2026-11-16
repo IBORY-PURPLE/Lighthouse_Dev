@@ -22,6 +22,7 @@ import {
   badgeOf,
   currentSlot,
   failureText,
+  holdsRefsQuestion,
   needsBenefitsSearch,
   planFold,
   reasonsOf,
@@ -144,6 +145,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const [reviewReasons, setReviewReasons] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  /** 혜택 검색이 한 번 끝났다(성공·실패 모두). 카드가 안 와도 질문 7을 계속 보류하지 않으려는 표시. 새 혜택 검색이 시작되면 false. */
+  const [benefitsEnded, setBenefitsEnded] = useState(false);
 
   const alive = useRef(true);
   const viewRef = useRef<ResearchView | null>(null);
@@ -159,6 +162,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const linkQueue = useRef<string[]>([]);
   const afterTurn = useRef<() => void>(() => undefined);
   const drainRef = useRef<() => Promise<void>>(async () => undefined);
+  /** 혜택 칸은 찼는데 혜택 카드가 없으면 혜택 검색을 대기열에 넣는다(처음 읽기·각 검색이 끝날 때·턴 뒤). */
+  const ensureBenefitsRef = useRef<() => void>(() => undefined);
   const panelToggleRef = useRef<HTMLButtonElement>(null);
   const focusSend = useRef(false);
   /** 맨 아래를 보던 중인가. 스크롤을 직접 올리면 false가 되고, 새 말풍선이 붙어 맨 아래로 가면 true가 된다. */
@@ -278,14 +283,22 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         searching.current = true;
         runningSearch.current = pending.kind;
         setThinking({ kind: pending.kind, startedAt: Date.now() });
-        await pollSearch();
+        const finished = await pollSearch();
         searching.current = false;
         runningSearch.current = null;
         if (!cancelled) {
           setThinking(null);
-          // 기다리는 동안 부르기로 한 검색이 있으면 이어서 부른다.
-          if (searchQueue.current.length > 0) void drainRef.current();
+          if (pending.kind === "benefits") {
+            benefitsAsked.current = true;
+            if (!finished) setBenefitsEnded(true);
+          }
         }
+      }
+      if (!cancelled) {
+        // 새로 고치기 전에 끝나지 않은 일: 혜택 칸은 찼는데 카드가 없으면 혜택 검색을 부른다.
+        ensureBenefitsRef.current();
+        // 기다리는 동안 부르기로 한 검색이 있으면 이어서 부른다.
+        if (searchQueue.current.length > 0) void drainRef.current();
       }
     })();
     return () => {
@@ -432,7 +445,10 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       const current = viewRef.current;
       if (!current) return;
       runningSearch.current = kind;
-      if (kind === "benefits") benefitsAsked.current = true;
+      if (kind === "benefits") {
+        benefitsAsked.current = true;
+        setBenefitsEnded(false);
+      }
       setThinking({ kind, startedAt: Date.now() });
       let outcome = await postSearch(requestId, { sessionId: current.sessionId, kind });
       if (outcome.kind === "accepted") {
@@ -442,6 +458,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       runningSearch.current = null;
       if (!alive.current) return;
       setThinking(null);
+      if (kind === "benefits") setBenefitsEnded(true);
       if (outcome.kind === "unauthorized") {
         toList();
         return;
@@ -456,6 +473,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         if (kind === "benefits") benefitsAsked.current = false;
         if (!leftProgress(outcome)) warn(failureText("search", outcome.status, outcome.error, outcome.body, COPY.searchFailed));
       }
+      // 이 검색이 끝난 뒤 혜택 칸은 찼는데 혜택 카드가 없으면(기종 검색 중 새로 고친 경우 등) 혜택 검색을 이어서 부른다.
+      if (kind !== "benefits") ensureBenefitsRef.current();
     },
     [requestId, pollSearch, toList, warn, updateView, leftProgress],
   );
@@ -486,6 +505,15 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     },
     [drainSearches],
   );
+
+  const ensureBenefits = useCallback(() => {
+    const now = viewRef.current;
+    if (now && !benefitsAsked.current && needsBenefitsSearch(now)) runSearch("benefits");
+  }, [runSearch]);
+
+  useEffect(() => {
+    ensureBenefitsRef.current = ensureBenefits;
+  }, [ensureBenefits]);
 
   /** 턴 한 번(turnBusy를 비운 쪽이 부른다). 보낸 글은 먼저 보여 주고, 실패하면 입력 글을 되돌려 놓는다. 성공했으면 true. */
   const runTurn = useCallback(
@@ -532,8 +560,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         const search = outcome.data.followUp?.search;
         if (search) runSearch(search);
         // followUp은 하나만 온다. 같은 턴에 혜택 칸도 정해졌다면(기종·대안 질문과 함께 앞질러 답함) 그 검색도 이어서 부른다.
-        const now = viewRef.current;
-        if (now && !benefitsAsked.current && needsBenefitsSearch(now)) runSearch("benefits");
+        ensureBenefits();
         if (!search) restoreFocus();
         return true;
       }
@@ -559,7 +586,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       restoreFocus();
       return false;
     },
-    [requestId, say, warn, applyTurn, runSearch, reload, restoreFocus, toList, leftProgress],
+    [requestId, say, warn, applyTurn, runSearch, ensureBenefits, reload, restoreFocus, toList, leftProgress],
   );
 
   /** 턴을 보낸다. 다른 턴이 처리 중이면 보내지 않고 false를 돌려준다. 끝나면 기다리던 [확인했어요]를 이어서 보낸다. */
@@ -818,7 +845,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   );
 
   // 질문 7은 혜택 카드 뒤에 그린다(검색 중에는 보류). 화면이 보이는 순서가 이 목록이다.
-  const searchingBenefits = thinking?.kind === "benefits" || view?.pending.search?.kind === "benefits";
+  const searchingBenefits = holdsRefsQuestion(view, thinking?.kind ?? null, benefitsEnded);
   const shown = useMemo(() => (view ? arrangeMessages(view.messages, searchingBenefits) : []), [view, searchingBenefits]);
 
   const fold = useMemo(
