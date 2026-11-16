@@ -67,7 +67,7 @@ describe("GET /api/health", () => {
     expect(response.status).toBe(200);
     expect(JSON.parse(text)).toEqual({
       ok: true,
-      groqKeyConfigured: true,
+      llmKeyConfigured: true,
       llmMode: "live",
       store: "memory",
       extractEngine: "openai",
@@ -77,13 +77,14 @@ describe("GET /api/health", () => {
   });
 
   it("키가 없으면 false, LLM_MODE=mock이면 mock이다", async () => {
-    vi.stubEnv("GROQ_API_KEY", "");
+    // 옛 GROQ_API_KEY가 남아 있어도 챗봇·요약 키로 세지 않는다.
+    vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("LLM_MODE", "mock");
     vi.stubEnv("EXTRACT_MODE", "mock");
     const response = health(healthRequest(hashAccessCode("right-code")));
     expect(await response.json()).toEqual({
       ok: true,
-      groqKeyConfigured: false,
+      llmKeyConfigured: false,
       llmMode: "mock",
       store: "memory",
       extractEngine: "mock",

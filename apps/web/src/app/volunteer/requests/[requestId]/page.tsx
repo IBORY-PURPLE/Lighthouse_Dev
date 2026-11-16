@@ -1,4 +1,4 @@
-import { RequestDetail } from "@/components/RequestDetail";
+import { ResearchChat } from "@/components/ResearchChat";
 
 export default async function VolunteerRequestPage({
   params,
@@ -6,5 +6,5 @@ export default async function VolunteerRequestPage({
   params: Promise<{ requestId: string }>;
 }) {
   const { requestId } = await params;
-  return <RequestDetail requestId={requestId} />;
+  return <ResearchChat requestId={requestId} />;
 }
