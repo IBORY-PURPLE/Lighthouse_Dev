@@ -46,6 +46,8 @@ create table public.research_turns (
   client_turn_id text not null check (char_length(client_turn_id) between 1 and 100),
   first_seq int,
   last_seq int,
+  -- begin이 사용량(요청당·하루 AI 호출)을 올린 자리인가. apply가 stale로 끝나면 이 값으로 되돌린다.
+  counted boolean not null default false,
   -- null이면 처리 중 자리. 같은 clientTurnId가 다시 오면 202.
   response jsonb,
   created_at timestamptz not null default now(),
@@ -497,7 +499,8 @@ begin
     where u.request_id = p_request_id;
 
   if p_kind = 'turn' then
-    insert into public.research_turns (request_id, client_turn_id) values (p_request_id, p_client_turn_id);
+    insert into public.research_turns (request_id, client_turn_id, counted)
+      values (p_request_id, p_client_turn_id, true);
   elsif p_kind = 'search' and p_cache_key is not null then
     update public.research_sessions as s
       set search_cache = s.search_cache || jsonb_build_object(p_cache_key,
@@ -557,6 +560,13 @@ begin
   end if;
   if p_base_version is not null and p_base_version <> v_s.version then
     if v_has_turn then
+      -- stale은 세지 않는다: begin이 올린 사용량을 되돌리고(요청당 → 하루 순서) 처리 중 자리를 지운다.
+      if v_turn.counted then
+        update public.research_usage as u set turns = greatest(u.turns - 1, 0), updated_at = now()
+          where u.request_id = p_request_id;
+        update public.ai_usage_daily as d set ai_calls = greatest(d.ai_calls - 1, 0), updated_at = now()
+          where d.day = (v_turn.created_at at time zone 'Asia/Seoul')::date;
+      end if;
       delete from public.research_turns as t
         where t.request_id = p_request_id and t.client_turn_id = p_client_turn_id;
     end if;

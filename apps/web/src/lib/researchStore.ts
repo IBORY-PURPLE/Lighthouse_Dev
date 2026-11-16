@@ -191,6 +191,8 @@ interface MemoryPhoto extends ResearchPhoto {
 interface MemoryTurn {
   clientTurnId: string;
   response: TurnResponse | null;
+  /** begin이 사용량을 올린 자리인가(그날 날짜 포함). apply가 stale이면 되돌린다. */
+  countedDay: string | null;
 }
 
 interface MemorySession {
@@ -459,7 +461,11 @@ export function createMemoryResearchStore(
         (input.kind === "review" && used.reviews >= caps.reviews);
       const capped = (cap: "request" | "daily"): BeginOutcome => {
         if (input.kind === "turn" && input.clientTurnId) {
-          session.turns.set(input.clientTurnId, { clientTurnId: input.clientTurnId, response: null });
+          session.turns.set(input.clientTurnId, {
+            clientTurnId: input.clientTurnId,
+            response: null,
+            countedDay: null,
+          });
           return { outcome: "ok", ai: "capped", cap, version: session.version, session: snapshot() };
         }
         return { outcome: "capped", cap };
@@ -473,7 +479,11 @@ export function createMemoryResearchStore(
       if (input.kind === "photo") used.photoUploads += 1;
       if (input.kind === "review") used.reviews += 1;
       if (input.kind === "turn" && input.clientTurnId) {
-        session.turns.set(input.clientTurnId, { clientTurnId: input.clientTurnId, response: null });
+        session.turns.set(input.clientTurnId, {
+          clientTurnId: input.clientTurnId,
+          response: null,
+          countedDay: kstDate(now()),
+        });
       } else if (input.kind === "search" && input.cacheKey) {
         session.searchCache[input.cacheKey] = { state: "pending", at: now() };
       }
@@ -486,7 +496,16 @@ export function createMemoryResearchStore(
       const turn = session.turns.get(input.clientTurnId);
       if (turn?.response) return { outcome: "duplicate", response: clone(turn.response) };
       if (input.baseVersion !== null && input.baseVersion !== session.version) {
-        if (turn) session.turns.delete(input.clientTurnId);
+        if (turn) {
+          // stale은 세지 않는다: begin이 올린 사용량을 되돌리고 처리 중 자리를 지운다.
+          if (turn.countedDay) {
+            const used = usageOf(input.requestId);
+            used.turns = Math.max(used.turns - 1, 0);
+            const row = daily.get(turn.countedDay);
+            if (row) row.aiCalls = Math.max(row.aiCalls - 1, 0);
+          }
+          session.turns.delete(input.clientTurnId);
+        }
         return { outcome: "stale", version: session.version };
       }
       const patched = applyPatch(session, input.patch);
@@ -512,7 +531,11 @@ export function createMemoryResearchStore(
         session.pending = after.pending;
       }
       const response = turnResponse(session, inserted, chosen?.action ?? null);
-      session.turns.set(input.clientTurnId, { clientTurnId: input.clientTurnId, response: clone(response) });
+      session.turns.set(input.clientTurnId, {
+        clientTurnId: input.clientTurnId,
+        response: clone(response),
+        countedDay: turn?.countedDay ?? null,
+      });
       return { outcome: "ok", response };
     },
     async addMessage(input) {

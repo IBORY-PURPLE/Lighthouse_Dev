@@ -161,6 +161,16 @@ describe("메모리 begin·apply", () => {
     expect((await research.begin({ ...r.actor, kind: "turn", baseVersion: 2, clientTurnId: "race" })).outcome).toBe("ok");
   });
 
+  it("begin 뒤 apply가 stale이면 begin이 올린 사용량을 되돌린다", async () => {
+    const r = await opened(newVol());
+    const caps = { turns: 1, searches: 12, photoUploads: 6, reviews: 3, dailySearches: 60, dailyAi: 1 };
+    expect(await research.begin({ ...r.actor, kind: "turn", baseVersion: 0, clientTurnId: "race", caps })).toMatchObject({ ai: "ok" });
+    await research.apply({ ...r.actor, clientTurnId: "other", baseVersion: 0, patch: { purchase: "bought" }, messages: [], next: [] });
+    expect(await research.apply({ ...r.actor, clientTurnId: "race", baseVersion: 0, messages: [], next: [] })).toMatchObject({ outcome: "stale" });
+    // 요청당(1)·하루(1) 상한이 모두 1이어도, 되돌렸으므로 같은 턴을 다시 시도할 수 있다.
+    expect(await research.begin({ ...r.actor, kind: "turn", baseVersion: 1, clientTurnId: "race", caps })).toMatchObject({ ai: "ok" });
+  });
+
   it("photo 칸 patch와 빈 값 채움은 bad_patch다", async () => {
     const r = await opened(newVol());
     const apply = (clientTurnId: string, slots: Record<string, SlotState>) =>

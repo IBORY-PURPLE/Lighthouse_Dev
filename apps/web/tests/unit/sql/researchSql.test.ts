@@ -175,12 +175,13 @@ describe("권한과 구조", () => {
   });
 
   it("research_ 함수는 anon·authenticated가 못 부르고 service_role만 부른다", async () => {
-    const rows = await db.query<{ name: string; anon: boolean; auth: boolean; svc: boolean; pub: boolean }>(
+    const rows = await db.query<{ name: string; anon: boolean; auth: boolean; svc: boolean; pub: boolean; definer: boolean; cfg: string | null }>(
       `select p.oid::regprocedure::text as name,
               has_function_privilege('anon', p.oid, 'execute') as anon,
               has_function_privilege('authenticated', p.oid, 'execute') as auth,
               has_function_privilege('service_role', p.oid, 'execute') as svc,
-              coalesce((select bool_or(a.grantee = 0) from aclexplode(p.proacl) a), false) as pub
+              coalesce((select bool_or(a.grantee = 0) from aclexplode(p.proacl) a), false) as pub,
+              p.prosecdef as definer, array_to_string(p.proconfig, ',') as cfg
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname like 'research\\_%'`,
     );
@@ -191,7 +192,9 @@ describe("권한과 구조", () => {
     }
     expect(rows.rows.length).toBeGreaterThanOrEqual(15);
     for (const row of rows.rows) {
-      expect(row, row.name).toMatchObject({ anon: false, auth: false, svc: true, pub: false });
+      expect(row, row.name).toMatchObject({ anon: false, auth: false, svc: true, pub: false, definer: false });
+      // security invoker(prosecdef false)이고 search_path가 빈 값이다.
+      expect(row.cfg, row.name).toMatch(/search_path=""/);
     }
     // 정책 이름이 아니라 실제 권한: anon으로 바꿔 부르면 거부된다.
     await db.exec("set role anon");
@@ -364,7 +367,12 @@ describe("begin·apply", () => {
     // begin 뒤에 다른 요청이 version을 올린 경우
     expect(await begin(r, "turn", { base: 1, turn: "race" })).toMatchObject({ outcome: "ok" });
     await apply(r, "other", 1, { slots: { model: slot("720N") } }, [], []);
+    const usageBefore = await one<{ turns: number }>("select turns from public.research_usage where request_id = $1", [r.id]);
+    const dailyBefore = await one<{ ai_calls: number }>("select ai_calls from public.ai_usage_daily");
     expect(await apply(r, "race", 1, null, [], [])).toMatchObject({ outcome: "stale", version: 2 });
+    // begin이 올린 사용량(요청당·하루)은 stale이 되면 되돌린다.
+    expect((await one<{ turns: number }>("select turns from public.research_usage where request_id = $1", [r.id])).turns).toBe(usageBefore.turns - 1);
+    expect((await one<{ ai_calls: number }>("select ai_calls from public.ai_usage_daily")).ai_calls).toBe(dailyBefore.ai_calls - 1);
     expect(await begin(r, "turn", { base: 2, turn: "race" })).toMatchObject({ outcome: "ok" });
   });
 
