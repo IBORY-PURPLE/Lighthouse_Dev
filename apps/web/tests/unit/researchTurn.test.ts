@@ -90,6 +90,21 @@ describe("isQuestionLike", () => {
       expect(isQuestionLike(line), line).toBe(false);
     }
   });
+  it("'나요'·'가요'로 끝나는 평서문(오래가요·잘 나요·들어가요)은 묻는 말이 아니다", () => {
+    for (const line of ["배터리가 오래가요", "소리가 잘 나요", "가방에 쏙 들어가요", "티가 안 나요", "음질 차이가 나요", "손이 자주 가요"]) {
+      expect(isQuestionLike(line), line).toBe(false);
+      expect(isQuestionLike(line, true), line).toBe(false);
+    }
+    // 의문 어미는 그대로 묻는 말이다.
+    for (const line of ["좋은가요", "뭔가요", "큰가요", "되나요", "재고 있어", "가격 얼마야", "어디서 사요"]) {
+      expect(isQuestionLike(line), line).toBe(true);
+    }
+  });
+  it("AI가 읽은 뒤에는 물음표와 부탁형만 정규식으로 본다(나머지는 AI의 ask_back을 따른다)", () => {
+    expect(isQuestionLike("재고 있나요", true)).toBe(false);
+    expect(isQuestionLike("어디서 찾아요?", true)).toBe(true);
+    expect(isQuestionLike("찾는 방법 알려줘", true)).toBe(true);
+  });
 });
 
 describe("validateAiTurn", () => {
@@ -367,7 +382,7 @@ describe("질문 순서", () => {
     expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "photo" });
   });
 
-  it("AI가 먼저 꺼낸 주제의 칸을 고르면 그 칸을 먼저 묻는다(A21)", async () => {
+  it("앞선 필수 칸(장점·사진)이 남아 있으면 AI가 고른 뒤 칸보다 그 칸을 먼저 묻는다(질문 번호 순서가 기본)", async () => {
     const h = await harness();
     await h.step({ type: "quick", replyId: "purchase.bought" });
     const result = await h.step(say("WH-CH720N이요"), {
@@ -375,8 +390,36 @@ describe("질문 순서", () => {
       fills: [fill("model", "WH-CH720N", "WH-CH720N이요")],
       next: { action: "ask_slot", slot: "altReason", text: "WH-CH720N을 고른 이유가 뭐예요?" },
     });
-    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "altReason", ai: "ok" });
-    expect(bodyText(result.messages.at(-1)!)).toBe("WH-CH720N을 고른 이유가 뭐예요?");
+    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "pros", ai: "none" });
+  });
+
+  it("구매함에서 장점까지 채워도 AI가 뒤 칸을 골라도 사진(필수)이 먼저다(E3)", async () => {
+    const h = await harness();
+    const result = await h.step(say("WH-CH720N 샀어요. 소리가 잘 나요"), {
+      intent: "reply",
+      fills: [fill("model", "WH-CH720N", "WH-CH720N 샀어요"), fill("pros", "소리가 잘 나요")],
+      purchase: { value: "bought", evidence: "WH-CH720N 샀어요" },
+      next: { action: "ask_slot", slot: "altReason", text: "WH-CH720N을 고른 이유가 뭐예요?" },
+    });
+    expect(result.view.slots.pros).toMatchObject({ value: "소리가 잘 나요", by: "ai" });
+    expect(result.messages.some((message) => message.body.kind === "guide")).toBe(false);
+    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "photo" });
+  });
+
+  it("앞선 필수 칸이 모두 찼으면 봉사자가 꺼낸 주제로 AI가 고른 칸이 먼저다(A21)", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    const result = await h.step(say("WH-CH520이고 가벼워서 샀고 무게가 맘에 들어요. 블로그 글도 봤어요"), {
+      intent: "reply",
+      fills: [
+        fill("model", "WH-CH520", "WH-CH520이고"),
+        fill("pros", "가벼워요", "가벼워서"),
+        fill("altReason", "무게가 맘에 들어요", "무게가 맘에 들어요"),
+      ],
+      next: { action: "ask_slot", slot: "refs", text: "봤다는 블로그 글을 알려 주세요." },
+    });
+    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "refs", ai: "ok" });
+    expect(bodyText(result.messages.at(-1)!)).toBe("봤다는 블로그 글을 알려 주세요.");
   });
 
   it("AI 질문 글이 검사를 못 넘으면 서버 질문을 쓴다", async () => {
@@ -547,12 +590,13 @@ describe("대체 동작(AI 없음)", () => {
     await h.step({ type: "skip", slot: "alts" });
     await h.step(say("무게가 맘에 들어요"), replyAi(fill("altReason", "무게가 맘에 들어요")));
     await h.step({ type: "skip", slot: "benefits" });
-    // 마지막 질문(참고 글)에 AI 없이 답하면 넣을지 묻고, 그 확인이 남은 채 다른 말을 하면 리뷰 제안 대신 재촉한다.
+    // 마지막 질문(참고 글)에 AI 없이 답하면 넣을지 묻고, 그 확인이 남은 채 글이 아닌 입력이 오면 리뷰 제안 대신 재촉한다.
     await h.step(say("블로그 글 읽었어요"), fallback);
-    const result = await h.step(say("그리고요"), fallback);
+    const result = await h.step({ type: "skip", slot: "benefits" });
     expect(result.view.pending.confirmFill).toBeDefined();
     expect(result.messages.at(-1)).toMatchObject({ tag: "notice" });
-    expect(bodyText(result.messages.at(-1)!)).toBe(text.PENDING_NOTICE);
+    // 넣을 칸과 값을 함께 보여 준다.
+    expect(bodyText(result.messages.at(-1)!)).toBe(`${text.PENDING_NOTICE} 참고 글 칸에 “블로그 글 읽었어요”라고 적어도 될까요?`);
     expect(result.chosen).not.toBe("propose_review");
   });
 
@@ -672,5 +716,155 @@ describe("건너뛰기·칩·고치기·링크", () => {
     for (const message of result.view.messages) {
       expect(Buffer.byteLength(JSON.stringify(message.body), "utf8")).toBeLessThanOrEqual(8192);
     }
+  });
+});
+
+describe("A2 독립 리뷰 지적 반영", () => {
+  const fallback: AiMode = { state: "fallback" };
+  async function researchUntilRefs() {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    await h.step(say("WH-CH520"), replyAi(fill("model", "WH-CH520")));
+    await h.step(say("가벼워 보여요"), replyAi(fill("pros", "가벼워 보여요")));
+    await h.step({ type: "skip", slot: "alts" });
+    await h.step(say("무게가 맘에 들어요"), replyAi(fill("altReason", "무게가 맘에 들어요")));
+    await h.step({ type: "skip", slot: "benefits" });
+    return h;
+  }
+
+  it("200자가 넘는 https 주소도 링크 확인 뒤 칸 값은 짧게, 전체 주소는 links에 둔다", async () => {
+    const h = await researchUntilRefs();
+    const url = `https://blog.example.com/post/${"a".repeat(300)}`;
+    const card = await h.step(say(`이 글을 참고했어요 ${url}`), fallback);
+    expect(card.messages.find((message) => message.body.kind === "link")?.body).toMatchObject({ url });
+    const checked = await h.step({ type: "link_check", url });
+    expect(checked.view.slots.refs?.links).toEqual([url]);
+    expect(checked.view.slots.refs?.status).toBe("confirmed");
+    expect((checked.view.slots.refs?.value ?? "").length).toBeLessThanOrEqual(200);
+    expect(checked.view.slots.refs?.value).toContain("blog.example.com");
+  });
+
+  it("대안 이름 둘을 이으면 200자를 넘는 경우 새 이름을 넣지 않는다(칸 한도)", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    const first = "가".repeat(110);
+    const second = "나".repeat(110);
+    const result = await h.step(say(`${first} 그리고 ${second}`), {
+      intent: "reply",
+      fills: [fill("alts", first, "가".repeat(50)), fill("alts", second, "나".repeat(50))],
+    });
+    expect(result.view.slots.alts?.value).toBe(first);
+  });
+
+  it("확인을 기다리는 중에 글이 오면 확인을 닫고 새 말로 처리한다(오래된 값이 남지 않는다)", async () => {
+    const h = await researchUntilRefs();
+    const pending = await h.step(say("블로그 글 읽었어요"), fallback);
+    expect(pending.view.pending.confirmFill).toMatchObject({ slot: "refs" });
+    // 묻는 말: 확인은 닫히고 막혔던 칸 질문이 다시 보인다.
+    const asked = await h.step(say("어디서 찾아요?"), fallback);
+    expect(asked.view.pending.confirmFill).toBeUndefined();
+    expect(asked.messages.at(-1)).toMatchObject({ tag: "question", slot: "refs" });
+    // 그다음 답은 버려지지 않는다(재질문을 이미 했으므로 짧은 답이 칸에 들어간다). 예전 확인 값이 새 값을 덮지도 않는다.
+    const answer = await h.step(say("공식 후기 글이요"), fallback);
+    expect(answer.view.pending.confirmFill).toBeUndefined();
+    expect(answer.view.slots.refs).toMatchObject({ value: "공식 후기 글이요", status: "filled" });
+    const yes = await h.step({ type: "quick", replyId: "confirm.yes" });
+    expect(yes.view.slots.refs?.value).toBe("공식 후기 글이요");
+  });
+
+  it("건너뛰기로 칸이 바뀌면 같은 칸의 확인도 닫힌다", async () => {
+    const h = await researchUntilRefs();
+    await h.step(say("블로그 글 읽었어요"), fallback);
+    const skipped = await h.step({ type: "skip", slot: "refs" });
+    expect(skipped.view.pending.confirmFill).toBeUndefined();
+    expect(skipped.view.slots.refs?.status).toBe("skipped");
+  });
+
+  it("AI 없이도 물음표 없는 가격·재고·판매처 질문에는 찾는 방법 카드를 준다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.bought" });
+    for (const line of ["가격 얼마야", "어디서 사", "재고 있어"]) {
+      const result = await h.step(say(line), fallback);
+      expect(result.messages.some((message) => message.body.kind === "guide"), line).toBe(true);
+      expect(result.view.slots.model, line).toBeUndefined();
+      expect(result.view.pending.confirmFill, line).toBeUndefined();
+    }
+  });
+
+  it("봉사자가 그 주제를 꺼내지 않았으면 AI가 고른 뒤 칸이 순서를 앞지르지 못한다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.research" });
+    const result = await h.step(say("WH-CH520이고 가벼워서 샀고 무게가 맘에 들어요"), {
+      intent: "reply",
+      fills: [
+        fill("model", "WH-CH520", "WH-CH520이고"),
+        fill("pros", "가벼워요", "가벼워서"),
+        fill("altReason", "무게가 맘에 들어요", "무게가 맘에 들어요"),
+      ],
+      next: { action: "ask_slot", slot: "refs", text: "참고한 글이 있나요?" },
+    });
+    // 참고 글 얘기는 없었으므로 질문 번호 순서(대안)가 이어진다.
+    expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "alts", ai: "none" });
+  });
+
+  describe("AI 출력 검사의 틈", () => {
+    const input = {
+      text: "가벼워요 그리고 소니랑 보스를 봤어요",
+      material: ["가벼워요 그리고 소니랑 보스를 봤어요", "소니 헤드셋 찾아줘"],
+      purchase: "bought" as const,
+    };
+    it("값 일부가 금지 표현으로 지워지면 dropped로 센다", () => {
+      const turn = validateAiTurn(
+        { intent: "reply", fills: [{ slot: "pros", value: "가벼워요. 19,900원이에요.", evidence: "가벼워요" }] },
+        input,
+        CONTEXT,
+      );
+      expect(turn?.fills).toEqual([{ slot: "pros", value: "가벼워요." }]);
+      expect(turn?.dropped).toBe(true);
+    });
+    it("쉼표로 이은 대안 이름은 이름 수로 상한 2를 센다", () => {
+      const turn = validateAiTurn(
+        { intent: "reply", fills: [{ slot: "alts", value: "소니, 보스, 젠하이저", evidence: "소니랑 보스" }] },
+        input,
+        CONTEXT,
+      );
+      expect(turn?.fills).toEqual([]);
+      expect(turn?.dropped).toBe(true);
+    });
+    it("알아볼 수 있는 필드가 없는 JSON은 AI 실패(대체 동작)로 본다", () => {
+      expect(validateAiTurn({ answer: "sorry" }, input, CONTEXT)).toBeNull();
+      expect(validateAiTurn({ intent: "reply", fills: [] }, input, CONTEXT)).not.toBeNull();
+    });
+    it("흔하지 않은 최상위 도메인(.ai·.xyz)도 주소로 본다", () => {
+      const turn = validateAiTurn(
+        { intent: "reply", fills: [], next: { action: "ask_slot", slot: "pros", text: "example.xyz 에서 확인해 주세요." } },
+        input,
+        CONTEXT,
+      );
+      expect(turn?.next?.text).toBeNull();
+      expect(turn?.dropped).toBe(true);
+      const ai = validateAiTurn({ intent: "reply", fills: [{ slot: "pros", value: "example.ai 가벼워요", evidence: "가벼워요" }] }, input, CONTEXT);
+      expect(ai?.fills).toEqual([]);
+      // 소수점이 든 말은 주소가 아니다.
+      const ok = validateAiTurn({ intent: "reply", fills: [{ slot: "pros", value: "무게가 1.5배 가벼워요", evidence: "가벼워요" }] }, input, CONTEXT);
+      expect(ok?.fills).toHaveLength(1);
+    });
+    it("주소·도메인이 든 글은 다음 질문·찾는 방법·다른 칸 값에서 버린다", () => {
+      const turn = validateAiTurn(
+        {
+          intent: "ask_back",
+          fills: [{ slot: "pros", value: "www.evil.example 가벼워요", evidence: "가벼워요" }],
+          guide: { queries: ["소니 헤드셋 https://evil.example"], checks: ["기종 이름이 같은지"], steps: ["evil.com 에서 산다"] },
+          next: { action: "ask_slot", slot: "pros", text: "https://evil.example 에서 알려 주세요." },
+        },
+        input,
+        CONTEXT,
+      );
+      expect(turn?.fills).toEqual([]);
+      expect(turn?.next?.text).toBeNull();
+      expect(turn?.guide?.queries).toEqual(defaultGuide(CONTEXT).queries);
+      expect(turn?.guide?.steps).toEqual(defaultGuide(CONTEXT).steps);
+      expect(turn?.dropped).toBe(true);
+    });
   });
 });

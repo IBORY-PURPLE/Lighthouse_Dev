@@ -7,9 +7,11 @@ import {
   isAskable,
   isFilled,
   isSlotKey,
+  mergePending,
   questionOrder,
   requiredSlots,
   SLOT_KEYS,
+  SLOT_VALUE_MAX,
   type NextCandidate,
   type NextMessage,
   type ResearchPatch,
@@ -178,12 +180,33 @@ export function evidenceMatches(evidence: string, text: string): boolean {
   return found / words.length >= 0.8;
 }
 
+// 부탁형·묻는 말투: AI가 읽은 결과가 있어도 정규식으로 본다.
+const REQUEST_END =
+  /(?:알려\s?줘요?|알려\s?주세요|찾아\s?줘요?|찾아\s?주세요|추천해\s?줘요?|추천해\s?주세요|가르쳐\s?줘요?)[\s.!]*$/;
+// 의문 어미: AI가 없을 때(대체 동작·상한)만 본다. 맨 `나요`·`가요`는 '소리가 잘 나요', '오래가요' 같은 평서문이라 넣지 않는다.
 const QUESTION_END =
-  /(?:나요|까요|인가요|가요|는지|을지|ㄹ지|어때요?|뭐예요|뭐야|뭔가요|알려\s?줘요?|알려\s?주세요|찾아\s?줘요?|찾아\s?주세요|추천해\s?줘요?|추천해\s?주세요|가르쳐\s?줘요?)[\s.!]*$/;
+  /(?:(?:있|없|되|안\s?되|하|맞|같|보이|들리|나오|가능한|어떤|다른|좋은|큰|작은)[나가]요|인가요|까요|는지|을지|ㄹ지|어때요?|뭐예요|뭐야|뭔가요)[\s.!]*$/;
+// 물음표 없는 가격·재고·판매처 질문(대체 동작에서도 찾는 방법 카드를 주려고).
+const PRICE_STOCK_ASK =
+  /(?:얼마(?:야|예요|에요|죠|지)?[\s.!]*$|어디(?:서|에서)\s?(?:사|구매|팔|파)|재고\s?(?:있|없|남)|가격\s?(?:알려|좀|뭐|얼마))/;
 
-/** 의문형·부탁형이면 봉사자가 AI에게 묻는 말로 본다(칸에 넣지 않는다). */
-export function isQuestionLike(text: string): boolean {
-  return /[?？]/.test(text) || QUESTION_END.test(text.trim());
+/**
+ * 봉사자가 AI에게 묻는 말인가(칸에 넣지 않는다). aiRead가 true면 AI가 intent를 읽은 뒤이므로
+ * 물음표와 부탁형만 정규식으로 보고 나머지는 AI의 ask_back을 따른다. false면(AI 없음) 의문 어미와 가격·재고 말도 본다.
+ */
+export function isQuestionLike(text: string, aiRead = false): boolean {
+  const trimmed = text.trim();
+  if (/[?？]/.test(trimmed) || REQUEST_END.test(trimmed)) return true;
+  if (aiRead) return false;
+  return QUESTION_END.test(trimmed) || PRICE_STOCK_ASK.test(trimmed) || hasQuestionKa(trimmed);
+}
+
+/** 'ㄴ가요'(좋은가요·뭔가요·큰가요): 앞 글자의 받침이 ㄴ일 때만 의문형이다. '오래가요' '들어가요'는 평서문이다. */
+function hasQuestionKa(text: string): boolean {
+  const match = /([가-힣])가요[\s.!]*$/.exec(text);
+  if (!match) return false;
+  const code = (match[1] as string).charCodeAt(0) - 0xac00;
+  return code >= 0 && code % 28 === 4;
 }
 
 /** 재질문 뒤의 짧은 답을 그대로 값으로 넣어도 되는 말인가(design.md 4.5). */
@@ -193,6 +216,20 @@ export function isShortAnswer(text: string, slot: SlotKey): boolean {
   const trimmed = text.trim();
   return charCount(trimmed) >= 2 && !isQuestionLike(trimmed) && !trimmed.includes("건너");
 }
+
+/** 주소나 도메인 모양(링크는 참고 글 링크 카드로만 받는다). AI가 만든 글과 칸 값에서 걸러낸다(design.md 9절). */
+const LINK_LIKE = /https?:\/\/|www\.|(?<![A-Za-z0-9-])[a-z0-9-]{2,}\.[a-z]{2,24}(?![a-z0-9-])/i;
+export const hasLinkLike = (value: string): boolean => LINK_LIKE.test(value.normalize("NFKC"));
+
+/** 봉사자가 이번 말에서 그 칸의 주제를 꺼냈는가(design.md 4.2: 봉사자가 먼저 꺼낸 주제만 순서를 앞지른다). */
+const TOPIC_WORDS: Partial<Record<SlotKey, RegExp>> = {
+  pros: /장점|좋았|좋아요|좋은|가볍|가벼|편하|편해|착용감|음질|소리|배터리|노이즈|디자인/,
+  alts: /비교|고민|다른\s?(?:제품|모델|기종)|대신|말고|보다/,
+  altReason: /이유|때문|골랐|고른|선택|그래서/,
+  benefits: /할인|혜택|쿠폰|포인트|적립|사은품|카드|프로모션|이벤트/,
+  refs: /블로그|후기|리뷰|영상|유튜브|링크|커뮤니티|카페|참고|검색|글/,
+};
+export const topicRaised = (slot: SlotKey, text: string): boolean => TOPIC_WORDS[slot]?.test(text) ?? false;
 
 const SKIP_WORD = /건너\s?뛰|패스|스킵/;
 
@@ -231,7 +268,15 @@ function cleanGuideLines(raw: unknown, max: number, material: readonly string[])
   for (const entry of raw) {
     if (lines.length >= 3) break;
     const text = typeof entry === "string" ? oneLine(entry) : "";
-    if (text === "" || charCount(text) > max || hasForbidden(text) || unknownModelTokens(text, material).length > 0) continue;
+    if (
+      text === "" ||
+      charCount(text) > max ||
+      hasForbidden(text) ||
+      hasLinkLike(text) ||
+      unknownModelTokens(text, material).length > 0
+    ) {
+      continue;
+    }
     if (!lines.includes(text)) lines.push(text);
   }
   return lines;
@@ -278,7 +323,8 @@ export function validateAiTurn(raw: Record<string, unknown> | null, input: Valid
   let dropped = false;
   const intent: Intent =
     typeof raw.intent === "string" && (INTENTS as readonly string[]).includes(raw.intent) ? (raw.intent as Intent) : "other";
-  if (intent === "other" && raw.intent !== "other") dropped = true;
+  const intentInvalid = intent === "other" && raw.intent !== "other";
+  if (intentInvalid) dropped = true;
 
   const fills: AiTurn["fills"] = [];
   const rawFills = Array.isArray(raw.fills) ? raw.fills : null;
@@ -289,10 +335,15 @@ export function validateAiTurn(raw: Record<string, unknown> | null, input: Valid
     const item = isRecord(entry) ? entry : null;
     const slot = item && typeof item.slot === "string" ? item.slot : "";
     const evidence = item && typeof item.evidence === "string" ? item.evidence : "";
-    const value = item && typeof item.value === "string" ? oneLine(cleanText(item.value, SLOT_VALUE_LIMIT)) : "";
+    const rawValue = item && typeof item.value === "string" ? oneLine(item.value) : "";
+    const value = oneLine(cleanText(rawValue, SLOT_VALUE_LIMIT));
+    // 값 일부가 금지 표현·없는 기종 때문에 지워졌거나 길이로 잘렸으면 버려진 것으로 센다(design.md 4.3-4).
+    if (value !== "" && value !== rawValue) dropped = true;
     if (
       !(FILL_SLOTS as readonly string[]).includes(slot) ||
       value === "" ||
+      // 링크는 참고 글(refs) 링크 카드로만 받는다. 다른 칸 값의 주소는 버린다.
+      (slot !== "refs" && hasLinkLike(value)) ||
       charCount(evidence) > 80 ||
       !evidenceMatches(evidence, input.text) ||
       unknownModelTokens(value, input.material).length > 0
@@ -301,7 +352,8 @@ export function validateAiTurn(raw: Record<string, unknown> | null, input: Valid
       continue;
     }
     if (slot === "alts") {
-      altsSeen.push(value);
+      // 쉼표로 이은 값 하나도 이름 여러 개다. 이름 수로 상한 2를 센다.
+      altsSeen.push(...value.split(/[,，]/).map((name) => name.trim()).filter(Boolean));
       if (altsSeen.length > 2) {
         dropped = true;
         continue;
@@ -336,7 +388,7 @@ export function validateAiTurn(raw: Record<string, unknown> | null, input: Valid
       let text: string | null = null;
       if (typeof raw.next.text === "string" && raw.next.text.trim() !== "") {
         const line = oneLine(raw.next.text);
-        if (charCount(line) <= 120 && !hasForbidden(line) && unknownModelTokens(line, input.material).length === 0) {
+        if (charCount(line) <= 120 && !hasForbidden(line) && !hasLinkLike(line) && unknownModelTokens(line, input.material).length === 0) {
           text = line;
         } else {
           dropped = true;
@@ -346,6 +398,8 @@ export function validateAiTurn(raw: Record<string, unknown> | null, input: Valid
     }
     // ask_extra는 11/18 핵심에서 끈다(P3). 받아도 버린다.
   }
+  // 알아볼 수 있는 필드가 하나도 없는 JSON(예: {"answer":"sorry"})은 AI 실패로 본다(대체 동작).
+  if (intentInvalid && fills.length === 0 && !purchase && !next) return null;
   return { intent, fills, purchase, guide, next, dropped };
 }
 
@@ -446,7 +500,7 @@ interface NextOptions {
   /** 다음 질문을 붙이지 않는다(확인·링크 확인을 기다림). */
   hold: boolean;
   /** AI가 고른 다음 칸. 검사를 통과한 것만 넣는다. */
-  aiNext: { slot: SlotKey; text: string | null } | null;
+  aiNext: { slot: SlotKey; text: string | null; /** 봉사자가 이번 말에서 그 칸의 주제를 꺼냈다. */ topical?: boolean } | null;
   /** 직전 칸을 한 번 더 묻는다. */
   reask: { slot: SlotKey; text: string | null } | null;
 }
@@ -497,10 +551,15 @@ export function buildCandidates(post: Post, subject: string, options: NextOption
 
   // 다음이 리뷰 제안인데 확인할 것이 남았으면 리뷰 제안 대신 확인을 재촉한다.
   if (post.purchase !== "unset" && hasUnresolvedCheck(post.pending) && !firstValidNext(post, serverList)) {
+    // 넣을 칸과 값을 함께 보여 준다(값을 모르고 [넣기]를 누르지 않게).
+    const waiting = post.pending.confirmFill;
+    const slot = isRecord(waiting) && typeof waiting.slot === "string" && isSlotKey(waiting.slot) ? waiting.slot : null;
+    const value = isRecord(waiting) && typeof waiting.value === "string" ? waiting.value : "";
+    const notice = slot && value !== "" ? `${PENDING_NOTICE} ${SLOT_NAME[slot]} 칸에 “${value}”라고 적어도 될까요?` : PENDING_NOTICE;
     return [
       {
         action: "pending_notice",
-        message: aiNotice(PENDING_NOTICE, post.pending.confirmFill ? { quick: CONFIRM_QUICK } : {}),
+        message: aiNotice(notice, post.pending.confirmFill ? { quick: CONFIRM_QUICK } : {}),
       },
     ];
   }
@@ -508,8 +567,15 @@ export function buildCandidates(post: Post, subject: string, options: NextOption
   const list: NextCandidate[] = [];
   if (reaskCandidate) list.push(reaskCandidate);
   list.push(purchaseCandidate);
+  // AI가 고른 칸(봉사자가 이번 말에서 꺼낸 주제)은 순서상 앞선 필수 칸(특히 구매함의 사진)이 아직 안 물렸으면 그 뒤에 둔다.
+  // 질문 번호 순서가 기본이다(design.md 4.2). 앞선 필수 칸이 없으면 AI 칸이 먼저다.
+  // 순서상 다음 칸이면 AI의 질문 글을 쓰고, 그보다 뒤 칸이면 봉사자가 그 주제를 꺼냈을 때만 앞지른다.
   const aiSlot = options.aiNext?.slot ?? null;
-  if (aiSlot && isAskable(post, aiSlot) && !post.counters.asked[aiSlot]) {
+  if (aiSlot && isAskable(post, aiSlot) && !post.counters.asked[aiSlot] && (firstRound[0] === aiSlot || options.aiNext?.topical)) {
+    const required = requiredSlots(post.purchase);
+    const aiIndex = order.indexOf(aiSlot);
+    const blockers = firstRound.filter((slot) => order.indexOf(slot) < aiIndex && required.includes(slot));
+    list.push(...blockers.map((slot) => slotCandidate(slot)));
     list.push(slotCandidate(aiSlot, options.aiNext?.text, options.aiNext?.text ? "ok" : "none"));
   }
   list.push(...ordered);
@@ -562,11 +628,20 @@ const filledSlot = (value: string, by: SlotState["by"], status: SlotState["statu
   ...(short ? { short: true } : {}),
 });
 
-function mergeAlts(slots: ResearchView["slots"], incoming: string[]): string[] {
+/**
+ * 대안 이름을 이어 붙인다(최대 2개). 칸 값은 200자 이하라서 이어 붙인 글이 넘으면 새 이름을 넣지 않는다.
+ * 봉사자가 칩으로 직접 고른 이름(preferIncoming)은 넘칠 때 그 이름만 남긴다.
+ */
+function mergeAlts(slots: ResearchView["slots"], incoming: string[], preferIncoming = false): string[] {
   const names = altNames(slots);
   for (const name of incoming) {
     if (names.length >= 2) break;
-    if (!names.some((existing) => existing.toLowerCase() === name.toLowerCase())) names.push(name);
+    if (names.some((existing) => existing.toLowerCase() === name.toLowerCase())) continue;
+    if ([...names, name].join(", ").length > SLOT_VALUE_MAX) {
+      if (preferIncoming) return [name];
+      continue;
+    }
+    names.push(name);
   }
   return names;
 }
@@ -585,16 +660,33 @@ function shownLinks(pending: ResearchView["pending"]): { url: string; slot: Slot
   });
 }
 
+/** 참고 글 칸에 적는 짧은 표시(호스트와 경로, 200자 이하). */
+function linkLabel(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const label = `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`;
+    return [...label].slice(0, 120).join("") || "링크 확인함";
+  } catch {
+    return "링크 확인함";
+  }
+}
+
 const URL_IN_TEXT = /https:\/\/[^\s<>"'，。]+/i;
 
 /** 한 턴을 계획한다. 저장소에 넘길 patch·messages·후보 목록을 만든다. 상태를 바꾸지 않는다. */
 export function planTurn(args: PlanArgs): TurnPlan {
-  const { session, input, context, ai } = args;
+  const { input, context, ai } = args;
+  // 확인(confirmFill)을 기다리는 중에 글이 오면 그 확인은 닫고 새 말로 처리한다. 오래된 값이 남아 새 값을 덮거나,
+  // 막힌 칸 때문에 다음 답이 버려지는 일을 막는다.
+  const closeConfirm = input.type === "text" && Boolean(args.session.pending.confirmFill);
+  const session = closeConfirm
+    ? { ...args.session, pending: mergePending(args.session.pending, { confirmFill: null }) }
+    : args.session;
   const subject = searchQueryOf(context);
   const messages: NextMessage[] = [];
   const slotsPatch: Partial<Record<SlotKey, SlotState | null>> = {};
   const patch: ResearchPatch = {};
-  const pendingPatch: Record<string, unknown> = {};
+  const pendingPatch: Record<string, unknown> = closeConfirm ? { confirmFill: null } : {};
   const last = lastQuestionSlot(session.pending);
   const lastSlot: SlotKey | null = last && isSlotKey(last) ? last : null;
   let hold = false;
@@ -651,7 +743,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
 
       // AI에게 묻는 말(AI가 ask_back으로 읽었거나 의문형·부탁형)은 칸을 채우지 않는다. 구매 여부도 읽지 않는다.
       // 아래 4)에서 찾는 방법 카드와 같은 질문을 보인다. 섞인 답은 봉사자가 질문에 다시 답하면 된다.
-      const asking = turn?.intent === "ask_back" || isQuestionLike(input.text);
+      const asking = turn?.intent === "ask_back" || isQuestionLike(input.text, turn !== null);
 
       // 주소가 든 말: 참고 글(refs)에 해당하면 AI가 칸을 채우지 못하게 하고, 아래 3)에서 "직접 확인 필요" 링크 카드로 받는다.
       // (서버는 외부 주소를 열지 않으므로 봉사자가 확인하기 전에는 값으로 넣지 않는다. design.md 4.6, 4.10)
@@ -674,7 +766,8 @@ export function planTurn(args: PlanArgs): TurnPlan {
         }
         const altIncoming: string[] = [];
         for (const fill of turn.fills) {
-          if (fill.slot === "refs" && linkCard) continue;
+          // 참고 글의 주소는 링크 카드로만 받는다. 카드를 못 만드는 경우(이미 찼음·http 등)에는 주소가 든 값을 넣지 않는다.
+          if (fill.slot === "refs" && (linkCard || hasLinkLike(fill.value))) continue;
           if (fill.slot === "alts") {
             altIncoming.push(fill.value);
             continue;
@@ -692,7 +785,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
         }
         if (!turn.dropped && turn.next) {
           if (turn.next.action === "ask_slot" && turn.next.slot && turn.next.slot !== "photo") {
-            aiNext = { slot: turn.next.slot, text: turn.next.text };
+            aiNext = { slot: turn.next.slot, text: turn.next.text, topical: topicRaised(turn.next.slot, input.text) };
           }
         }
       }
@@ -823,7 +916,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
         confirmed("model", input.value);
         messages.push(fillMessage("model", input.value, "none"));
       } else {
-        const value = mergeAlts(session.slots, [input.value]).join(", ");
+        const value = mergeAlts(session.slots, [input.value], true).join(", ");
         slotsPatch.alts = filledSlot(value, "volunteer", "confirmed");
         messages.push(fillMessage("alts", value, "none"));
       }
@@ -860,15 +953,27 @@ export function planTurn(args: PlanArgs): TurnPlan {
         messages.push(aiNotice("확인할 링크를 찾지 못했어요."));
         hold = true;
       } else {
-        slotsPatch.refs = { value: input.url, links: [input.url], status: "confirmed", by: "volunteer" };
+        // 칸 값은 200자 이하라서 200자를 넘는 주소는 줄여 적는다. 전체 주소는 links에만 둔다.
+        slotsPatch.refs = { value: [...input.url].length <= SLOT_VALUE_MAX ? input.url : linkLabel(input.url), links: [input.url], status: "confirmed", by: "volunteer" };
         messages.push(aiNotice(LINK_CHECKED));
       }
       break;
     }
   }
 
+  // 이 턴에서 같은 칸이 바뀌면(AI 채움·건너뛰기·짧은 답·칩) 오래된 확인은 닫는다.
+  const waiting = session.pending.confirmFill;
+  if (isRecord(waiting) && typeof waiting.slot === "string" && isSlotKey(waiting.slot)) {
+    if (slotsPatch[waiting.slot] !== undefined && pendingPatch.confirmFill === undefined) pendingPatch.confirmFill = null;
+  }
+
   if (Object.keys(slotsPatch).length > 0) patch.slots = slotsPatch;
   if (Object.keys(pendingPatch).length > 0) patch.pending = pendingPatch;
+
+  // 글 턴의 ai 표시는 봉사자 메시지에도 남긴다: 같은 clientTurnId 재전송이 저장된 메시지에서 첫 응답과 같은 표시를 읽도록.
+  // (칸 채움·재질문처럼 AI 글이 없는 턴이나 CAP·fallback 안내가 한 번만 나오는 뒤 턴에서도 표시가 사라지지 않는다.)
+  const first = messages[0];
+  if (input.type === "text" && label !== "none" && first?.role === "volunteer") messages[0] = { ...first, ai: label };
 
   const base = {
     purchase: session.purchase,

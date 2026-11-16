@@ -53,7 +53,8 @@ function modelMessage(body: ModelBody, subject: string, notice: string | null): 
     slot: "model",
     body: {
       kind: "text",
-      text: notice ?? MODEL_CHIPS_INTRO,
+      // 후보가 없으면 칩이 없어 화면이 caption을 그리지 않으므로 본문 글이 "후보를 찾지 못함"을 말한다.
+      text: notice ?? (count === 0 ? MODEL_CHIPS_EMPTY : MODEL_CHIPS_INTRO),
       chips: body.items.map((item) => ({ label: item.name, value: item.name, url: urlOf(item.url) })),
       chipSlot: "model",
       chipsCaption: caption,
@@ -141,7 +142,8 @@ export async function POST(
       const outcome = await answerResearch(
         { requestId: id, kind: "model" },
         context,
-        AbortSignal.any([request.signal, AbortSignal.timeout(AI_DEADLINE_MS)]),
+        // 브라우저 연결이 끊겨도 검색은 끝까지 하고 결과를 저장한다(이미 센 검색을 버리지 않고, 새로 고친 뒤 GET으로 보인다).
+        AbortSignal.timeout(AI_DEADLINE_MS),
       );
       const body = outcome.body as ModelBody;
       const label: AiLabel = body.ai === "ok" ? "ok" : "fallback";
