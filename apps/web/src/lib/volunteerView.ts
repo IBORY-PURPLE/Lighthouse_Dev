@@ -140,6 +140,18 @@ export function formatSentAt(sentAt: string): string {
   });
 }
 
+/** 보낸 결과 중 이용자에게 읽히는 검증 리뷰 문단(첫 후보의 핵심 정리). 없으면 null. */
+export function sentReviewOf(result: SentResult): string | null {
+  const text = result.candidates.find((candidate) => candidate.guide.trim() !== "")?.guide.trim();
+  return text ? text : null;
+}
+
+/** 보낸 결과의 기종 이름(첫 후보 이름). 자르지 않고 그대로 준다. 없으면 null. */
+export function sentModelOf(result: SentResult): string | null {
+  const name = result.candidates[0]?.name.trim();
+  return name ? name : null;
+}
+
 /** 직전 목록에 없던 요청 id. 직전 목록이 없으면(첫 불러오기) 빈 집합. */
 export function newRequestIds(
   previous: readonly string[] | null,

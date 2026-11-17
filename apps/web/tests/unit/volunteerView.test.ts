@@ -4,6 +4,8 @@ import {
   newRequestIds,
   quoteOf,
   sentDayLabel,
+  sentModelOf,
+  sentReviewOf,
   structuredLine,
   waitLabel,
 } from "@/lib/volunteerView";
@@ -88,5 +90,35 @@ describe("newRequestIds", () => {
   it("직전 목록에 없던 id만 새 요청이다", () => {
     expect([...newRequestIds(["a", "b"], ["a", "c", "b", "d"])]).toEqual(["c", "d"]);
     expect([...newRequestIds([], ["a"])]).toEqual(["a"]);
+  });
+});
+
+describe("sentReviewOf·sentModelOf", () => {
+  const sent = (candidates: { name: string; guide: string }[]) => ({
+    sentAt: "2026-11-17T06:00:00Z",
+    heardAt: null,
+    linkOpenedAt: null,
+    candidates: candidates.map((candidate) => ({ ...candidate, url: "https://example.com", summary: [] })),
+  });
+
+  it("이용자에게 읽히는 것은 첫 후보의 핵심 정리(검증 리뷰 문단) 하나다", () => {
+    const result = sent([
+      { name: "WH-CH720N", guide: "  실제로 써 본 경험이에요.  " },
+      { name: "같이 고민한 제품", guide: "" },
+    ]);
+    expect(sentReviewOf(result)).toBe("실제로 써 본 경험이에요.");
+  });
+
+  it("첫 후보에 문단이 없으면 문단이 있는 다음 후보의 것을 쓰고, 모두 없으면 null", () => {
+    expect(sentReviewOf(sent([{ name: "A", guide: "" }, { name: "B", guide: "두 번째 문단" }]))).toBe("두 번째 문단");
+    expect(sentReviewOf(sent([{ name: "A", guide: " " }]))).toBeNull();
+    expect(sentReviewOf(sent([]))).toBeNull();
+  });
+
+  it("기종 이름은 자르지 않고 그대로 준다(짧은 이름 730N도 그대로)", () => {
+    expect(sentModelOf(sent([{ name: "730N", guide: "x" }]))).toBe("730N");
+    const long = "가".repeat(100);
+    expect(sentModelOf(sent([{ name: long, guide: "x" }]))).toBe(long);
+    expect(sentModelOf(sent([]))).toBeNull();
   });
 });

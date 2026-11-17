@@ -125,12 +125,36 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     // 봉사자 화면: 방금 접수한 요청이 대기열에 뜬다.
     const volunteer = await page.context().newPage();
     await volunteer.goto("/volunteer");
-    await expect(volunteer.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
-    const card = volunteer.locator(".vol-card").filter({ hasText: product });
+    await expect(volunteer.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
+    await volunteer.getByRole("button", { name: "대기열·내 담당" }).click();
+    const card = volunteer.getByTestId("queue-card").filter({ hasText: product });
     await expect(card).toHaveCount(1);
     await expect(card.getByText("대기", { exact: true })).toBeVisible();
     await expect(card).toContainText(BUDGET);
     await volunteer.screenshot({ path: "test-results/voice-volunteer-queue.png" });
+  });
+
+  test("저장된 상품 상세에는 검증 리뷰 한 문단만 있고 후보 목록·구매 링크·가격이 없다", async ({ page }) => {
+    await openVoiceHome(page);
+    await page.getByRole("button", { name: "저장된 상품 목록" }).click();
+    await expect(page.locator("#list")).toHaveClass(/active/);
+    // 이용자 화면은 정적 시연 화면이라 저장된 정보 카드는 모두 이 소니 헤드셋 상세를 연다(서버에서 결과를 받아 그리는 곳은 아직 없다).
+    await page.locator("#list .card:not(.pending)", { hasText: "소니 무선 헤드셋" }).click();
+    const detail = page.locator("#detail");
+    await expect(detail).toHaveClass(/active/);
+    // 읽히는 것은 봉사자가 검수한 리뷰 문단 하나다.
+    const review = detail.getByRole("article", { name: "봉사자 리뷰" });
+    await expect(review).toBeVisible();
+    await expect(review.locator("#review-text")).toContainText("봉사자가 직접 구매해 사용한 제품");
+    await expect(detail.getByRole("link")).toHaveCount(0);
+    // 버튼은 뒤로 가기와 목록으로 이동 둘뿐이다("상품 링크 바로가기"는 없다).
+    await expect(detail.getByRole("button")).toHaveCount(2);
+    await expect(detail.getByRole("button", { name: "요청 목록으로 이동" })).toBeVisible();
+    // 리뷰 상자(article)는 제목과 리뷰 문단 하나뿐이다.
+    await expect(review.locator("p")).toHaveCount(1);
+    const text = await detail.innerText();
+    expect(text).not.toMatch(/링크|\d[\d,]*\s*원|후보|상세 요약/);
+    await page.screenshot({ path: "../../test-results/demo6-shots/user-result-review-only.png", fullPage: true });
   });
 
   test("AI 호출이 실패하면 원본처럼 안내하고 다시 듣는다", async ({ page }) => {

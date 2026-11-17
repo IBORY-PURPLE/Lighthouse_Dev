@@ -61,6 +61,13 @@ export interface SessionSnapshot {
   review: ReviewState;
 }
 
+/** 휴대폰 사진 링크 상태(contract-ui.md "휴대폰 사진 링크"). waiting = 링크를 만들고 아직 안 씀, connected = 휴대폰이 연결돼 사진을 받는 중. */
+export type PhotoLinkName = "none" | "waiting" | "connected" | "expired";
+export interface PhotoLinkView {
+  state: PhotoLinkName;
+  expiresAt: string | null;
+}
+
 /** GET …/research 응답. */
 export interface ResearchView extends SessionSnapshot {
   sessionId: string;
@@ -68,6 +75,8 @@ export interface ResearchView extends SessionSnapshot {
   lastSeq: number;
   messages: ChatMessage[];
   photos: PhotoView[];
+  /** 서버가 주지 않으면(옛 응답·보낸 뒤) 없다. */
+  photoLink?: PhotoLinkView;
 }
 
 export type TurnInput =
@@ -152,6 +161,7 @@ export function normalizeView(raw: Partial<ResearchView>): ResearchView {
     review: raw.review ?? {},
     messages: raw.messages ?? [],
     photos: raw.photos ?? [],
+    photoLink: raw.photoLink,
   };
 }
 
@@ -180,6 +190,18 @@ export function postPhoto(
   body: { sessionId: string; image: string; thumb: string },
 ): Promise<Outcome<{ photo: PhotoView; messages: ChatMessage[]; session?: SessionSnapshot; version?: number }>> {
   return call(`${base(requestId)}/photos`, json("POST", body));
+}
+
+/** 휴대폰 사진 링크를 새로 만든다(앞 링크는 끊긴다). 토큰 원문은 이 응답에만 있다. */
+export function postPhotoLink(
+  requestId: string,
+  body: { sessionId: string },
+): Promise<Outcome<{ token: string; expiresAt: string }>> {
+  return call(`${base(requestId)}/photo-link`, json("POST", body));
+}
+
+export function deletePhotoLink(requestId: string, sessionId: string): Promise<Outcome<{ revoked: number }>> {
+  return call(`${base(requestId)}/photo-link?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" });
 }
 
 export function deletePhoto(requestId: string, photoId: string): Promise<Outcome<{ session: SessionSnapshot; version?: number }>> {

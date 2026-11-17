@@ -168,8 +168,9 @@ test("공개 주소 리서치 챗 한 사이클: 맡기 → 질문 7개 → 리�
   await expect(page.getByText("봉사자 검수 완료")).toBeVisible({ timeout: 30_000 });
   await scanScreen(page, wording);
   await page.getByRole("button", { name: "보내기", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "완료된 요청" })).toBeVisible();
-  await expect(page.getByText("전달 완료", { exact: true })).toBeVisible();
+  // 보낸 뒤에도 같은 챗봇 화면에 머물며 보낸 리뷰를 읽기 전용으로 보인다.
+  await expect(page.getByTestId("sent-review")).toBeVisible();
+  await expect(page.getByTestId("sent-review").getByText("전달 완료", { exact: true })).toBeVisible();
 
   console.log(`리서치 호출 ${records.length}회: ${records.map((record) => `${record.kind}:${record.status}:${record.ai}`).join(" ")}`);
   console.log(`ai=ok ${records.filter((r) => r.ai === "ok").length}회, fallback ${records.filter((r) => r.ai === "fallback").length}회, capped ${records.filter((r) => r.ai === "capped").length}회`);
@@ -187,6 +188,6 @@ test("공개 주소 리서치 챗 한 사이클: 맡기 → 질문 7개 → 리�
 
   // 정리: 시연용 요청을 다시 채운다(이 기기에서 보낸 요청도 시연 기본값으로 돌아간다).
   await page.goto("/volunteer");
-  await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
   await refill(page);
 });

@@ -285,6 +285,16 @@ describe("buildResultFromSession", () => {
     for (const candidate of candidates) expect(checkCandidate(candidate).ok, candidate.name).toBe(true);
   });
 
+  it("기종 칸 값이 짧아도 결과의 기종 이름은 그 값 그대로다(730N도 자르지 않는다)", () => {
+    for (const model of ["730N", "WH-CH720N", "소니 WH-1000XM5"]) {
+      const view = makeView({
+        slots: { ...makeView().slots, model: filled(model) },
+        review: { status: "confirmed", text: confirmed, rev: 1, confirmedVersion: 5 },
+      });
+      expect(buildResultFromSession(view)[0].name).toBe(model);
+    }
+  });
+
   it("구매했지만 사진 인증이 안 됐으면 '구매했지만 사진 인증 안 됨'이고, 리서치만이면 사진 줄이 없다", () => {
     const pendingCheck = buildResultFromSession(
       makeView({ pending: { mismatch: { slot: "photo" } }, review: { status: "confirmed", text: confirmed, rev: 1, confirmedVersion: 5 } }),
