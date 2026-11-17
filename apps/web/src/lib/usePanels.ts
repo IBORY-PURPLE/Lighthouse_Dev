@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { readPanels, writePanels, type PanelState, type WidthClass } from "./panelPrefs";
+import { fitToWidth, readPanels, writePanels, type PanelState, type WidthClass } from "./panelPrefs";
 
 const WIDE_QUERY = "(min-width: 1180px)";
 
@@ -14,8 +14,8 @@ interface Stored extends PanelState {
 
 function initial(forceMine: boolean): Stored {
   const cls: WidthClass = isWideScreen() ? "wide" : "narrow";
-  const stored = readPanels(cls);
-  return { cls, mine: forceMine || stored.mine, slots: stored.slots };
+  const stored = fitToWidth(cls, readPanels(cls));
+  return { cls, mine: forceMine || stored.mine, slots: forceMine && cls === "narrow" ? false : stored.slots };
 }
 
 /**
@@ -35,7 +35,7 @@ export function usePanels({ hero, forceMine = false }: { hero: boolean; forceMin
     const query = window.matchMedia(WIDE_QUERY);
     const onChange = () => {
       const cls: WidthClass = query.matches ? "wide" : "narrow";
-      setState((prev) => (prev.cls === cls ? prev : { cls, ...readPanels(cls) }));
+      setState((prev) => (prev.cls === cls ? prev : { cls, ...fitToWidth(cls, readPanels(cls)) }));
     };
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
@@ -47,7 +47,8 @@ export function usePanels({ hero, forceMine = false }: { hero: boolean; forceMin
       const next: Stored = { ...state, mine: open, slots: open && narrow ? false : state.slots };
       setState(next);
       if (open && narrow) setHeroSlots(false);
-      if (remember) writePanels(state.cls, { mine: next.mine, slots: hero ? state.slots : next.slots });
+      // 히어로에서는 오른쪽 창의 기억값을 바꾸지 않는다(그리는 값이 아니라 저장된 값을 그대로 다시 쓴다).
+      if (remember) writePanels(state.cls, { mine: next.mine, slots: hero ? readPanels(state.cls).slots : next.slots });
     },
     [state, hero],
   );

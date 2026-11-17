@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PANELS_KEY, defaultPanels, readPanels, writePanels } from "@/lib/panelPrefs";
+import { PANELS_KEY, defaultPanels, fitToWidth, readPanels, writePanels } from "@/lib/panelPrefs";
 
 /** 메모리 저장소. fail이 켜지면 읽기·쓰기가 던진다. */
 function stubStorage(initial: Record<string, string> = {}, fail: "get" | "set" | null = null) {
@@ -70,5 +70,17 @@ describe("panelPrefs", () => {
     stubStorage({ [PANELS_KEY]: JSON.stringify({ wide: { mine: "yes", slots: false }, narrow: 3 }) });
     expect(readPanels("wide")).toEqual({ mine: true, slots: false });
     expect(readPanels("narrow")).toEqual({ mine: false, slots: false });
+  });
+});
+
+describe("fitToWidth", () => {
+  it("narrow에서 둘 다 열림이면 왼쪽 창만 남긴다", () => {
+    expect(fitToWidth("narrow", { mine: true, slots: true })).toEqual({ mine: true, slots: false });
+  });
+
+  it("그 밖의 값은 그대로", () => {
+    expect(fitToWidth("narrow", { mine: false, slots: true })).toEqual({ mine: false, slots: true });
+    expect(fitToWidth("narrow", { mine: true, slots: false })).toEqual({ mine: true, slots: false });
+    expect(fitToWidth("wide", { mine: true, slots: true })).toEqual({ mine: true, slots: true });
   });
 });

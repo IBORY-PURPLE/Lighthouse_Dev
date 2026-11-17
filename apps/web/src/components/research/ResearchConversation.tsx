@@ -465,10 +465,9 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       const target = event.target as Node | null;
       if (target && (document.getElementById("vc-more")?.contains(target) || moreToggleRef.current?.contains(target))) return;
       setMoreOpen(false);
-      // 누른 곳이 초점을 받지 않는 자리면(초점이 body로 떨어지면) 버튼으로 돌려준다.
-      window.setTimeout(() => {
-        if (!document.activeElement || document.activeElement === document.body) moreToggleRef.current?.focus();
-      }, 0);
+      // 초점은 "더 보기"로 돌아온다. 누른 곳이 글자를 쓰는 칸이면(입력창) 쓰던 자리를 지키려고 그 칸에 둔다.
+      const typing = target instanceof HTMLElement && target.closest("input, textarea, [contenteditable]") !== null;
+      if (!typing) window.setTimeout(() => moreToggleRef.current?.focus(), 0);
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onPointer);

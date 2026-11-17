@@ -50,3 +50,11 @@ export function writePanels(widthClass: WidthClass, state: PanelState): void {
     // 기억하지 못할 뿐 화면은 돌아간다.
   }
 }
+
+/**
+ * 화면에 그릴 값. narrow(겹치는 창)에서는 두 창이 함께 열릴 수 없으므로, 기억된 값이 둘 다 열림이면 왼쪽 창만 남긴다.
+ * (히어로에서 왼쪽 창을 열면 오른쪽 창의 기억값은 건드리지 않아 둘 다 true인 값이 저장될 수 있다.)
+ */
+export function fitToWidth(widthClass: WidthClass, state: PanelState): PanelState {
+  return widthClass === "narrow" && state.mine && state.slots ? { mine: true, slots: false } : state;
+}

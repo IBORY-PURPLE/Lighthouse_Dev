@@ -842,6 +842,14 @@ test.describe("두 창 · 노트북 1440", () => {
     await expect(more).toHaveAttribute("aria-expanded", "false");
     await expect(more).toBeFocused();
 
+    // 바깥의 초점 가능한 버튼을 눌러도 닫히고 초점이 더 보기로 돌아온다.
+    await more.click();
+    await expect(menu).toBeVisible();
+    await sideToggle(page).click();
+    await expect(menu).toBeHidden();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(more).toBeFocused();
+
     // 패널과 같은 확인·같은 release(): 돌려놓기를 누르면 첫 화면으로 간다.
     await more.click();
     await menu.getByRole("button", { name: "요청 내려놓기" }).click();
@@ -936,6 +944,24 @@ test.describe("두 창 · 1024 (겹침)", () => {
 
 test.describe("두 창 · 휴대폰 393", () => {
   test.use({ viewport: { width: 393, height: 852 } });
+
+  test("기억된 값이 둘 다 열림이어도 좁은 화면에서는 한 창만 열린다(왼쪽 창이 남는다)", async ({ page }) => {
+    await begin(page);
+    await page.evaluate((key) => window.localStorage.setItem(key, JSON.stringify({ narrow: { mine: true, slots: true } })), SLOTS_KEY);
+    await page.reload();
+    await expect(page.getByTestId("research-stage")).toHaveAttribute("data-mode", "hero");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    // 히어로에서 왼쪽 창을 닫고 열어도 오른쪽 창의 기억값은 바꾸지 않는다.
+    await sideToggle(page).click();
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+    expect((await storedPanels(page))?.narrow).toEqual({ mine: false, slots: true });
+    // 대화로 넘어가도 두 창이 함께 열려 있지 않다.
+    await page.getByRole("button", { name: "구매했어요", exact: true }).click();
+    await expect(log(page).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
+    const both = (await sideToggle(page).getAttribute("aria-expanded")) === "true" && (await slotsToggle(page).getAttribute("aria-expanded")) === "true";
+    expect(both).toBe(false);
+  });
 
   test("두 창 버튼이 모두 보이고 한 번에 하나만 열리며 가로로 넘치지 않는다. axe 통과", async ({ page }) => {
     await begin(page);
