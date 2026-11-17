@@ -7,7 +7,6 @@ import { GET as me } from "@/app/api/volunteer/me/route";
 import { GET as queue } from "@/app/api/volunteer/queue/route";
 import { POST as claim } from "@/app/api/volunteer/requests/[requestId]/claim/route";
 import { POST as release } from "@/app/api/volunteer/requests/[requestId]/release/route";
-import { POST as result } from "@/app/api/volunteer/requests/[requestId]/result/route";
 import { GET as detail } from "@/app/api/volunteer/requests/[requestId]/route";
 import { resetRequestStoresForTest } from "@/lib/requestStore";
 import { readVolunteerId, VOLUNTEER_COOKIE } from "@/lib/volunteerSession";
@@ -57,7 +56,7 @@ function get(handler: typeof queue | typeof me, path: string, cookie?: string) {
 }
 
 function idRoute<
-  T extends typeof claim | typeof release | typeof detail | typeof result,
+  T extends typeof claim | typeof release | typeof detail,
 >(
   handler: T,
   method: "GET" | "POST",
@@ -225,7 +224,6 @@ describe("봉사자 서버 함수", () => {
           await idRoute(detail, "GET", MISSING_ID, cookie),
           await idRoute(claim, "POST", MISSING_ID, cookie),
           await idRoute(release, "POST", MISSING_ID, cookie),
-          await idRoute(result, "POST", MISSING_ID, cookie),
           await post(reset, "/api/volunteer/demo/reset", cookie),
         ];
         for (const response of responses) {

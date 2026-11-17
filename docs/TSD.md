@@ -1,6 +1,7 @@
 # LightHouse 기술 설계서(TSD) v2: 봉사자 흐름(플로우 A·B) 반영
 
 작성일: 2026-11-09. 상태: **확정(2026-11-09 이용자 승인)**. 사람용 1쪽 요약은 `docs/human_tsd.md`.
+v2.2(2026-11-17, **초안: 이용자 승인(A39) 전**): 리서치 챗을 대화형으로 바꾸면서 서버가 대화 상태를 갖는다. 바뀐 곳은 핵심 결정 2·3, §2 데이터 표, §8.3(대화 표 6개·함수 9개·보관 규칙)이다. 공식 페이지 사진 읽기 원칙 예외(TSD 원칙 줄), 화면 절(D안 E1~E12), 결과 guide = 검증 리뷰 문단은 해당 PR(PR 3~5)에서 이 문서에 더한다. 설계 근거는 `docs/plans/2026-11-16-research-chat-backend/design.md`다.
 v2.1(2026-11-13): 봉사자 ③④⑤를 리서치 챗 한 화면으로 합침. 바뀐 곳은 핵심 결정 3, §1 플로우 B·시연 예외, §2, §3, §4, §5, §7.1, §8 공통, §8.1, §8.2, §8.3, §8.7·§8.8·사진 축소, §9·§9.1, §10, §12, §13이다(v2.1 문서는 이용자 승인 전. 설계 근거는 2026-11-12 이용자 지시).
 이전 판: v1(11/4 밤샘 범위)은 git 기록(`f8b77c6`)에 있다. 바뀐 점과 근거는 `docs/plans/2026-11-09-overnight/tsd-review.md`.
 적용 범위: 11/24 중간 시연까지의 데모 시나리오 V2(① 음성 요청 ② 요청 전달 ③ 탐색 조언 ④ 정보 요약 ⑤ 사람 검증 ⑥ 결과 전달 ⑦ 듣고 열기). v2.1부터 ③④⑤는 리서치 챗 한 화면에서 한다. 설계 출처는 FigJam의 "MVP 플로우 A · 사용자 요청"과 "MVP 플로우 B · 봉사자 수행"이다.
@@ -9,8 +10,8 @@ v2.1(2026-11-13): 봉사자 ③④⑤를 리서치 챗 한 화면으로 합침. 
 
 **v2의 핵심 결정**
 1. 백엔드는 Next.js 서버 함수(TypeScript) 하나다. FastAPI 등 별도 서버는 11/24 시연 전에는 두지 않는다(§3, 재검토 조건은 `tsd-review.md`).
-2. 서버 상태는 Supabase Postgres의 `requests`(대기열)와 `results`(결과함) 두 표뿐이다. 동시 선택은 SQL 함수의 조건부 UPDATE로 막는다(§2, §8.3).
-3. ③④⑤의 작업 중 값은 봉사자 기기에만 있다. 서버는 이미지와 원문을 저장하지 않는다(§2). v2에서는 탭 메모리(대화, 이미지 조각, 글자 읽기 원문, 요약 초안)였고, v2.1에서 리서치 챗의 답·AI 도움·작은 썸네일을 기기 `localStorage`에 두는 것으로 바꿨다.
+2. 서버 상태는 Supabase Postgres의 `requests`(대기열)와 `results`(결과함)에, v2.2부터 리서치 챗 대화 표 6개(`research_sessions`, `research_messages`, `research_turns`, `research_photos`, `research_usage`, `ai_usage_daily`)가 더해진다. 동시 선택은 SQL 함수의 조건부 UPDATE로 막고, 대화 표는 요청 행을 먼저 잠그는 SQL 함수로만 바꾼다(§2, §8.3). *(v2.2 초안)*
+3. ③④⑤의 작업 중 값(대화, 칸, 구매 인증 사진 작은 썸네일 최대 3장)은 v2.2부터 서버 DB의 대화 표에 둔다. 서버는 이미지 원본과 원문, 상세 페이지를 저장하지 않는다(§2). 보관은 보내기·내려놓기 때 즉시 삭제하고, 6시간 동안 활동이 없으면 요청을 대기열로 돌리며 대화도 지운다(§8.3). v2에서는 탭 메모리, v2.1에서는 기기 `localStorage`였다. *(v2.2 초안)*
 4. 데모 단계마다 브랜치 하나다(§12).
 
 ## 1. 합격 흐름
@@ -56,8 +57,8 @@ WBS #8 확정 전 가정(③은 챗봇 대화, ④는 스크린샷 업로드만)
 Vercel 서버 함수 (Next.js, Node 22, 기본 지역 iad1 — §11에서 icn1 검토)
   /enter(옛 링크 이동만), /api/health, /api/match(시연 이어 보기)
   /api/requests, /api/requests/{id}                         플로우 A
-  /api/volunteer/queue, /api/volunteer/requests/{id}[/claim|/release|/result]   플로우 B ②⑥
-  /api/volunteer/research                                   ③④⑤ 리서치 AI (상태 없음)
+  /api/volunteer/queue, /api/volunteer/requests/{id}[/claim|/release]   플로우 B ②⑥
+  /api/volunteer/requests/{id}/research[/turn|/search|/photos|/review|/send]   ③④⑤ 대화형 리서치 챗(v2.2 초안, 서버가 대화 상태를 가짐. 옛 /api/volunteer/research·/result는 지움)
   /api/chat                                                 시연 이어 보기 화면(/volunteer/demo)의 챗봇 (스트리밍)
       │                       │
       ▼                       ▼
@@ -82,12 +83,14 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 이용자의 세 답(제품·예산·새/중고), 대기번호, 상태 | Supabase `requests` | §8.3 보관 규칙 |
 | 결과(후보명, 구매 링크, 가이드, 확정 요약) | Supabase `results` | 완료 뒤 7일(이용자 결정 대기) |
 | 이용자 기기의 지난 요청 표시 | 이용자 `localStorage` `lh.request.v1` | "새 요청하기"까지 |
-| 리서치 챗 진행 단계, 카드별 답, 구매 여부, 받은 AI 도움, 사진 작은 썸네일(최대 3장)·설명 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 보내기·내려놓기에 성공하면 지움. 서버 저장 안 함 |
+| 리서치 챗 대화, 칸 7개 값, 구매 여부, 추가 답, 검수한 리뷰 문단, 구매 인증 사진 작은 썸네일(JPEG, 최대 3장) | Supabase `research_sessions`·`research_messages`·`research_turns`·`research_photos`(v2.2 초안) | 보내기·내려놓기 때 즉시 삭제(DB 트리거). 6시간 활동이 없으면 요청을 대기열로 돌리고 같이 삭제. §8.3 |
+| 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
+| (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
 | 서버로 보내는 축소 사진(사진 설명용) | 봉사자 탭 메모리 | 새로 고치면 사라짐. 서버는 AI에 넘긴 뒤 버림 |
 | 시연 이어 보기 화면의 챗봇 대화 | 봉사자 탭 메모리 | 탭을 닫으면 사라짐 |
 
 - v2의 "이미지 조각·글자 읽기 원문·요약 초안·근거 원문은 탭 메모리"와 "대체 경로 이미지는 Storage 비공개 버킷" 행은 v2.1에서 없앴다.
-- 이미지와 상세페이지 원문을 서버에 남기지 않는 이유: 상세페이지 보관은 멘토가 지적한 법적 위험이다. 리서치 챗에서도 서버는 사진을 저장하지 않고, 결과에는 사진 장수와 설명 글만 들어간다.
+- 이미지와 상세페이지 원문을 서버에 남기지 않는 이유: 상세페이지 보관은 멘토가 지적한 법적 위험이다. v2.2의 사진은 구매 인증용(착샷·실제 소유 사진)뿐이고 상세 페이지 캡처는 받지 않는다. 서버는 원본을 저장하지 않고 브라우저가 줄인 작은 JPEG 썸네일(60,000자 이하)만 대화가 살아 있는 동안 둔다. 결과에는 사진이 들어가지 않는다. *(v2.2 초안)*
 - DB는 서버 라우트만 서버 키(secret 또는 service_role)로 SQL 함수(RPC)를 호출해 다룬다. 표는 RLS를 켜고 정책을 두지 않아 브라우저 직접 접근을 막는다. 브라우저에는 Supabase 키를 내보내지 않고 Realtime도 쓰지 않는다.
 - 봉사자 식별: 입장하면 기기 열쇠 쿠키(`lh_vol`)를 받고, 서버는 그 열쇠에서 뽑은 봉사자 ID를 쓴다(`volunteerSession.ts`). 실제 로그인은 범위 밖이다. QA 기간에는 접근 코드와 입장 코드가 없고 `lh_access` 쿠키도 없다. 링크만 있으면 이용자·봉사자 화면 모두 바로 쓰고, 봉사자 화면은 처음 열 때 스스로 `POST /api/volunteer/enter`를 불러 `lh_vol`을 받는다(쿠키는 비밀이 아니라 기기 번호표다). `DEMO_ACCESS_CODE`는 코드 입력용이 아니라 이 쿠키의 서명 비밀이다. 값을 바꾸면 모든 봉사자 기기의 입장이 풀리고(다시 열면 새로 받는다), 맡은 요청은 새 ID로 바뀌어 이어 보지 못한다. 없으면 입장이 503 `not_configured`다. 되돌리려면 이 변경(PR)을 revert한다.
 
@@ -129,10 +132,10 @@ apps/web/                                   Vercel Root Directory
   src/app/api/{health,match,chat}/route.ts
   src/app/api/requests/route.ts, [requestId]/route.ts                 플로우 A
   src/app/api/volunteer/queue/route.ts
-  src/app/api/volunteer/requests/[requestId]/{route,claim/route,release/route,result/route}.ts
-  src/app/api/volunteer/research/route.ts   리서치 AI(§8.7)
+  src/app/api/volunteer/requests/[requestId]/{route,claim/route,release/route}.ts
+  src/app/api/volunteer/requests/[requestId]/research/{route,turn/route,search/route,photos/route,photos/[photoId]/route,review/route,send/route}.ts   대화형 리서치 챗(§8.3). 옛 카드형 research·result 라우트는 지움
   src/components/{SpeechInput,StatusRegion,DemoHandoff,VolunteerChat}.tsx
-  src/components/{ResearchChat,ResearchCards,ResearchSummary,SentView}.tsx   리서치 챗 화면, 카드, 보내기 전 확인, 보낸 결과
+  src/components/{SentView}.tsx, src/components/research/*.tsx   보낸 결과, 대화형 리서치 챗 화면(`ResearchConversation.tsx`와 부품). 옛 ResearchChat·ResearchCards·ResearchSummary는 지움
   src/lib/{rateLimit,llm,prompt,chat,speech,parseRequest,matchHandoff,volunteers,answerRules}.ts
   src/lib/{voiceChat,voiceInstructions}.ts  서버 전용. 이용자 음성 대화: 요청 검사, OpenAI 호출, 접수 변환, 가짜 대화 / 지시문 원문(§8.9)
   src/lib/requestStore.ts                   서버 전용. 저장소 인터페이스, 메모리 구현, Supabase 구현
@@ -236,7 +239,7 @@ recognition.maxAlternatives = 1;
 | 내려놓기 취소(취소 버튼, Esc, 카드 이동) | 없음 | "내려놓기" 버튼(카드 이동이면 새 질문) |
 
 - 화면 구조: 위 띠(제목·구매 인증 배지·진행 점·현재 질문)는 고정이라, 답을 쓰는 동안에도 현재 질문이 화면 위에 보인다(이용자 기획 설계원칙 4). "이용자가 한 말" 상자와 보조 문구는 스크롤 본문에 둔다. 화면이 아주 작거나 글자를 크게 키워 두 띠가 화면을 너무 많이 차지할 때만 고정을 풀어 입력 칸이 가려지지 않게 한다(조건은 `ResearchChat.tsx`). 초점 받은 칸은 띠 밖으로 스크롤된다.
-- 리서치 챗의 안내 글자는 `research.ts`의 `RESEARCH_COPY`와 `ResearchChat.tsx`에, 대기열·전송 안내는 `volunteerView.ts`의 `VOLUNTEER_MESSAGES`에 있다. 이 표는 시점과 초점만 정한다.
+- 리서치 챗의 안내 글자는 `research.ts`의 `RESEARCH_COPY`와 `ResearchConversation.tsx`(`COPY`)에, 대기열·전송 안내는 `volunteerView.ts`의 `VOLUNTEER_MESSAGES`에 있다. 이 표는 시점과 초점만 정한다.
 - 상태 안내는 화면마다 `StatusRegion`(`role="status"`) 하나로 한다.
 - 진행 점 7개는 그림(`role="img"`)으로 묶고 몇 번째 질문인지 글 이름을 준다(`RESEARCH_COPY.progressAlt`). 눈에 보이는 진행 글자는 낭독에서 숨긴다.
 - 막힌 버튼은 `disabled` 대신 `aria-disabled`로 둔다. 초점이 버튼에 남고, 막힌 "다음"·"완료하고 보내기"를 누르면 이유를 안내한다.
@@ -320,6 +323,35 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 - 반환 열 이름은 `out_`으로 시작하고 표 열은 별칭으로 한정한다. 반환 이름이 열 이름과 같으면 PL/pgSQL에서 "ambiguous" 오류가 난다.
 - 초안 SQL은 `tsd-review.md`의 근거 문서와 워크플로 산출물에 있다. 실제 Postgres에서 돌려 보기 전까지는 추정이다(§10, §13).
 
+### 8.3.1 리서치 챗 대화 표와 SQL 함수(v2.2 초안, 마이그레이션 `20261117000000_research_conversation.sql`)
+
+추가형이다. 위 표 2개와 함수 5개는 바꾸지 않는다. 모든 표는 RLS를 켜고 정책이 없으며 `revoke all from anon, authenticated`다.
+
+| 표 | 내용 | 지워지는 때 |
+|---|---|---|
+| `research_sessions` | 요청당 세션 1개. 구매 여부, 칸 7개(`slots`), 추가 답, 질문 횟수(`counters`), 확인 필요(`pending`), 리뷰(`review`), 검색 캐시, `version`, `next_seq` | 요청이 in_progress에서 벗어나거나 봉사자가 바뀔 때(트리거), 요청 삭제(cascade) |
+| `research_messages` / `research_turns` | 대화 메시지(≤8,192바이트), 같은 `clientTurnId` 중복 방지와 처리 중 자리 | 세션과 함께 |
+| `research_photos` | 구매 인증 사진 JPEG 썸네일(≤60,000자), 설명·표기 기종·촬영 종류는 null 허용 | 세션과 함께 |
+| `research_usage` | 요청당 AI 턴·웹 검색·사진·리뷰 횟수 | 요청이 지워질 때만(세션이 지워져도 남음) |
+| `ai_usage_daily` | 서울 날짜별 웹 검색·AI 호출 횟수 | 없음(날짜당 한 줄) |
+
+| 함수 | 하는 일 |
+|---|---|
+| `research_open(p_request_id, p_volunteer_id, p_after)` | `p_after`가 없으면 6시간 정리 뒤 소유를 확인하고 세션을 만들어 전부 돌려준다. 있으면 읽기만(폴링) |
+| `research_begin(...)` | 소유·`session_id` 확인, 중복 턴·처리 중, stale(세지 않음), 검색 캐시, 요청당·하루 상한 확인, 스냅숏 |
+| `research_apply(...)` | 중복이면 저장된 응답(stale보다 먼저), stale, patch 반영, 칸이 바뀌면 `version+1`이고 확정 리뷰는 draft로, 다음 질문 후보 중 첫 유효 후보를 메시지로 |
+| `research_add_message` / `research_add_photo` / `research_remove_photo` | 검색 결과 저장, 사진(3장, 리서치만이면 거부) 넣기·지우기와 같은 처리에서 다음 질문 |
+| `research_set_review` / `research_send` | 리뷰 draft·confirmed 저장, 보내기(필수 칸·확정 리뷰·`version` 확인 뒤 요청 done과 `results` 삽입. 다시 보내면 existing) |
+| `research_sweep(p_idle)` | 6시간 넘게 활동이 없는 in_progress 요청을 `release_request`와 같은 값으로 대기열에 돌린다 |
+| 트리거 `research_drop_on_leave` | `requests`가 in_progress에서 벗어나거나 봉사자가 바뀌면 그 세션을 지운다 |
+
+- 필수 칸: 기종, 장점, 대안 대신 고른 이유, 구매함이면 사진, 구매 여부 정해짐. 리서치만이면 사진 칸이 없다.
+- 잠금 순서는 언제나 `requests` → `research_sessions` → `research_usage` → `ai_usage_daily`다. 세션을 쓰는 함수는 요청 행을 `for share`로, 요청을 바꾸는 `research_send`·`research_sweep`은 `for no key update`·`skip locked`로 먼저 잠근다. 그래서 내려놓기·보내기·정리와 교착이 없고, 소유 확인 뒤 내려놓기가 끝나 세션이 남는 경합도 없다.
+- 상한: 요청당 AI 턴 40, 웹 검색 12, 사진 올리기 6, 리뷰 3. 하루 웹 검색 380, AI 호출 1500(QA 1회 2.5만 원 기준, 환경변수 `RESEARCH_DAILY_SEARCH_CAP`·`RESEARCH_DAILY_AI_CAP`로 바꿈).
+- 함수는 모두 `security invoker`, `set search_path = ''`, `revoke execute from public, anon, authenticated`, `grant to service_role`다. 시험은 PGlite(`tests/unit/sql/researchSql.test.ts`).
+- 되돌리기: `supabase/rollback/20261117000000_research_conversation_down.sql`을 사람이 실행하고 `supabase migration repair --status reverted 20261117000000 --linked`를 실행한다.
+- 휴대폰 사진 링크(`photo_links`)는 11/18 뒤 마이그레이션 2(`20261119000000_photo_links.sql`)에서 더한다.
+
 ### 8.4 플로우 A(①②)
 
 | 경로 | 성공 | 실패 |
@@ -337,7 +369,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 | 2 | `POST /api/volunteer/requests/{id}/claim` | 200 `{requestId, status:"in_progress", claimedAt, alreadyMine, request: VolunteerRequestView}` | 409 `already_claimed` / `already_done` / `expired`, 404 |
 | 3 | `GET /api/volunteer/requests/{id}` | 200 `VolunteerRequestView` + `status` | 403 `not_yours`, 404 |
 | 4 | `POST /api/volunteer/requests/{id}/release` (선택) | 200 `{requestId, status:"waiting"}` | 403 `not_yours`, 409 `not_in_progress` |
-| 5 | `POST /api/volunteer/requests/{id}/result` `{candidateName, purchaseUrl, guide, summary, summarySource, summaryEdited}` | 201 `{requestId, status:"done", sentAt, durationSeconds}`, 같은 봉사자 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`/`invalid_url`, 403 `not_yours`, 409 `not_in_progress`, 404 |
+| 5 | *(v2.2 초안에서 `POST /api/volunteer/requests/{id}/research/send`로 대체됨. 이 줄의 `/result`는 지웠다)* `POST /api/volunteer/requests/{id}/result` `{candidateName, purchaseUrl, guide, summary, summarySource, summaryEdited}` | 201 `{requestId, status:"done", sentAt, durationSeconds}`, 같은 봉사자 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`/`invalid_url`, 403 `not_yours`, 409 `not_in_progress`, 404 |
 
 Next 16의 동적 경로 `params`는 Promise라 `await`한다(구현 때 설치된 Next 타입으로 확인).
 
@@ -353,9 +385,9 @@ v1 계약에 선택 필드만 더한다. 봉사자 화면에서만 호출한다.
 - 응답, 오류 표, `runtime`, `maxDuration`은 v1 그대로.
 - 대화 기록은 보내지 않는다(v1 그대로). 대화는 봉사자 탭 메모리에만 있다.
 
-### 8.7 ③④⑤ `POST /api/volunteer/research` (v2.1)
+### 8.7 ③④⑤ `POST /api/volunteer/research` (v2.1, v2.2 초안에서 지움: 대화형 `research/*` 라우트로 대체, §8.3)
 
-리서치 챗의 AI 도움 한 번을 돌려준다. 상태가 없다. 요청·응답 필드, 로그 형식, 검사 패턴 같은 세부 계약은 `apps/web/src/lib/research.ts`·`researchRequest.ts`·`researchCheck.ts`와 `src/app/api/volunteer/research/route.ts`를 따른다.
+리서치 챗의 AI 도움 한 번을 돌려준다. 상태가 없다. 요청·응답 필드, 로그 형식, 검사 패턴 같은 세부 계약은 `apps/web/src/lib/research.ts`·`researchImage.ts`·`researchCheck.ts`를 따른다(옛 라우트 파일은 지웠다).
 
 - 설정: `runtime = 'nodejs'`, `dynamic = 'force-dynamic'`, `maxDuration = 60`. 응답은 래퍼 없는 JSON, `Cache-Control: no-store`. 봉사자 쿠키가 있어야 한다.
 - 요청 `{ requestId, kind, ... }`. `kind`는 8종이다: 카드용 `model`·`pros`·`alts`·`altReason`·`benefits`·`refs`, 사진 설명 `photo`, 핵심 정리 초안 `summary`. kind에 필요한 답(기종, 같이 고민한 제품 등)을 함께 보낸다.
@@ -444,7 +476,7 @@ AI는 봉사자의 리서치를 돕기만 한다. 경계는 코드로 고정한�
 - v1의 가짜 음성 입력, 화면 시험 환경(iPhone 15·WebKit), 필수 사례, 챗봇 품질 규칙은 그대로다. 통과 보고에는 "가짜 음성 입력 기준"을 밝힌다.
 - 저장소: `requestStore`는 인터페이스 하나에 메모리 구현과 Supabase 구현을 둔다. Supabase 구현은 가짜 RPC 클라이언트를 주입해 단위 시험한다.
 - 리서치 챗 단위 시험: `tests/unit/research*.test.ts`(카드 상태·구매 인증, 출력 검사, 사진 축소 계산, 결과 변환, 라우트). 라우트 시험은 가짜 OpenAI로 fallback과 오류 코드를 본다.
-- 리서치 챗 화면 시험: `tests/e2e/volunteer-research.spec.ts`(도우미 `e2e/helpers/researchFlow.ts`). `LLM_MODE=mock` 가짜 AI 응답 기준이고, fallback은 `page.route`로 만든다. 보고에는 "가짜 AI 응답 기준"을 밝힌다.
+- 리서치 챗 화면 시험: `tests/e2e/research-chat.spec.ts`(`e2e-desktop` 프로젝트, 노트북 1440·1024). 실제 Next 서버를 `LLM_MODE=mock` 가짜 AI로 띄워 붙고, 응답은 꾸미지 않는다(실패 시험만 `page.route`로 요청을 끊는다). 실제 AI 한 사이클은 `research-cycle.spec.ts`(`npm run test:research-cycle`, 공개 주소). 보고에는 "가짜 AI 응답 기준"을 밝힌다.
 - v2.1에서 화면이 바뀌어 대상이 없어진 시험(요청 상세·캡처·전송 화면 시험, `extract-text`·`summarize` 라우트 시험, `candidateDraft`·`captureRead`·`evidenceCheck`·`imagePieces`·`summaryDraft`·`summaryEdit` 단위 시험)은 리서치 챗 시험으로 바꿨다. 기준을 낮춘 것이 아니다.
 - (v2.1에서 없앰) ④ 합성 이미지 조각과 `EXTRACT_MODE=mock`으로 자르기·보내기·텍스트 입력 경로 시험, `evidenceCheck` 고정 시험값, ④ 엔진 정확도 정답지 비교.
 - 필수 사례 추가: 대기열 빈 목록, 이미 진행 중(409) → 목록 복귀와 낭독, 남의 요청 상세(403), 사진 413·415, 필수 카드가 빈 채 보내기 막힘, AI fallback에서도 카드 진행, ⑥ 실패 → 입력 유지·재전송 같은 결과, 봉사자 화면 axe 위반 0건.

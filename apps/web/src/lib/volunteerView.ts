@@ -93,9 +93,10 @@ const CONDITION_LABEL: Record<ConditionKind, string> = {
   any: "새 제품·중고 상관없음",
 };
 
-/** 요청 상세의 구조화 줄. 품목을 모르면 "품목" 부분을 뺀다. */
+/** 요청 상세의 구조화 줄. 품목을 모르면 "품목" 부분을 뺀다. 브랜드가 있으면 품목 뒤에 붙는다. */
 export function structuredLine(request: {
   item: string | null;
+  brand?: string | null;
   budget: string;
   conditionKind: ConditionKind | null;
   condition: string;
@@ -105,6 +106,7 @@ export function structuredLine(request: {
     : request.condition;
   const parts = [
     ...(request.item ? [`품목 ${request.item}`] : []),
+    ...(request.brand ? [`브랜드 ${request.brand}`] : []),
     `예산 ${request.budget}`,
     condition,
   ];
