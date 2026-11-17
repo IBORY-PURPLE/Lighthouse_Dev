@@ -191,7 +191,8 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(page.getByText("AI 제안 · 웹에서 찾은 후보 3개")).toBeVisible();
     await expect(page.getByRole("link", { name: /^쿠팡에서 찾기/ })).toHaveAttribute("href", /coupang\.com/);
     await expect(page.getByTestId("current-question")).toContainText("질문 1 · 기종");
-    await expect(composer(page)).toBeFocused();
+    // 기대 변경: 승인된 계획 §3.7 — 브리핑 뒤 초점은 첫 질문(vc-q-<seq>)이다.
+    await expect(page.locator("[id^=vc-q-]").first()).toBeFocused();
 
     // E3: 칩으로 기종, 글로 장점 → 칸 채움, 사진 요청.
     await pickModel(page);

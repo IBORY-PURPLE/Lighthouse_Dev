@@ -2233,12 +2233,30 @@
   }
 
   /* 히어로는 제목·입력창이 가운데 기준으로 떠 있어(position:absolute) 위 여백이 먹지 않는다. 둘 다 아래로 내린다. */
+  /* 제목 묶음은 아래(입력창 위 24px+안내 한 줄 자리)에 붙이고, 위로는 [열기] 버튼(본문 위 72px까지) 아래로만 자란다. */
   .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-copy {
-    bottom: calc(50% + 24px);
+    top: 72px;
+    bottom: calc(50% + 32px);
+    justify-content: flex-end;
   }
 
   .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-dock {
     top: calc(50% + 16px);
+  }
+
+  /* 화면이 낮으면(폰 Safari 659px 등) 보조 문장을 빼고 제목을 줄여 [열기] 버튼과 겹치지 않게 한다. */
+  @media (max-height: 720px) {
+    .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-copy {
+      gap: 10px;
+    }
+
+    .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-title {
+      font-size: 28px;
+    }
+
+    .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-sub {
+      display: none;
+    }
   }
 
   .vc-topbar .vc-tag {

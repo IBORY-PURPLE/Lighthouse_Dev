@@ -77,6 +77,19 @@ test.describe("이용자 요청 브리핑", () => {
     // 히어로: 구매 여부를 고르면 이용자 답을 차례로 보여 준다는 안내.
     await expect(page.getByTestId("hero-brief-hint")).toHaveText(HINT);
     await capture(page, "brief-1-hero");
+    // 390 폭에서도 [열기] 버튼·알약·제목·안내·입력창이 겹치지 않는다(폰 Safari 높이 659 포함).
+    for (const height of [659, 844]) {
+      await page.setViewportSize({ width: 390, height });
+      await page.waitForTimeout(300);
+      const open = await page.locator(".vc-side-open").boundingBox();
+      const pill = await page.locator(".vc-pill").boundingBox();
+      const hintBox = await page.getByTestId("hero-brief-hint").boundingBox();
+      const dock = await page.locator(".vc-dock").boundingBox();
+      expect(pill!.y).toBeGreaterThanOrEqual(open!.y + open!.height);
+      expect(hintBox!.y + hintBox!.height).toBeLessThanOrEqual(dock!.y);
+      if (height === 844) await capture(page, "brief-1-hero-390");
+    }
+    await page.setViewportSize({ width: 393, height: 659 });
 
     await quick(page).getByRole("button", { name: "구매했어요", exact: true }).click();
 
