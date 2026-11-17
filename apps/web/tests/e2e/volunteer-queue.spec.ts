@@ -131,6 +131,47 @@ test.describe("봉사자 첫 화면·왼쪽 창·맡기 (휴대폰)", () => {
     await page.context().close();
   });
 
+  test("완료 항목을 누르면 같은 챗봇 화면 틀에서 보낸 리뷰 문단과 보낸 시각을 읽기 전용으로 보인다(옛 주소도 같다)", async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await openDevice(browser, baseURL);
+    await enterAs(page);
+    await refill(page);
+    await openPane(page);
+
+    const sent = pane(page).getByTestId("mine-sent").filter({ hasText: "아이 실내화 210 사이즈, 흰색" });
+    await sent.click();
+    // 좁은 화면에서는 겹친 왼쪽 창이 접히고, 보낸 리뷰가 보인다. 완료 페이지(제목 "완료된 요청")는 없다.
+    await expect(page).toHaveURL(/\/volunteer\/requests\/[0-9a-f-]{36}$/);
+    const detailUrl = page.url();
+    const review = page.getByTestId("sent-review");
+    await expect(review).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "리서치 챗" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "완료된 요청" })).toHaveCount(0);
+    await expect(paneToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("sent-body")).toHaveText("‘구매하기’를 누르고 사이즈 210을 고릅니다.");
+    await expect(page.getByTestId("sent-at")).toContainText("보낸 시각");
+    await expect(page.getByTestId("sent-model")).toContainText("아동 EVA 실내화 흰색 (시연용 예시 1)");
+    await expect(review.getByRole("button")).toHaveCount(0);
+    await expect(page.getByRole("textbox")).toHaveCount(0);
+    // 후보 목록·구매 링크·상세 요약은 이 화면에 없다.
+    await expect(page.getByText("구매 링크")).toHaveCount(0);
+    await expect(page.getByText("상세 요약")).toHaveCount(0);
+    await expect(page.getByText("아동 실내화 흰색 (시연용 예시 2)")).toHaveCount(0);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+    await expectNoBlockingAxe(page);
+
+    // 왼쪽 창을 열면 이 요청이 현재 위치(aria-current)로 표시된다. 새로 고쳐도 같은 화면이다.
+    await openPane(page);
+    await expect(pane(page).getByTestId("mine-sent").filter({ hasText: "아이 실내화 210 사이즈, 흰색" })).toHaveAttribute("aria-current", "page");
+    await page.reload();
+    await expect(page.getByTestId("sent-review")).toBeVisible();
+    expect(page.url()).toBe(detailUrl);
+    await page.context().close();
+  });
+
   test("[새로 보기]를 누르면 직전 목록에 없던 요청에 새 요청 표시가 붙고, 다시 누르면 사라진다", async ({
     browser,
     baseURL,
