@@ -11,7 +11,7 @@ import {
   sessionSnapshot,
   type AiLabel,
 } from "@/lib/researchApi";
-import { runTurn, parseTurnBody, type TurnInput } from "@/lib/researchTurn";
+import { runTurn, parseTurnBody, turnTrace, type TurnInput } from "@/lib/researchTurn";
 import { capsFromEnv } from "@/lib/researchSession";
 import { getResearchStore, type ResearchStore, type TurnResponse } from "@/lib/researchStore";
 import { StoreUnavailableError } from "@/lib/requestStore";
@@ -242,6 +242,8 @@ export async function POST(
               up: label === "fallback" ? run.upstream : null,
               usage: run.usage,
             });
+            // AI 판단 확인용 한 줄(Vercel 실행 로그에서 "[research-turn]"으로 찾는다). 봉사자 입력·칸 값·ID는 넣지 않는다.
+            if (applied.outcome === "ok" && input.type === "text") console.info("[research-turn]", JSON.stringify(turnTrace(run)));
             return succeed(turnBody(applied.response, label, input));
           }
           case "stale":

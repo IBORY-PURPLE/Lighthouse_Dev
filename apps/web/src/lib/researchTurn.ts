@@ -1093,6 +1093,31 @@ export interface TurnRun {
   plan: TurnPlan;
   upstream: Upstream | null;
   usage: { in: number; out: number };
+  /** 검사를 통과한 AI 판단(로그용). AI를 부르지 않았거나 실패하면 없다. */
+  aiTurn?: AiTurn | null;
+}
+
+/**
+ * Vercel 실행 로그에 남길 턴 요약 한 줄. AI가 무엇을 판단했고 서버가 어떤 질문을 후보로 두었는지 본다.
+ * 봉사자 입력과 칸 값은 넣지 않는다(칸은 이름만). 질문 문장은 AI·서버가 만든 글이다.
+ */
+export function turnTrace(run: TurnRun): Record<string, unknown> {
+  const turn = run.aiTurn ?? null;
+  return {
+    ai: run.plan.label,
+    upstream: run.upstream,
+    tokens: run.usage,
+    intent: turn?.intent ?? null,
+    filled: turn ? turn.fills.map((fill) => fill.slot) : [],
+    aiNext: turn?.next ? { action: turn.next.action, slot: turn.next.slot, text: turn.next.text } : null,
+    aiDropped: turn?.dropped ?? false,
+    next: run.plan.next.slice(0, 2).map((candidate) => ({
+      action: candidate.action,
+      slot: candidate.slot ?? null,
+      by: candidate.message.ai ?? "none",
+      text: typeof candidate.message.body.text === "string" ? candidate.message.body.text : null,
+    })),
+  };
 }
 
 /** 글 입력이면 AI를 한 번 부르고(가짜 모드·키 없음·실패는 fallback), 검사를 거쳐 계획한다. 던지지 않는다. */
@@ -1120,5 +1145,6 @@ export async function runTurn({ session, input, context, capped, signal }: RunTu
     plan: planTurn({ session, input, context, ai }),
     upstream: turn ? null : (result.upstream ?? "empty"),
     usage: result.usage,
+    aiTurn: turn,
   };
 }
