@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { claimDemo, enterAs, FIRST_DEMO_QUOTE, refill } from "./helpers/volunteerFlow";
+import { claimDemo, enterAs, FIRST_DEMO_QUOTE, refill, shot as evidenceShot } from "./helpers/volunteerFlow";
 
 // 대화형 리서치 챗(D안) 화면 시험, 노트북 크롬(e2e-desktop).
 // 실제 Next 서버(LLM_MODE=mock, 메모리 저장소, playwright.config의 webServer)에 붙는다. 가로채기로 응답을 꾸미지 않는다
@@ -714,5 +714,303 @@ test.describe("대화형 리서치 챗 · 1024", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(toggle).toBeFocused();
     await expect(count(page)).toBeHidden();
+  });
+});
+
+// ----- 두 창 접기·점·기억·"…" 메뉴·칸 누르기 (demo6 PR2) -----
+
+const SLOTS_KEY = "lh.vol.panels.v1";
+const slotsToggle = (page: Page) => page.getByRole("button", { name: /^모은 정보 필수/ });
+const sideToggle = (page: Page) => page.locator(".vc-topbar").getByRole("button", { name: "대기열·내 담당" });
+const moreToggle = (page: Page) => page.getByRole("button", { name: "더 보기" });
+const storedPanels = (page: Page) =>
+  page.evaluate(
+    (key) => JSON.parse(window.localStorage.getItem(key) ?? "null") as Record<string, { mine: boolean; slots: boolean }> | null,
+    SLOTS_KEY,
+  );
+const turnPosts = (calls: Call[]) => calls.filter((call) => call.method === "POST" && call.path.startsWith("/research/turn")).length;
+
+test.describe("두 창 · 노트북 1440", () => {
+  test("오른쪽 창을 닫으면 창이 보이지 않고 inert이며 대화가 넓어진다. 새로 고쳐도 왼쪽·오른쪽 창 상태가 그대로다", async ({ page }) => {
+    await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+
+    // 넓은 화면의 기본값: 둘 다 열림.
+    await expect(slotsToggle(page)).toHaveAttribute("aria-controls", "vc-panel");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "true");
+    const main = page.locator("main.vc-main");
+    const widthOpen = (await main.boundingBox())?.width ?? 0;
+
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#vc-panel")).toBeHidden();
+    await expect(page.locator("#vc-panel")).toHaveAttribute("inert", "");
+    // 오른쪽 여백이 0이 되어 대화가 창 폭(360)만큼 넓어진다.
+    await expect.poll(async () => ((await main.boundingBox())?.width ?? 0) - widthOpen).toBeGreaterThanOrEqual(350);
+    await expect.poll(async () => (await storedPanels(page))?.wide).toEqual({ mine: true, slots: false });
+    await evidenceShot(page, "research-panels-closed");
+
+    await sideToggle(page).click();
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#vol-mine")).toBeHidden();
+    await expect.poll(async () => (await storedPanels(page))?.wide).toEqual({ mine: false, slots: false });
+
+    // 새로 고쳐도 그대로.
+    await page.reload();
+    await expect(log(page).getByText(`${MODEL}의 장점이 뭐예요?`)).toBeVisible();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#vc-panel")).toBeHidden();
+
+    // 다시 열고 새로 고치면 열린 채로.
+    await slotsToggle(page).click();
+    await sideToggle(page).click();
+    await page.reload();
+    await expect(log(page).getByText(`${MODEL}의 장점이 뭐예요?`)).toBeVisible();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#vc-panel")).toBeVisible();
+  });
+
+  test("히어로에서는 오른쪽 창이 닫힌 채 시작하고 열고 닫아도 저장값을 바꾸지 않는다", async ({ page }) => {
+    await begin(page);
+    await expect(page.getByTestId("research-stage")).toHaveAttribute("data-mode", "hero");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    const before = (await storedPanels(page))?.wide?.slots ?? true;
+    await slotsToggle(page).click();
+    await expect(page.locator("#vc-panel")).toBeVisible();
+    await slotsToggle(page).click();
+    await expect(page.locator("#vc-panel")).toBeHidden();
+    expect((await storedPanels(page))?.wide?.slots ?? true).toBe(before);
+  });
+
+  test("닫힌 동안 칸이 새로 차면 버튼에 점과 새 정보 있음이 붙고, 창은 저절로 열리지 않으며, 열면 점이 사라진다", async ({ page }) => {
+    await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(slotsToggle(page)).not.toContainText("새 정보 있음");
+
+    await answerPros(page);
+    await expect(page.getByRole("button", { name: /^모은 정보 필수 2\/4 새 정보 있음$/ })).toBeVisible();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#vc-panel")).toBeHidden();
+
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(slotsToggle(page)).not.toContainText("새 정보 있음");
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).not.toContainText("새 정보 있음");
+
+    // 닫은 채 새로 고치면 처음 읽는 것이라 점이 없다.
+    await page.reload();
+    await expect(log(page).getByText("구매 인증에 쓸 사진을 올려 주세요.")).toBeVisible();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(slotsToggle(page)).not.toContainText("새 정보 있음");
+  });
+
+  test("위 막대 더 보기 메뉴: 요청 내려놓기 확인, Esc·바깥 누르기로 닫히고 초점이 더 보기로 돌아온다", async ({ page }) => {
+    await begin(page);
+    const more = moreToggle(page);
+    await expect(more).toHaveAttribute("aria-controls", "vc-more");
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#vc-more")).toBeHidden();
+
+    await more.click();
+    await expect(more).toHaveAttribute("aria-expanded", "true");
+    const menu = page.locator("#vc-more");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "요청 내려놓기" }).click();
+    await expect(page.getByRole("group", { name: "요청 내려놓기 확인" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "취소" })).toBeFocused();
+    await evidenceShot(page, "research-more-menu");
+    await page.getByRole("button", { name: "취소" }).click();
+    await expect(menu.getByRole("button", { name: "요청 내려놓기" })).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(menu).toBeHidden();
+    await expect(more).toBeFocused();
+
+    await more.click();
+    await expect(menu).toBeVisible();
+    await page.getByRole("heading", { level: 2, name: /구매 경험\s*리서치 어시스턴트/ }).click();
+    await expect(menu).toBeHidden();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(more).toBeFocused();
+
+    // 바깥의 초점 가능한 버튼을 눌러도 닫히고 초점이 더 보기로 돌아온다.
+    await more.click();
+    await expect(menu).toBeVisible();
+    await sideToggle(page).click();
+    await expect(menu).toBeHidden();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(more).toBeFocused();
+
+    // 입력창을 눌러도 초점은 더 보기로 돌아온다.
+    await more.click();
+    await expect(menu).toBeVisible();
+    await composer(page).click();
+    await expect(menu).toBeHidden();
+    await expect(more).toBeFocused();
+
+    // 패널과 같은 확인·같은 release(): 돌려놓기를 누르면 첫 화면으로 간다.
+    await more.click();
+    await menu.getByRole("button", { name: "요청 내려놓기" }).click();
+    await page.getByRole("button", { name: "돌려놓기" }).click();
+    await expect(page).toHaveURL(/\/volunteer$/);
+    await expect(page.getByRole("status")).toHaveText("요청을 대기열로 돌려놓았어요");
+  });
+
+  test("칸 누르기: 그 칸의 마지막 질문으로 스크롤하고 초점을 옮긴다. 접힌 앞부분은 목록을 먼저 열고, 묻지 않은 칸은 안내한다. 서버 요청은 없다", async ({ page }) => {
+    test.setTimeout(120_000);
+    const calls = await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+    await answerPros(page);
+    await uploadPhoto(page);
+    await pickAlt(page);
+    await answerReason(page);
+    await expect(page.locator("#vc-folded-list")).toHaveCount(0);
+    const turnsBefore = turnPosts(calls);
+    const callsBefore = calls.length;
+
+    // 칸마다 버튼이 있고 data-slot은 li에만 있다(기존 시험이 칸을 센다: 구매 경로는 7칸).
+    await expect(page.locator("[data-slot]")).toHaveCount(7);
+    const jumpModel = page.getByRole("button", { name: /^질문 1 .*으로 가기$/ });
+    await expect(jumpModel).toBeVisible();
+
+    // 접힌 앞부분(기종 질문): 접힌 목록이 열리고 그 질문 말풍선이 보이며 초점을 받는다.
+    await jumpModel.click();
+    await expect(page.locator("#vc-folded-list")).toBeVisible();
+    const target = page.locator(".vc-row:focus");
+    await expect(target).toHaveAttribute("id", /^vc-q-\d+$/);
+    await expect(target).toContainText("어떤 기종을 쓰고 계세요?");
+    await expect(target).toBeInViewport();
+    await evidenceShot(page, "research-slot-jump");
+
+    // 묻지 않은 칸(참고 글): 상태 줄 안내만.
+    await page.getByRole("button", { name: /^질문 7 .*으로 가기$/ }).click();
+    await expect(page.getByRole("status")).toHaveText("아직 묻지 않았어요");
+
+    // 접히지 않은 질문(혜택): 바로 그 말풍선.
+    await page.getByRole("button", { name: /^질문 6 .*으로 가기$/ }).click();
+    await expect(page.locator(".vc-row:focus")).toContainText("살 때 받은 혜택이 있었어요?");
+
+    await page.waitForTimeout(500);
+    expect(turnPosts(calls)).toBe(turnsBefore);
+    expect(calls.length).toBe(callsBefore);
+  });
+});
+
+test.describe("두 창 · 1024 (겹침)", () => {
+  test.use({ viewport: { width: 1024, height: 768 } });
+
+  test("겹친 오른쪽 창을 Esc로 닫으면 닫힌 상태를 기억한다(새로 고쳐도 닫힌 채)", async ({ page }) => {
+    await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect.poll(async () => (await storedPanels(page))?.narrow?.slots).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(slotsToggle(page)).toBeFocused();
+    await expect.poll(async () => (await storedPanels(page))?.narrow?.slots).toBe(false);
+    await page.reload();
+    await expect(log(page).getByText(`${MODEL}의 장점이 뭐예요?`)).toBeVisible();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("둘 다 닫힌 채 시작하고 한쪽을 열면 다른 쪽이 닫힌다. 메뉴를 열면 창이 닫힌다. 칸을 누르면 창이 닫히고 질문으로 간다", async ({ page }) => {
+    test.setTimeout(120_000);
+    await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+    await answerPros(page);
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await sideToggle(page).click();
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+
+    // 칸 누르기: 창을 닫은 뒤 질문으로 옮긴다.
+    await page.getByRole("button", { name: /^질문 1 .*으로 가기$/ }).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator(".vc-row:focus")).toContainText("어떤 기종을 쓰고 계세요?");
+
+    // 메뉴를 열면 열려 있던 창이 닫힌다.
+    await slotsToggle(page).click();
+    await moreToggle(page).click();
+    await expect(page.locator("#vc-more")).toBeVisible();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expectFits(page);
+
+    // 겹친 왼쪽 창은 Esc로 닫고 초점은 버튼으로 돌아온다.
+    await page.keyboard.press("Escape");
+    await sideToggle(page).click();
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(sideToggle(page)).toBeFocused();
+  });
+});
+
+test.describe("두 창 · 휴대폰 393", () => {
+  test.use({ viewport: { width: 393, height: 852 } });
+
+  test("기억된 값이 둘 다 열림이어도 좁은 화면에서는 한 창만 열린다(왼쪽 창이 남는다)", async ({ page }) => {
+    await begin(page);
+    await page.evaluate((key) => window.localStorage.setItem(key, JSON.stringify({ narrow: { mine: true, slots: true } })), SLOTS_KEY);
+    await page.reload();
+    await expect(page.getByTestId("research-stage")).toHaveAttribute("data-mode", "hero");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    // 히어로에서 왼쪽 창을 닫고 열어도 오른쪽 창의 기억값은 바꾸지 않는다.
+    await sideToggle(page).click();
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+    expect((await storedPanels(page))?.narrow).toEqual({ mine: false, slots: true });
+    // 대화로 넘어가도 두 창이 함께 열려 있지 않다.
+    await page.getByRole("button", { name: "구매했어요", exact: true }).click();
+    await expect(log(page).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
+    const both = (await sideToggle(page).getAttribute("aria-expanded")) === "true" && (await slotsToggle(page).getAttribute("aria-expanded")) === "true";
+    expect(both).toBe(false);
+  });
+
+  test("두 창 버튼이 모두 보이고 한 번에 하나만 열리며 가로로 넘치지 않는다. axe 통과", async ({ page }) => {
+    await begin(page);
+    await expect(page.getByTestId("research-stage")).toHaveAttribute("data-mode", "hero");
+    await expectFits(page);
+    await expect(sideToggle(page)).toBeVisible();
+    await expect(slotsToggle(page)).toBeVisible();
+    await expect(moreToggle(page)).toBeVisible();
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expectNoAxe(page);
+
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expectFits(page);
+    await sideToggle(page).click();
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expectFits(page);
+    await expectNoAxe(page);
+    await page.keyboard.press("Escape");
+    await expect(sideToggle(page)).toHaveAttribute("aria-expanded", "false");
+
+    await slotsToggle(page).click();
+    await expectFits(page);
+    await evidenceShot(page, "research-panels-phone");
+    await expectNoAxe(page);
   });
 });

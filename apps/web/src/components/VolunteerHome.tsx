@@ -8,6 +8,7 @@ import { HeroBackdrop } from "@/components/research/HeroBackdrop";
 import { HeroCopy } from "@/components/research/HeroCopy";
 import { resetDemoRequests, takeFlash } from "@/lib/volunteerClient";
 import { filterSlash, HOME_COPY, parseHomeInput } from "@/lib/volunteerCommands";
+import { usePanels } from "@/lib/usePanels";
 import { SIDE_PANE_ID, useSidePane } from "@/lib/useSidePane";
 
 interface VolunteerHomeProps {
@@ -42,7 +43,8 @@ export function VolunteerHome({ onUnauthorized }: VolunteerHomeProps) {
   const toggleRef = useRef<HTMLButtonElement>(null);
   const queueHeadingRef = useRef<HTMLHeadingElement>(null);
   const mineHeadingRef = useRef<HTMLHeadingElement>(null);
-  const pane = useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, forceOpen: forceMine, onUnauthorized, say: setNotice, onFirstLoad });
+  const panels = usePanels({ hero: true, forceMine });
+  const pane = useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, open: panels.mineOpen, setOpen: panels.setMine, onUnauthorized, say: setNotice, onFirstLoad });
 
   const confirmReset = async () => {
     if (busyRef.current) return;
@@ -101,7 +103,7 @@ export function VolunteerHome({ onUnauthorized }: VolunteerHomeProps) {
 
   return (
     <div
-      className={`vol-chat vc-stage is-hero vh-home${pane.open ? " has-mine" : ""}`}
+      className={`vol-chat vc-stage is-hero vh-home${panels.mineOpen ? " has-mine" : ""}`}
       data-testid="home-stage"
     >
       <header className="vc-topbar vh-topbar">
@@ -111,16 +113,16 @@ export function VolunteerHome({ onUnauthorized }: VolunteerHomeProps) {
           ref={toggleRef}
           type="button"
           className="vc-mine-toggle"
-          aria-expanded={pane.open}
+          aria-expanded={panels.mineOpen}
           aria-controls={SIDE_PANE_ID}
-          onClick={pane.toggle}
+          onClick={panels.toggleMine}
         >
           대기열·내 담당
         </button>
       </header>
       <div className="vc-body">
         <HeroBackdrop variant="hero" />
-        <SidePane id={SIDE_PANE_ID} pane={pane} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
+        <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
         <main className="vc-main">
           <HeroCopy />
           <div className="vc-dock">

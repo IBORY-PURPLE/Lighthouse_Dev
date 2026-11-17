@@ -1,17 +1,11 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { claimRequest, fetchQueue, readSeen, saveSeen, type QueueResponse } from "./volunteerClient";
+import { isWideScreen } from "./usePanels";
 import { newRequestIds, VOLUNTEER_MESSAGES } from "./volunteerView";
 
 /** 왼쪽 창 id. 위 막대 버튼의 aria-controls가 가리킨다. */
 export const SIDE_PANE_ID = "vol-mine";
-
-const WIDE_QUERY = "(min-width: 1180px)";
-
-/** 1180px 이상이면 창이 대화 옆에 붙고, 그 아래면 대화 위에 겹친다. */
-export function isWideScreen(): boolean {
-  return typeof window !== "undefined" && window.matchMedia(WIDE_QUERY).matches;
-}
 
 export type PaneSection = "queue" | "mine";
 
@@ -20,8 +14,9 @@ interface Options {
   toggleRef: RefObject<HTMLButtonElement | null>;
   queueHeadingRef: RefObject<HTMLHeadingElement | null>;
   mineHeadingRef: RefObject<HTMLHeadingElement | null>;
-  /** 처음부터 열고 시작한다(?tab=mine). */
-  forceOpen: boolean;
+  /** 왼쪽 창 열림(두 창 상태는 usePanels가 갖는다). remember가 false면 저장하지 않는다. */
+  open: boolean;
+  setOpen: (open: boolean, remember?: boolean) => void;
   /** 쿠키가 없어졌거나 틀리면(401). */
   onUnauthorized: () => void;
   /** 상태 줄에 알릴 글자. */
@@ -35,9 +30,8 @@ interface Options {
  * 열림은 넓은 화면은 열린 채, 좁은 화면은 닫힌 채 시작한다. 이 훅은 브라우저에서만 그려지는 화면(입장 확인과 요청 읽기가 끝난 뒤)이 쓴다.
  * 겹친 창은 Esc로 닫고, 초점은 연 버튼으로 돌려준다. 서버는 열 때·[새로 보기]·맡기·초기화 뒤에만 부른다.
  */
-export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, forceOpen, onUnauthorized, say, onFirstLoad }: Options) {
+export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, open, setOpen, onUnauthorized, say, onFirstLoad }: Options) {
   const router = useRouter();
-  const [open, setOpen] = useState<boolean>(() => forceOpen || isWideScreen());
   const [data, setData] = useState<QueueResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [loadedAt, setLoadedAt] = useState(0);
@@ -45,13 +39,11 @@ export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, forceO
   const [claimingId, setClaimingId] = useState<string | null>(null);
 
   const wantFocus = useRef<PaneSection | null>(null);
-  const handlers = useRef({ onUnauthorized, say, onFirstLoad });
+  const handlers = useRef({ onUnauthorized, say, onFirstLoad, setOpen });
 
   useEffect(() => {
-    handlers.current = { onUnauthorized, say, onFirstLoad };
-  }, [onUnauthorized, say, onFirstLoad]);
-
-  const toggle = useCallback(() => setOpen((value) => !value), []);
+    handlers.current = { onUnauthorized, say, onFirstLoad, setOpen };
+  }, [onUnauthorized, say, onFirstLoad, setOpen]);
 
   /**
    * 목록을 다시 읽는다. 성공하면 true. markNew가 false면(첫 읽기·다시 채운 직후) '새 요청'을 붙이지 않는다.
@@ -95,7 +87,7 @@ export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, forceO
       saveSeen(result.data.waiting.map((item) => item.requestId));
       setData(result.data);
       setLoadedAt(Date.now());
-      handlers.current.onFirstLoad?.(result.data, setOpen);
+      handlers.current.onFirstLoad?.(result.data, (value) => handlers.current.setOpen(value, false));
     })();
     return () => {
       cancelled = true;
@@ -114,9 +106,9 @@ export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, forceO
     (section: PaneSection) => {
       wantFocus.current = section;
       if (open) placeFocus();
-      else setOpen(true);
+      else setOpen(true, false);
     },
-    [open, placeFocus],
+    [open, setOpen, placeFocus],
   );
 
   useEffect(() => {
@@ -133,7 +125,7 @@ export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, forceO
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, toggleRef]);
+  }, [open, setOpen, toggleRef]);
 
   const locked = Boolean(data?.mine);
 
@@ -149,6 +141,8 @@ export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, forceO
       say("");
       const outcome = await claimRequest(requestId);
       if (outcome.kind === "claimed") {
+        // 좁은 화면의 겹친 창은 요청을 맡으면 접는다(다음 화면이 창에 덮인 채 시작하지 않게). 넓은 화면은 기억한 대로 둔다.
+        if (!isWideScreen()) handlers.current.setOpen(false);
         router.push(`/volunteer/requests/${outcome.requestId}`);
         return;
       }
@@ -173,9 +167,6 @@ export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, forceO
   );
 
   return {
-    open,
-    setOpen,
-    toggle,
     data,
     failed,
     loadedAt,

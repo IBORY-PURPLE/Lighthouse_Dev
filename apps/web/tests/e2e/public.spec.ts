@@ -66,7 +66,7 @@ test("공개 주소 완주: 가짜 음성, 대기열 접수, 다시 조회, 이�
 
   const entered = await page.goto("/classic");
   expect(entered?.status(), "첫 화면").toBe(200);
-  expect(new URL(page.url()).pathname).toBe("/");
+  expect(new URL(page.url()).pathname).toBe("/classic");
   await shot("user-first-screen");
 
   // 대기열 접수(POST /api/requests) 1회와 조회(GET) 2회의 저장소 시간을 잰다(결정 11).
