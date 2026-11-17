@@ -88,6 +88,9 @@ describe("원본(apps/user-voice-ui)과의 일치", () => {
     // 합병본은 목록이 진행 상황·리뷰를 서버에 묻고, "아직 연결되지 않았다"는 옛 안내를 띄우지 않는다.
     expect(merged).toContain("fetch('/api/requests/'+encodeURIComponent(item.requestId)");
     expect(merged).not.toContain("아직 연결되지 않았습니다");
+    // 웹 앱(PWA)·웹 푸시(A13): head 태그와 알림 버튼은 스크립트로 붙인다(마크업은 원본과 같다).
+    expect(merged).toContain("rel:'manifest',href:'/manifest.webmanifest'");
+    expect(merged).toContain("fetch('/api/push/key'");
   });
 });
 
