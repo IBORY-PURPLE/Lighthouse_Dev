@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // 로컬 개발에서 휴대폰(같은 와이파이)이 dev 서버를 열 수 있게 할 주소. 배포에는 영향 없다(dev 전용 설정).
+  allowedDevOrigins: process.env.LH_DEV_LAN_HOSTS?.split(",").filter(Boolean) ?? [],
   async headers() {
     return [
       {

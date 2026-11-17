@@ -36,9 +36,11 @@ export async function openDevice(
   return context.newPage();
 }
 
-/** 위 막대의 왼쪽 창 버튼. */
-export const paneToggle = (page: Page) =>
-  page.locator(".vc-topbar").getByRole("button", { name: PANE_TOGGLE_NAME });
+/**
+ * 왼쪽 창 여닫기 버튼. 닫혀 있으면 위 막대 아래 왼쪽의 [열기](이름 "대기열·내 담당"),
+ * 열려 있으면 창 안 토글 옆 [닫기](이름 "왼쪽 창 닫기")다. 보이는 쪽 하나를 고른다(aria-expanded로 상태를 본다).
+ */
+export const paneToggle = (page: Page) => page.locator(".vc-side-toggle:visible");
 
 /** 왼쪽 창. */
 export const pane = (page: Page) => page.locator(`#${PANE_ID}`);

@@ -141,7 +141,7 @@ const REFS_QUESTION = "참고한 블로그 글이나 영상이 있으면 링크�
 
 async function answerBenefits(page: Page) {
   await sendText(page, "카드 할인 받고 무료 배송이었어요");
-  await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("region", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
 }
 
 async function checkBenefit(page: Page) {
@@ -231,7 +231,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(page.getByTestId("thinking")).toContainText("공식몰 행사 찾는 중이에요.");
     await expect(log(page).getByText(REFS_QUESTION)).toHaveCount(0);
     releaseSearch();
-    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("region", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("혜택 3개를 찾았어요", { exact: false })).toBeVisible();
     await expect(page.getByText("봉사자 경험과 비교").first()).toBeVisible();
     await expect(page.getByText("직접 확인 필요", { exact: true })).toBeVisible();
@@ -360,12 +360,12 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await sendText(page, "소니 헤드셋 샀어요. 카드 할인 받고 무료 배송이었어요");
     await expect(page.getByText("AI 제안 · 웹에서 찾은 후보 3개")).toBeVisible();
     // 기종 검색 뒤에 화면이 혜택 검색을 이어서 부른다(followUp은 하나만 온다).
-    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("region", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
     expect(calls.filter((call) => call.path === "/research/search").map((call) => call.body?.kind)).toEqual(["model", "benefits"]);
 
     // 카드 둘을 잇따라 누른다. 두 번째는 첫 번째 턴이 끝난 뒤에 보내진다(버려지지 않는다).
     // 혜택은 종류별로 묶음이 따로 오므로 화면 전체의 카드 버튼에서 고른다.
-    const buttons = page.getByRole("list", { name: "찾은 혜택" }).getByRole("button", { name: /^확인했어요/ });
+    const buttons = page.getByRole("region", { name: "찾은 혜택" }).getByRole("button", { name: /^확인했어요/ });
     const first = buttons.nth(0);
     const second = buttons.nth(1);
     await first.click();
@@ -376,7 +376,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
 
     // 새로 고쳐도 서버 칸에서 둘 다 확인함으로 돌아온다.
     await page.reload();
-    const again = page.getByRole("list", { name: "찾은 혜택" }).getByRole("button", { name: /^확인했어요/ });
+    const again = page.getByRole("region", { name: "찾은 혜택" }).getByRole("button", { name: /^확인했어요/ });
     await expect(again.nth(0)).toHaveAttribute("aria-pressed", "true");
     await expect(again.nth(1)).toHaveAttribute("aria-pressed", "true");
     await expect(again.nth(2)).toHaveAttribute("aria-pressed", "false");
@@ -398,12 +398,12 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     const calls = await begin(page);
     await sendText(page, "소니 헤드셋 샀어요. 카드 할인 받고 무료 배송이었어요");
     await expect.poll(() => cut.size, { timeout: 15_000 }).toBe(2);
-    await expect(page.getByRole("list", { name: "찾은 혜택" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "찾은 혜택" })).toHaveCount(0);
 
     // 새로 고치면 처음 읽기만으로 혜택 검색을 부른다(턴·다른 검색 없이).
     const before = calls.length;
     await page.reload();
-    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("region", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
     const after = calls.slice(before).filter((call) => call.method === "POST");
     expect(after.map((call) => `${call.path}:${String(call.body?.kind ?? "")}`)).toEqual(["/research/search:benefits"]);
   });
@@ -446,11 +446,11 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await page.waitForTimeout(800);
     await expect(log(page).getByText(REFS_QUESTION)).toHaveCount(0);
     release();
-    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("region", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
     const refs = log(page).getByText(REFS_QUESTION);
     await expect(refs).toBeVisible();
     // 질문 7은 마지막 혜택 카드보다 아래에 있다.
-    const lastCard = await page.getByRole("list", { name: "찾은 혜택" }).last().boundingBox();
+    const lastCard = await page.getByRole("region", { name: "찾은 혜택" }).last().boundingBox();
     const refsBox = await refs.boundingBox();
     expect(refsBox!.y).toBeGreaterThan(lastCard!.y);
     expect(benefitsCalls).toBe(2);
@@ -505,11 +505,11 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
 
     const second = await page.context().newPage();
     await second.goto(page.url());
-    await expect(second.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(second.getByRole("region", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
 
-    expect(await page.getByRole("list", { name: "찾은 혜택" }).count()).toBe(0);
+    expect(await page.getByRole("region", { name: "찾은 혜택" }).count()).toBe(0);
     release();
-    await expect(page.getByRole("list", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("region", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
   });
 
   test("사진을 올린 뒤 다시 읽기 직전에 다른 탭이 요청을 내려놓으면, 옛 대화에 머물지 않고 화면을 바꾼다", async ({ page }) => {
@@ -573,7 +573,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(page.getByText("찾지 못했어요. 쇼핑몰에서 직접 찾아도 돼요.")).toBeVisible();
     expect(cut).toBe(1);
     await expect(page.getByTestId("thinking")).toHaveCount(0);
-    await expect(page.getByRole("list", { name: "찾은 혜택" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "찾은 혜택" })).toHaveCount(0);
     // 혜택 카드가 끝내 안 와도 질문 7이 제자리에 보이고, 다음 턴(건너뛰기)을 보낼 수 있다.
     await expect(log(page).getByText(REFS_QUESTION)).toBeVisible();
     await skipRefs(page);

@@ -23,6 +23,7 @@
     "test:public": "playwright test --project=public"
   },
   "dependencies": {
+    "@animateicons/react": "^0.13.0",
     "@supabase/supabase-js": "2.119.0",
     "groq-sdk": "^1.6.0",
     "next": "^16.4.5",

@@ -64,7 +64,10 @@ export function isSameSiteOrigin(request: NextRequest): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return false;
   try {
-    return new URL(origin).host === request.nextUrl.host;
+    // 브라우저가 보낸 Host를 먼저 본다. dev 서버를 0.0.0.0으로 띄우면 nextUrl.host가 실제 접속 주소(와이파이 IP)와 달라진다.
+    // 다른 사이트에서 온 요청은 Origin이 그 사이트라 어느 쪽과도 맞지 않는다.
+    const host = request.headers.get("host") ?? request.nextUrl.host;
+    return new URL(origin).host === host;
   } catch {
     return false;
   }

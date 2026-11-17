@@ -9,14 +9,17 @@ import { Composer, type ComposerHandle } from "./Composer";
 import { CurrentQuestionLine } from "./CurrentQuestionLine";
 import { HeroBackdrop } from "./HeroBackdrop";
 import { HeroCopy } from "./HeroCopy";
+import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { PhotoQrDialog } from "./PhotoQrDialog";
 import { QuickReplies } from "./QuickReplies";
 import { ResearchTopBar } from "./ResearchTopBar";
 import { SentMain, SentTopBar } from "./SentChat";
+import { saveSentHistory } from "@/lib/sentHistory";
 import { ReviewCard } from "./ReviewCard";
 import { ReviewEditor } from "./ReviewEditor";
 import { SlotPanel } from "./SlotPanel";
 import { SidePane } from "@/components/SidePane";
+import { BrandTitle } from "@/components/BrandTitle";
 import { isPhonePhotoCommand } from "@/lib/photoCommand";
 import { shrinkPhoto } from "@/lib/researchPhoto";
 import { lastQuestionSeq, newlyFilled } from "@/lib/chatPanelView";
@@ -70,7 +73,7 @@ import {
   saveFlash,
   type DetailResponse,
 } from "@/lib/volunteerClient";
-import { structuredLine, VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
+import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
 
 const PURCHASE_QUICK: QuickReply[] = [
   { id: "purchase.bought", label: "구매했어요", tone: "normal", action: "turn" },
@@ -246,6 +249,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     setOpen: panels.setMine,
     onUnauthorized: toList,
     say,
+    initialSection: "mine",
   });
   const refreshPane = pane.refresh;
 
@@ -804,6 +808,10 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
 
   // ----- 휴대폰 사진(QR) -----
 
+  // 사진 질문 때 저절로 띄운 QR인지. 저절로 띄운 창은 질문이 넘어가면 저절로 닫는다(손으로 연 창은 그대로 둔다).
+  const autoQrSeq = useRef(0);
+  const autoQrOpen = useRef(false);
+
   const openQr = useCallback(() => {
     qrReturn.current = "attach";
     setAttachOpen(false);
@@ -811,13 +819,15 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   }, []);
 
   /** 창을 닫는다. 휴대폰이 아직 안 쓴 링크(waiting)는 더 보이지 않으니 끊는다. 연결된 뒤에는 사진을 계속 받는다. */
-  const closeQr = useCallback(() => {
+  const closeQr = useCallback((options?: { focus?: boolean }) => {
     const current = viewRef.current;
+    autoQrOpen.current = false;
     setQrOpen(false);
     if (current?.photoLink?.state === "waiting") {
       updateView((prev) => ({ ...prev, photoLink: { state: "none", expiresAt: null } }));
       qrRevoke.current = deletePhotoLink(requestId, current.sessionId);
     }
+    if (options?.focus === false) return;
     if (qrReturn.current === "attach") attachButtonRef.current?.focus();
     else composerRef.current?.focus();
   }, [requestId, updateView]);
@@ -828,6 +838,36 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     (expiresAt: string) => updateView((prev) => ({ ...prev, photoLink: { state: "waiting", expiresAt } })),
     [updateView],
   );
+
+  // 사진 칸 질문이 지금 질문이 되면 [+]를 누르지 않아도 QR을 바로 띄운다. 한 질문에 한 번만 띄우고, 닫으면 다시 띄우지 않는다.
+  const photoAskSeq = (() => {
+    const messages = view?.messages ?? [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role === "ai" && message.tag === "question" && message.slot) return message.slot === "photo" ? message.seq : 0;
+    }
+    return 0;
+  })();
+  const photoCountNow = view?.photos.length ?? 0;
+  const photoNeeded = view ? view.purchase !== "research" && view.stage !== "sent" : false;
+  useEffect(() => {
+    if (!photoNeeded || photoAskSeq === 0 || photoAskSeq <= autoQrSeq.current || photoCountNow >= 3) return;
+    autoQrSeq.current = photoAskSeq;
+    const timer = window.setTimeout(() => {
+      qrReturn.current = "composer";
+      autoQrOpen.current = true;
+      setAttachOpen(false);
+      setQrOpen(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [photoNeeded, photoAskSeq, photoCountNow]);
+
+  // 저절로 띄운 QR은 사진 질문이 끝나면(다음 질문으로 넘어가거나 사진을 컴퓨터에서 올려 칸이 찼을 때) 닫는다. 초점은 옮기지 않는다.
+  useEffect(() => {
+    if (!qrOpen || !autoQrOpen.current || photoAskSeq !== 0) return;
+    const timer = window.setTimeout(() => closeQr({ focus: false }), 0);
+    return () => window.clearTimeout(timer);
+  }, [qrOpen, photoAskSeq, closeQr]);
 
   const qrOpenRef = useRef(false);
   useEffect(() => {
@@ -992,6 +1032,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       return;
     }
     if (outcome.kind === "ok") {
+      // 서버는 보내는 순간 대화를 지운다. 완료 화면에서 다시 볼 수 있게 이 기기에만 글로 남긴다(30일, A8).
+      saveSentHistory(requestId, current.messages);
       await finishSent();
       return;
     }
@@ -1118,15 +1160,31 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         <SentTopBar
           request={load.detail.request}
           headingRef={headingRef}
-          sideOpen={panels.mineOpen}
-          onToggleSide={panels.toggleMine}
-          sideId={SIDE_PANE_ID}
-          sideToggleRef={sideToggleRef}
         />
         <div className="vc-body">
           <HeroBackdrop variant="chat" />
-          <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
-          <SentMain result={load.detail.result!} />
+          <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} onClose={pane.close} onOpen={panels.toggleMine} toggleRef={sideToggleRef} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
+          <SentMain requestId={requestId} result={load.detail.result!} />
+        </div>
+      </div>
+    );
+  }
+
+  // 읽는 동안: 단색 페이지로 바꾸지 않고 히어로 화면(위 막대·배경·왼쪽 창)을 그대로 그린 채 도는 아이콘만 얹는다.
+  // 맡기 직후 첫 화면에서 이어지는 덮개라 새로 떠오르지 않게(instant) 한다.
+  if (load.kind === "loading") {
+    return (
+      <div className={`vol-chat vc-stage is-hero${panels.mineOpen ? " has-mine" : ""}`} data-testid="research-loading" data-mode="loading">
+        <header className="vc-topbar vh-topbar">
+          <BrandTitle ref={headingRef} context="리서치 챗" />
+          <span className="vh-spacer" />
+        </header>
+        <div className="vc-body">
+          <HeroBackdrop variant="hero" />
+          <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} onClose={pane.close} onOpen={panels.toggleMine} toggleRef={sideToggleRef} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
+          <main className="vc-main">
+            <LoadingOverlay instant />
+          </main>
         </div>
       </div>
     );
@@ -1139,7 +1197,6 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
           <h1 ref={headingRef} tabIndex={-1} className="vc-plain-title">
             리서치 챗
           </h1>
-          {load.kind === "loading" && <p className="vc-plain-note">불러오는 중이에요.</p>}
           {load.kind === "denied" && (
             <>
               <p role="status" className="vc-plain-note">
@@ -1184,7 +1241,6 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   let quick: QuickReply[] = idle ? lastQuick : [];
   if (idle && view.purchase === "unset" && quick.length === 0) quick = PURCHASE_QUICK;
   // 이용자가 말한 조건(새 제품·중고 또는 자유 문장)과 브랜드를 빠뜨리지 않는다.
-  const detailLine = structuredLine(request);
   const reviewReady = reviewShown && view.review.status === "confirmed";
   const photoCount = view.photos.length;
   const placeholder = hero
@@ -1202,7 +1258,6 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       <ResearchTopBar
         ref={headingRef}
         title={request.product}
-        detail={detailLine}
         badge={badge}
         panelOpen={panels.slotsOpen}
         panelSummary={`필수 ${progress.filled}/${progress.total}`}
@@ -1216,10 +1271,6 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         }}
         panelId={PANEL_ID}
         toggleRef={panelToggleRef}
-        sideOpen={panels.mineOpen}
-        onToggleSide={panels.toggleMine}
-        sideId={SIDE_PANE_ID}
-        sideToggleRef={sideToggleRef}
         unseen={unseen && !panels.slotsOpen}
         moreOpen={moreOpen}
         onToggleMore={() => {
@@ -1234,7 +1285,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       />
       <div className="vc-body">
         <HeroBackdrop variant={hero ? "hero" : "chat"} />
-        <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
+        <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} onClose={pane.close} onOpen={panels.toggleMine} toggleRef={sideToggleRef} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
         <main className="vc-main">
           {hero && <HeroCopy subject={subject} pill={`요청을 맡았어요 · 이용자: “${request.product}”`} />}
           {!hero && <CurrentQuestionLine slot={slot} required={slot ? requiredSlots(view.purchase).includes(slot) : false} />}

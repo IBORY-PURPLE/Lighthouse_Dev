@@ -12,7 +12,7 @@ import { ProductCards } from "./ProductCards";
 import { Thinking } from "./Thinking";
 import {
   altNames,
-  benefitsOf,
+  mergeBenefitRuns,
   checkedUrls,
   chipsOf,
   guideOf,
@@ -73,7 +73,12 @@ export function ChatLog({
   const checked = checkedUrls(slots);
   const altsLocked = slots.alts?.status === "skipped";
 
+  // 연달아 온 혜택 메시지는 첫 메시지 하나에 모아 카드를 한 장씩 넘겨 본다(뒤 메시지는 그리지 않는다).
+  const benefitRuns = mergeBenefitRuns(messages);
+
   const renderOne = (message: ChatMessage) => {
+    const run = benefitRuns.get(message.seq);
+    if (run === null) return null;
     const body = message.body;
     const text = textOf(body);
     const photoId = photoIdOf(body);
@@ -88,7 +93,7 @@ export function ChatLog({
     const isQuestion = message.role === "ai" && message.tag === "question";
     const chips = chipsOf(body);
     const products = productsOf(body);
-    const benefits = benefitsOf(body);
+    const benefits = run ?? null;
     const link = linkOf(body);
     const guide = guideOf(body);
     const shortcuts = shortcutsOf(body);

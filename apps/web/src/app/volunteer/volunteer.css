@@ -486,21 +486,132 @@
 }
 
 
-/* 위 막대의 왼쪽 창 버튼(대기열·내 담당). 모든 폭에서 보인다. */
-.vc-mine-toggle {
+/* 위 막대 맨 왼쪽의 왼쪽 창 여닫기 아이콘 버튼(Figma "Side toggle"). 모든 폭에서 보인다. */
+.vc-side-toggle {
   display: inline-flex;
   flex: none;
   align-items: center;
-  min-height: 44px;
-  padding: 0 16px;
-  border: 1.5px solid var(--c-linestrong);
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--c-ink);
+  cursor: pointer;
+  transition: background-color var(--lh-motion-fast) var(--lh-ease-standard);
+}
+
+.vc-side-toggle:hover,
+.vc-side-toggle.is-open {
+  background: var(--c-soft);
+}
+
+/* 닫혀 있으면 아이콘 왼쪽 칸을 비운다(열림을 모양으로도 보인다). */
+.vc-side-toggle-fill {
+  opacity: 0;
+  transition: opacity var(--lh-motion-fast) var(--lh-ease-standard);
+}
+
+.vc-side-toggle.is-open .vc-side-toggle-fill {
+  opacity: 1;
+}
+
+/* 왼쪽 창 맨 위: [대기열 | 내 담당] 토글 + 창 닫기 아이콘. */
+.vc-mine-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vc-mine-top .vc-seg {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 창이 닫혀 있을 때의 [열기] 버튼: 위 막대 아래 본문 왼쪽 위(열렸을 때 창 안 버튼과 같은 높이). */
+.vc-side-open {
+  position: absolute;
+  top: 20px;
+  left: 16px;
+  z-index: 3;
+}
+
+/* 창 오른쪽 가장자리 손잡이(폭 조절). 창 바깥 형제라 목록을 스크롤해도 제자리다. */
+.vc-mine-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--mine-w, 300px) - 4px);
+  z-index: 5;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.vc-mine-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background-color var(--lh-motion-fast) var(--lh-ease-standard);
+}
+
+.vc-mine-resize:hover::after,
+.vc-mine-resize:focus-visible::after,
+:root[data-pane-resizing] .vc-mine-resize::after {
+  background: var(--c-linestrong);
+}
+
+.vc-mine-resize:focus-visible {
+  outline: none;
+}
+
+/* 끄는 동안에는 창과 대화 칸이 손을 바로 따라가게 미끄러짐 전환을 끄고, 글자 선택을 막는다. */
+:root[data-pane-resizing] .vc-mine,
+:root[data-pane-resizing] .vol-chat main.vc-main {
+  transition: none;
+}
+
+:root[data-pane-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+
+
+/* 왼쪽 창 맨 위 [대기열 | 내 담당] 토글. */
+.vc-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
   border-radius: 999px;
-  background: var(--c-surface);
+  background: var(--c-soft);
+}
+
+.vc-seg-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: var(--c-ink);
   font: inherit;
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
+  transition:
+    background-color var(--lh-motion-fast) var(--lh-ease-standard),
+    color var(--lh-motion-fast) var(--lh-ease-standard);
+}
+
+.vc-seg-btn[aria-pressed="true"] {
+  background: var(--c-ink);
+  color: var(--c-surface);
 }
 
 .vh-spacer {
@@ -631,6 +742,86 @@
 .vc-backdrop--hero::before,
 .vc-backdrop--chat::after {
   opacity: 1;
+}
+
+/* ----- 불러오는 중 덮개(LoadingOverlay): 히어로 배경은 그대로, 가운데에 도는 아이콘 ----- */
+
+.vc-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--c-surface) 35%, transparent);
+  animation: lh-fade var(--lh-motion-base) var(--lh-ease-enter);
+}
+
+.vc-loading--instant {
+  animation: none;
+}
+
+.vc-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 26px 36px 22px;
+  border: 1px solid var(--c-line);
+  border-radius: 22px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 28px rgba(18, 20, 23, 0.14);
+}
+
+.vc-loading-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--c-soft);
+  color: var(--c-ink);
+}
+
+/* 아이콘 뒤에서 숨 쉬듯 퍼지는 고리. 장식이다. */
+.vc-loading-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--c-linestrong);
+  opacity: 0;
+  animation: vc-loading-ring var(--lh-motion-loop) var(--lh-ease-standard) infinite;
+}
+
+@keyframes vc-loading-ring {
+  from {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+.vc-loading-text {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vc-loading,
+  .vc-loading-badge::after {
+    animation: none;
+  }
 }
 
 .vol-chat main.vc-main {
@@ -1595,9 +1786,12 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
-  width: 300px;
+  width: var(--mine-w, 300px);
   padding: 20px 16px;
   overflow-y: auto;
+  /* 목록이 길어지면 아래로 이어지되 스크롤바(화살표 막대)는 그리지 않는다. 휠·터치·키보드 스크롤은 그대로다. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   background: var(--c-surface);
   border-right: 1px solid var(--c-line);
   visibility: hidden;
@@ -1605,6 +1799,10 @@
   transition:
     transform var(--lh-motion-card) var(--lh-ease-enter) var(--lh-motion-fast),
     visibility 0s linear var(--lh-motion-card);
+}
+
+.vc-mine::-webkit-scrollbar {
+  display: none;
 }
 
 .vc-mine.is-open {
@@ -1963,7 +2161,7 @@
 
 @media (min-width: 1180px) {
   .vol-chat.has-mine main.vc-main {
-    margin-left: 300px;
+    margin-left: var(--mine-w, 300px);
   }
 
   /* 대화(is-chat)에서는 열린 창이 대화 옆에 붙고, 닫으면 대화가 넓어진다(오른쪽 여백 0). */
@@ -2024,6 +2222,29 @@
     margin-right: auto;
   }
 
+  /* 좁은 폭에서는 서비스 이름이 뒤로·창 버튼 바로 옆에 붙는다(빈칸은 쓰지 않는다). 완료 표시는 오른쪽. */
+  .vc-topbar .vh-spacer {
+    display: none;
+  }
+
+  /* 왼쪽 창이 닫혀 있으면 본문 왼쪽 위에 [열기] 버튼이 뜬다. 좁은 폭에서는 본문을 그만큼 내려 겹치지 않게 한다. */
+  .vol-chat.vc-stage:not(.has-mine) > .vc-body > main.vc-main {
+    padding-top: 64px;
+  }
+
+  /* 히어로는 제목·입력창이 가운데 기준으로 떠 있어(position:absolute) 위 여백이 먹지 않는다. 둘 다 아래로 내린다. */
+  .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-copy {
+    bottom: calc(50% + 24px);
+  }
+
+  .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-dock {
+    top: calc(50% + 16px);
+  }
+
+  .vc-topbar .vc-tag {
+    order: 2;
+  }
+
   .vc-topbar .vc-badge,
   .vc-topbar .vc-more-wrap {
     order: 2;
@@ -2034,7 +2255,6 @@
     flex: 1 1 100%;
   }
 
-  .vc-topbar .vc-mine-toggle,
   .vc-topbar .vc-panel-toggle {
     order: 4;
   }
@@ -2053,13 +2273,96 @@
   }
 
   .vc-mine {
-    width: min(300px, 100%);
+    width: min(var(--mine-w, 300px), 100%);
   }
+}
 
-  .vc-mine-toggle {
-    padding: 0 12px;
-    font-size: 14px;
+/* ----- 혜택 넘겨 보기: 카드 한 장, 아래 [‹] 2 / 3 [›]. 넘기면 다음 카드가 옆에서 밀려 들어온다. ----- */
+
+.vc-benefits {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(520px, 100%);
+}
+
+.vc-benefits-stage {
+  overflow: hidden;
+  border-radius: 24px;
+}
+
+.vc-benefits-slide {
+  animation: vc-slide-next var(--lh-motion-card, 280ms) var(--lh-ease-standard, ease-out) both;
+}
+
+.vc-benefits-slide--prev {
+  animation-name: vc-slide-prev;
+}
+
+@keyframes vc-slide-next {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
   }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes vc-slide-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.vc-benefits-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vc-benefits-arrow {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border: 1.5px solid var(--c-linestrong);
+  border-radius: 50%;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.vc-benefits-arrow--next:not([aria-disabled="true"]) {
+  background: var(--c-ink);
+  border-color: var(--c-ink);
+  color: var(--c-surface);
+}
+
+.vc-benefits-arrow[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.vc-benefits-arrow:focus-visible {
+  outline: 2px solid var(--c-ink);
+  outline-offset: 2px;
+}
+
+.vc-benefits-count {
+  margin: 0;
+  font-size: 16px;
 }
 
 /* ----- 움직임 줄이기: 이동·크기 변화를 없애고 투명도 전환만 120ms로 남긴다. 반복은 멈춘다. ----- */
@@ -2255,7 +2558,41 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .vol-chat .vc-benefits-slide {
+    animation: lh-fade var(--lh-motion-fast) linear;
+  }
+
   .vol-chat .vc-qr {
     animation: lh-fade var(--lh-motion-fast) linear;
   }
+}
+
+/* 위 막대 서비스 이름. 로고 그림이 있으면 이름 앞에 붙는다. */
+.vc-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: -0.01em;
+}
+
+.vc-brand-logo {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+/* 완료 화면의 대화 이력(이 기기 보관, 30일). 리뷰 카드 아래에 버튼, 누르면 지난 말풍선이 읽기 전용으로 펼쳐진다. */
+.vc-history {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
+.vc-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--c-line);
 }

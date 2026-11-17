@@ -3,24 +3,20 @@ import { forwardRef, type Ref } from "react";
 import { PurchaseBadge } from "./PurchaseBadge";
 import { Icon } from "./Icon";
 import { ReleaseConfirm } from "./ReleaseConfirm";
+import { BrandTitle } from "../BrandTitle";
 import type { BadgeKind } from "@/lib/researchChatView";
 
-/** 위 바: 뒤로(첫 화면) · 리서치 챗 · 이용자 요청 한 줄 · 왼쪽 창 버튼 · 모은 정보 버튼(모든 폭) · 구매 배지 · "…" 더 보기(요청 내려놓기). */
+/** 위 바: 뒤로(첫 화면) · 서비스 이름(요청 제목은 화면 읽기 프로그램에만) · 모은 정보 버튼(모든 폭) · 구매 배지 · "…" 더 보기(요청 내려놓기). */
 export const ResearchTopBar = forwardRef<
   HTMLHeadingElement,
   {
     title: string;
-    detail: string;
     badge: { kind: BadgeKind; label: string };
     panelOpen: boolean;
     panelSummary: string;
     onTogglePanel: () => void;
     panelId: string;
     toggleRef?: Ref<HTMLButtonElement>;
-    sideOpen: boolean;
-    onToggleSide: () => void;
-    sideId: string;
-    sideToggleRef?: Ref<HTMLButtonElement>;
     /** 새로 채워진 칸이 있는데 오른쪽 창이 닫혀 있다. */
     unseen: boolean;
     moreOpen: boolean;
@@ -31,7 +27,7 @@ export const ResearchTopBar = forwardRef<
     releasing: boolean;
   }
 >(function ResearchTopBar(
-  { title, detail, badge, panelOpen, panelSummary, onTogglePanel, panelId, toggleRef, sideOpen, onToggleSide, sideId, sideToggleRef, unseen, moreOpen, onToggleMore, moreId, moreToggleRef, onRelease, releasing },
+  { title, badge, panelOpen, panelSummary, onTogglePanel, panelId, toggleRef, unseen, moreOpen, onToggleMore, moreId, moreToggleRef, onRelease, releasing },
   headingRef,
 ) {
   return (
@@ -39,24 +35,8 @@ export const ResearchTopBar = forwardRef<
       <Link href="/volunteer" className="vc-back" aria-label="첫 화면으로">
         <Icon name="back" />
       </Link>
-      <h1 ref={headingRef} tabIndex={-1} className="vc-topbar-title">
-        리서치 챗
-      </h1>
-      <span className="vc-topbar-rule" aria-hidden="true" />
-      <div className="vc-request">
-        <p className="vc-request-title">{title}</p>
-        <p className="vc-request-detail">{detail}</p>
-      </div>
-      <button
-        ref={sideToggleRef}
-        type="button"
-        className="vc-mine-toggle"
-        aria-expanded={sideOpen}
-        aria-controls={sideId}
-        onClick={onToggleSide}
-      >
-        대기열·내 담당
-      </button>
+      <BrandTitle ref={headingRef} context={`리서치 챗 · ${title}`} />
+      <span className="vh-spacer" />
       <button
         ref={toggleRef}
         type="button"
