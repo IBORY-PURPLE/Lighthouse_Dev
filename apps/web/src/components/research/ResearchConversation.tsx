@@ -17,6 +17,7 @@ import { SlotPanel } from "./SlotPanel";
 import { SentView } from "@/components/SentView";
 import { SidePane } from "@/components/SidePane";
 import { shrinkPhoto } from "@/lib/researchPhoto";
+import { lastQuestionSeq, newlyFilled } from "@/lib/chatPanelView";
 import { usePanels } from "@/lib/usePanels";
 import { SIDE_PANE_ID, useSidePane } from "@/lib/useSidePane";
 import {
@@ -26,9 +27,7 @@ import {
   currentSlot,
   failureText,
   holdsRefsQuestion,
-  lastQuestionSeq,
   needsBenefitsSearch,
-  newlyFilled,
   planFold,
   reasonsOf,
   requiredProgress,

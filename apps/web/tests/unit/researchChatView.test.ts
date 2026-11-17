@@ -10,9 +10,7 @@ import {
   failureText,
   holdsRefsQuestion,
   imageSearchUrl,
-  lastQuestionSeq,
   missingText,
-  newlyFilled,
   needsBenefitsSearch,
   panelSlots,
   planFold,
@@ -277,44 +275,5 @@ describe("질문 7 보류(holdsRefsQuestion)", () => {
     // 새로 고친 뒤 진행 중이던 혜택 검색의 폴링이 카드 없이 끝나면(시간 초과) 서버 pending이 남아도 보류가 풀린다.
     const stuck = { slots: { benefits: filled }, messages: [question(1, "refs")], pending: { search: { kind: "benefits" } } };
     expect(holdsRefsQuestion(stuck, null, true)).toBe(false);
-  });
-});
-
-describe("newlyFilled", () => {
-  const filled = { value: "a", status: "filled", by: "volunteer" } as const;
-  const confirmed = { value: "a", status: "confirmed", by: "volunteer" } as const;
-  const skipped = { value: "", status: "skipped", by: "volunteer" } as const;
-
-  it("이전에 비었다가 filled·confirmed가 된 칸만 센다", () => {
-    expect(newlyFilled({}, { model: filled, pros: confirmed })).toEqual(["model", "pros"]);
-    expect(newlyFilled({ model: filled }, { model: filled, pros: filled })).toEqual(["pros"]);
-  });
-
-  it("그대로이거나 건너뜀이면 세지 않는다. 이미 filled가 confirmed로 바뀌어도 새 칸이 아니다", () => {
-    expect(newlyFilled({ model: filled }, { model: filled })).toEqual([]);
-    expect(newlyFilled({}, { model: skipped })).toEqual([]);
-    expect(newlyFilled({ model: filled }, { model: confirmed })).toEqual([]);
-  });
-
-  it("건너뜀이 나중에 채워지면 새 칸이다", () => {
-    expect(newlyFilled({ model: skipped }, { model: filled })).toEqual(["model"]);
-  });
-});
-
-describe("lastQuestionSeq", () => {
-  it("그 칸의 마지막 질문 말풍선 seq", () => {
-    const messages = [question(1, "model"), volunteer(2), question(3, "pros"), volunteer(4), question(5, "model")];
-    expect(lastQuestionSeq(messages, "model")).toBe(5);
-    expect(lastQuestionSeq(messages, "pros")).toBe(3);
-  });
-
-  it("묻지 않은 칸은 null, AI가 아닌 말풍선·질문이 아닌 태그는 건너뛴다", () => {
-    const messages: ChatMessage[] = [
-      question(1, "model"),
-      { seq: 2, role: "ai", tag: "fill", slot: "pros", body: { text: "채움" } },
-      { seq: 3, role: "volunteer", tag: "question", slot: "pros", body: { text: "x" } },
-    ];
-    expect(lastQuestionSeq(messages, "pros")).toBeNull();
-    expect(lastQuestionSeq([], "model")).toBeNull();
   });
 });
