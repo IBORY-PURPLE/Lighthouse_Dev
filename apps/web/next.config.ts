@@ -6,6 +6,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // 웹 푸시 서비스 워커(A13): 늘 새로 받게 하고, 사이트 전체(/)를 맡는다.
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+      {
         // 휴대폰 사진 페이지: 링크 토큰이 주소(#t=)에 있으므로 저장·전달·검색 노출을 막는다(design.md 3.3).
         source: "/volunteer/photo",
         headers: [

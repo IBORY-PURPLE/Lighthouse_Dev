@@ -86,6 +86,8 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 리서치 챗 대화, 칸 7개 값, 구매 여부, 추가 답, 검수한 리뷰 문단, 구매 인증 사진 작은 썸네일(JPEG, 최대 3장) | Supabase `research_sessions`·`research_messages`·`research_turns`·`research_photos`(v2.2 초안) | 보내기·내려놓기 때 즉시 삭제(DB 트리거). 6시간 활동이 없으면 요청을 대기열로 돌리고 같이 삭제. §8.3 |
 | 보낸 요청의 대화 이력(글만, 사진은 "사진을 올렸어요" 글로) | 보낸 봉사자 기기 `localStorage` `lh.vol.sentHistory.v1` | 보낸 날부터 30일 뒤 화면이 지움(A8 이용자 결정 2026-11-17). 다른 기기에서는 보이지 않는다 |
 | 리서치 챗 AI 호출 기록(대화 턴·추가 질문·리뷰 문단의 요청·응답 글) | OpenAI 대시보드 Logs(`store: true`, `metadata.feature` = research_turn·research_ask·research_review, `src/lib/openaiLog.ts`) | OpenAI 보관 기간을 따른다. `OPENAI_STORE_LOGS=off`면 남기지 않는다(이용자 요청 2026-11-17). 웹 검색·이용자 음성 대화는 `store: false` 그대로 |
+| 이용자 리뷰 도착 알림 구독(웹 푸시 endpoint·p256dh·auth) | Supabase `push_subscriptions`(요청 하나에 하나, 마이그레이션 20261120000000) | 리뷰를 보내 알림을 한 번 보내면 지운다. 요청이 지워지면 같이 지워진다(A13 이용자 결정 2026-11-17). 키 `VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`가 없으면 기능이 꺼진다 |
+| 이용자 기기의 요청 기록(대화 id·요청 번호·상태·리뷰) | 이용자 `localStorage` `lh-requests`, 알림 켬 여부 `lh-push` | 최근 20건. 목록을 열면 `GET /api/requests/{id}`로 상태·리뷰를 다시 묻는다 |
 | 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
 | (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
 | 서버로 보내는 축소 사진(사진 설명용) | 봉사자 탭 메모리 | 새로 고치면 사라짐. 서버는 AI에 넘긴 뒤 버림 |

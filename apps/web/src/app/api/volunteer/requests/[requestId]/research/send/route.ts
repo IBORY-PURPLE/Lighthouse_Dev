@@ -1,4 +1,4 @@
-import type { NextRequest } from "next/server";
+import { after, type NextRequest } from "next/server";
 import { getRequestStore } from "@/lib/requestStore";
 import { failWith, guardResponse, logTail, readJsonBody } from "@/lib/researchApi";
 import { buildResultFromSession } from "@/lib/researchResult";
@@ -6,9 +6,19 @@ import { loadSession, notReady } from "@/lib/researchReviewApi";
 import { getResearchStore } from "@/lib/researchStore";
 import { checkCandidate } from "@/lib/resultInput";
 import { fail, isUuid, runVolunteerRoute, succeed } from "@/lib/volunteerApi";
+import { notifyReviewSent } from "@/lib/webPush";
 
 // 보내기(design.md 3.2, 4.11). 검수를 마친 리뷰와 칸으로 결과를 만들어 research_send로 저장한다(필수·confirmed·version·rev를 저장소가 확인).
 // 처음 보내면 201, 다시 보내면 처음 저장한 값으로 200이다. 결과를 쓰는 길은 이 라우트 하나다(옛 POST …/result는 지웠다).
+/** 응답을 보낸 뒤 할 일. 요청 범위 밖(단위 시험 등)이라 after를 못 쓰면 기다리지 않고 바로 돌린다. */
+function afterResponse(task: () => Promise<void>): void {
+  try {
+    after(task);
+  } catch {
+    void task().catch(() => undefined);
+  }
+}
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -67,6 +77,12 @@ export async function POST(
       });
       switch (sent.outcome) {
         case "sent":
+          // 이용자 기기에 "리뷰가 도착했어요" 웹 푸시(A13). 응답을 늦추지 않게 보낸 뒤에 한다. 실패해도 보내기는 끝났다.
+          afterResponse(async () => {
+            const row = await getRequestStore().get(id).catch(() => null);
+            const outcome = await notifyReviewSent(id, row?.product ?? "");
+            console.info(`push review_sent ${outcome}`);
+          });
           return succeed({ status: "done", sentAt: sent.sentAt }, 201);
         case "existing":
           return succeed({ status: "done", sentAt: sent.sentAt }, 200);
