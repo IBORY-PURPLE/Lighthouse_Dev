@@ -2,13 +2,13 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { StatusRegion } from "@/components/StatusRegion";
-import { VolunteerQueue } from "@/components/VolunteerQueue";
+import { VolunteerHome } from "@/components/VolunteerHome";
 import { enterVolunteer, fetchMe } from "@/lib/volunteerClient";
 import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
 
 type Gate = { kind: "checking" } | { kind: "failed" } | { kind: "ready" };
 
-/** 이 기기가 아직 기기 쿠키(lh_vol)를 받지 않았으면 스스로 입장 호출을 하고 요청 목록을 보인다. 입력 화면은 없다. */
+/** 이 기기가 아직 기기 쿠키(lh_vol)를 받지 않았으면 스스로 입장 호출을 하고 첫 화면(챗봇)을 보인다. 입력 화면은 없다. */
 async function resolveGate(): Promise<Gate> {
   const me = await fetchMe();
   if (me.kind !== "ok") return { kind: "failed" };
@@ -17,7 +17,7 @@ async function resolveGate(): Promise<Gate> {
   return entered.kind === "ok" ? { kind: "ready" } : { kind: "failed" };
 }
 
-function VolunteerHome() {
+function VolunteerGate() {
   const [gate, setGate] = useState<Gate>({ kind: "checking" });
 
   const check = useCallback(async () => {
@@ -59,13 +59,13 @@ function VolunteerHome() {
     );
   }
   // 쿠키가 없어졌거나 틀리면 다시 입장을 거친다.
-  return <VolunteerQueue onUnauthorized={() => void check()} />;
+  return <VolunteerHome onUnauthorized={() => void check()} />;
 }
 
 export default function VolunteerPage() {
   return (
     <Suspense fallback={null}>
-      <VolunteerHome />
+      <VolunteerGate />
     </Suspense>
   );
 }

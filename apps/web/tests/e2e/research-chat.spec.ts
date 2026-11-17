@@ -171,7 +171,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     const calls = await begin(page);
 
     // E1 히어로: 제목, 알림 알약, 입력창, 시작 칩, 패널 없음.
-    await expect(page.getByRole("heading", { level: 2, name: /소니 헤드셋 구매경험\s*리서치 어시스턴트/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: /소니 헤드셋 구매 경험\s*리서치 어시스턴트/ })).toBeVisible();
     await expect(page.getByText("요청을 맡았어요 · 이용자: “소니 무선 헤드셋 사고 싶어요”")).toBeVisible();
     await expect(page.getByTestId("purchase-badge")).toHaveText("구매 확인 전");
     // 위 바의 요청 줄에 이용자가 말한 조건(새 제품)이 있다.
@@ -435,7 +435,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(second.getByTestId("research-stage")).toBeVisible();
     await second.getByRole("button", { name: "요청 내려놓기" }).click();
     await second.getByRole("button", { name: "돌려놓기" }).click();
-    await expect(second.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+    await expect(second.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
 
     release();
     // 폴링 간격(2초) 안팎에 알아챈다. 알아채지 못하면 폴링이 90초 돌고 화면이 그대로다.
@@ -496,7 +496,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
           released = true;
           await second.getByRole("button", { name: "요청 내려놓기" }).click();
           await second.getByRole("button", { name: "돌려놓기" }).click();
-          await expect(second.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+          await expect(second.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
         }
         await route.continue();
       },
@@ -566,7 +566,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await toggle.click();
     await page.getByRole("button", { name: "요청 내려놓기" }).click();
     await page.getByRole("button", { name: "돌려놓기" }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
   });
 
   test("리서치만 경로: 사진 칸·첨부 없음, 필수 3칸", async ({ page }) => {
@@ -611,10 +611,10 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     // 내려놓기: 대기열로 돌아가고, 다시 맡으면 대화가 지워진 히어로다.
     await page.getByRole("button", { name: "요청 내려놓기" }).click();
     await page.getByRole("button", { name: "돌려놓기" }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
     await claimDemo(page, FIRST_DEMO_QUOTE);
     await expect(page.getByTestId("research-stage")).toHaveAttribute("data-mode", "hero");
-    await expect(page.getByRole("heading", { level: 2, name: /소니 헤드셋 구매경험\s*리서치 어시스턴트/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: /소니 헤드셋 구매 경험\s*리서치 어시스턴트/ })).toBeVisible();
   });
 
   test("다른 탭에서 먼저 답해 버전이 어긋나면(409 stale) 다시 읽고 쓰던 글을 그대로 둔다", async ({ page }) => {

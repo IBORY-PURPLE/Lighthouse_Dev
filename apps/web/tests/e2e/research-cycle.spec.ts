@@ -187,6 +187,6 @@ test("공개 주소 리서치 챗 한 사이클: 맡기 → 질문 7개 → 리�
 
   // 정리: 시연용 요청을 다시 채운다(이 기기에서 보낸 요청도 시연 기본값으로 돌아간다).
   await page.goto("/volunteer");
-  await expect(page.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
   await refill(page);
 });

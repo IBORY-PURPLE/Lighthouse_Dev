@@ -125,8 +125,9 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     // 봉사자 화면: 방금 접수한 요청이 대기열에 뜬다.
     const volunteer = await page.context().newPage();
     await volunteer.goto("/volunteer");
-    await expect(volunteer.getByRole("heading", { level: 1, name: "대기열" })).toBeVisible();
-    const card = volunteer.locator(".vol-card").filter({ hasText: product });
+    await expect(volunteer.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
+    await volunteer.getByRole("button", { name: "대기열·내 담당" }).click();
+    const card = volunteer.getByTestId("queue-card").filter({ hasText: product });
     await expect(card).toHaveCount(1);
     await expect(card.getByText("대기", { exact: true })).toBeVisible();
     await expect(card).toContainText(BUDGET);
