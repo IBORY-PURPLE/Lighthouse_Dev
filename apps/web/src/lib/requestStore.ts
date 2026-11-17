@@ -40,6 +40,16 @@ export interface StoredRequest {
   queueNumber: number;
   status: RequestStatus;
   product: string;
+  /** done일 때 봉사자가 보낸 리뷰 문단(이용자 화면이 읽어 준다). 없으면 null. */
+  review?: string | null;
+  /** done일 때 보낸 시각(ISO). */
+  sentAt?: string | null;
+}
+
+/** 보낸 결과에서 리뷰 문단(글이 있는 첫 후보의 guide). volunteerView.sentReviewOf와 같은 규칙. */
+function reviewOfCandidates(candidates: readonly { guide: string }[]): string | null {
+  const text = candidates.find((candidate) => candidate.guide.trim() !== "")?.guide.trim();
+  return text ? text : null;
 }
 
 export type ClaimOutcome = "claimed" | "already_mine" | "busy" | "taken" | "not_found";
@@ -318,14 +328,17 @@ export function createMemoryStore(
     async get(requestId) {
       sweep(now());
       const row = state.rows.get(requestId);
-      return row
-        ? {
-            requestId: row.id,
-            queueNumber: row.queueNumber,
-            status: row.status,
-            product: row.product,
-          }
-        : null;
+      if (!row) return null;
+      const sent = row.status === "done" ? state.results.get(requestId) : undefined;
+      return {
+        requestId: row.id,
+        queueNumber: row.queueNumber,
+        status: row.status,
+        product: row.product,
+        ...(sent
+          ? { review: reviewOfCandidates(sent.candidates), sentAt: new Date(sent.sentAt).toISOString() }
+          : {}),
+      };
     },
     async listQueue(volunteerId) {
       const current = now();
@@ -840,7 +853,21 @@ export function createSupabaseStore(
         }
         throw new StoreUnavailableError("requests select failed");
       }
-      return toStoredRequest(result.data);
+      const stored = toStoredRequest(result.data);
+      if (!stored || stored.status !== "done") return stored;
+      // 끝난 요청이면 보낸 리뷰 문단을 같이 준다. 결과를 못 읽어도 상태는 그대로 돌려준다.
+      try {
+        const sent = await client.from("results").select("candidates, sent_at").eq("request_id", requestId).maybeSingle();
+        const row = sent.error ? null : (sent.data as Record<string, unknown> | null);
+        if (!row) return stored;
+        return {
+          ...stored,
+          review: reviewOfCandidates(toCandidates(row.candidates)),
+          sentAt: typeof row.sent_at === "string" ? row.sent_at : null,
+        };
+      } catch {
+        return stored;
+      }
     },
     listQueue(volunteerId) {
       return volunteerCall(

@@ -79,11 +79,15 @@ describe("원본(apps/user-voice-ui)과의 일치", () => {
       "u.lang='ko-KR'",
       "aria-hidden=\"true\"",
       "prefers-reduced-motion",
-      "function saveRequest(product,summary)",
+      // 합병본은 요청 번호를 같이 저장하려고 대화 id 인자를 하나 더 받는다(앞 두 인자는 같다).
+      "function saveRequest(product,summary",
     ]) {
       expect(merged).toContain(piece);
       expect(original).toContain(piece);
     }
+    // 합병본은 목록이 진행 상황·리뷰를 서버에 묻고, "아직 연결되지 않았다"는 옛 안내를 띄우지 않는다.
+    expect(merged).toContain("fetch('/api/requests/'+encodeURIComponent(item.requestId)");
+    expect(merged).not.toContain("아직 연결되지 않았습니다");
   });
 });
 
