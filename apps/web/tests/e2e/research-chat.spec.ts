@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { claimDemo, enterAs, FIRST_DEMO_QUOTE, refill, shot as evidenceShot } from "./helpers/volunteerFlow";
+import { claimDemo, enterAs, FIRST_DEMO_QUOTE, openPane, pane, refill, shot as evidenceShot } from "./helpers/volunteerFlow";
 
 // 대화형 리서치 챗(D안) 화면 시험, 노트북 크롬(e2e-desktop).
 // 실제 Next 서버(LLM_MODE=mock, 메모리 저장소, playwright.config의 webServer)에 붙는다. 가로채기로 응답을 꾸미지 않는다
@@ -282,13 +282,54 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(send).toBeFocused();
     await expect(page.getByRole("button", { name: "다시 편집하기" })).toBeVisible();
 
-    // E12 보내기 → 완료 화면(제목에 초점).
+    // E12 보내기 → 같은 챗봇 화면에 머문다(주소 그대로, 완료 페이지로 넘어가지 않는다). 보낸 리뷰는 읽기 전용이고 입력창·빠른 답은 닫힌다.
+    const urlBefore = page.url();
+    await expect(pane(page).getByTestId("mine-current")).toHaveCount(1);
     await send.click();
-    const done = page.getByRole("heading", { level: 1, name: "완료된 요청" });
-    await expect(done).toBeVisible();
-    await expect(done).toBeFocused();
-    await expect(page.getByText("전달 완료")).toBeVisible();
+    const sentReview = page.getByTestId("sent-review");
+    await expect(sentReview).toBeVisible();
+    await expect(sentReview).toBeFocused();
+    expect(page.url()).toBe(urlBefore);
+    await expect(page.getByRole("heading", { level: 1, name: "리서치 챗" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "완료된 요청" })).toHaveCount(0);
+    await expect(log(page).getByText("이용자에게 보냈어요. 이 요청은 끝났어요.")).toBeVisible();
+    await expect(page.getByTestId("sent-body")).toHaveText(GOOD_REVIEW);
+    await expect(page.getByTestId("sent-at")).toContainText("보낸 시각");
+    await expect(page.getByTestId("sent-model")).toContainText(MODEL);
+    await expect(sentReview.getByRole("button")).toHaveCount(0);
+    await expect(sentReview.getByRole("link")).toHaveCount(0);
+    await expect(page.getByRole("textbox")).toHaveCount(0);
+    await expect(quickGroup(page)).toHaveCount(0);
+    // 후보 목록·구매 링크·상세 요약은 보이지 않는다.
+    await expect(page.getByText("구매 링크", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("상세 요약")).toHaveCount(0);
+    // 왼쪽 창 "내 담당"에서 진행 중이던 요청이 새로 고침 없이 완료로 옮겨 갔다.
+    const sentItem = pane(page).getByTestId("mine-sent").filter({ hasText: "소니 무선 헤드셋 사고 싶어요" });
+    await expect(sentItem).toHaveCount(1);
+    await expect(sentItem).toContainText("완료");
+    await expect(sentItem).toContainText("오늘 보냄");
+    await expect(sentItem).toHaveAttribute("aria-current", "page");
+    await expect(sentItem).toBeInViewport();
+    await expect(pane(page).getByTestId("mine-current")).toHaveCount(0);
+    await expect(pane(page).getByText("맡은 요청이 없어요.")).toBeVisible();
+    await expectNoAxe(page);
     await shot(page, "volunteer-sent");
+    await evidenceShot(page, "volunteer-sent-in-chat");
+
+    // 새로 고쳐도(옛 주소로 다시 열어도) 같은 읽기 전용 화면이다. 대화 글은 새로 저장하지 않는다.
+    await page.reload();
+    await expect(page.getByTestId("sent-review")).toBeVisible();
+    await expect(page.getByTestId("sent-body")).toHaveText(GOOD_REVIEW);
+    expect(page.url()).toBe(urlBefore);
+    // 첫 화면으로 갔다가 왼쪽 창의 완료 항목을 누르면 같은 화면이 다시 열린다.
+    await page.getByRole("link", { name: "첫 화면으로" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
+    await openPane(page);
+    await pane(page).getByTestId("mine-sent").filter({ hasText: "소니 무선 헤드셋 사고 싶어요" }).click();
+    await expect(page.getByTestId("sent-review")).toBeVisible();
+    await expect(page.getByTestId("sent-body")).toHaveText(GOOD_REVIEW);
+    expect(page.url()).toBe(urlBefore);
+    await evidenceShot(page, "volunteer-sent-review");
 
     // 요청 본문 약속: 턴마다 clientTurnId(모두 다름), 같은 sessionId, 올라가는 baseVersion. 결과를 쓰는 길은 send 하나다.
     const turns = calls.filter((call) => call.path === "/research/turn" && call.method === "POST");

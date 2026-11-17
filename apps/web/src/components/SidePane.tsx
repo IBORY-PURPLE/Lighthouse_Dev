@@ -31,7 +31,7 @@ export function SidePane({
   pane: SidePaneState;
   queueHeadingRef: Ref<HTMLHeadingElement>;
   mineHeadingRef: Ref<HTMLHeadingElement>;
-  /** 지금 열어 둔 요청 id. 진행 중 요청이 이것이면 [이어서 하기]에 aria-current="page". */
+  /** 지금 열어 둔 요청 id. 진행 중 요청이면 [이어서 하기]에, 보낸 요청이면 그 완료 항목에 aria-current="page". */
   currentId?: string;
 }) {
   const { data, failed, loadedAt, newIds, locked, claimingId } = pane;
@@ -132,6 +132,8 @@ export function SidePane({
                       href={`/volunteer/requests/${item.requestId}`}
                       className="vc-mine-card vc-mine-card--link"
                       data-testid="mine-sent"
+                      onClick={pane.openSent}
+                      aria-current={currentId === item.requestId ? "page" : undefined}
                     >
                       <span className="vc-mine-head">
                         <span className="vh-chip">완료</span>
