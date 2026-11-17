@@ -16,6 +16,8 @@ import {
   type TurnInput,
 } from "@/lib/researchTurn";
 import * as text from "@/lib/researchTurnText";
+import { purchaseBadge } from "@/lib/researchSession";
+import { modelDiffers, photoCheckOutcome } from "@/lib/researchPhotoUpload";
 
 // 대화 한 턴의 규칙(design.md 4.3~4.6). 가짜 AI 응답(검사를 거친 JSON)과 메모리 저장소로 질문 순서·대체 동작을 확인한다.
 // 실제 AI는 tests/chatbot/research-turn.test.ts가 부른다.
@@ -965,5 +967,61 @@ describe("A2 독립 리뷰 지적 반영", () => {
       expect(turn?.guide?.steps).toEqual(defaultGuide(CONTEXT).steps);
       expect(turn?.dropped).toBe(true);
     });
+  });
+});
+
+describe("구매 인증 사진 확인(P2, A12)", () => {
+  async function toPhotoQuestion() {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.bought" });
+    await h.step(say("WH-CH720N"), replyAi(fill("model", "WH-CH720N")));
+    await h.step(say("가볍고 귀가 덜 아파요"), replyAi(fill("pros", "가볍고 귀가 덜 아파요")));
+    expect(await h.questions()).toEqual(["model", "pros", "photo"]);
+    return h;
+  }
+
+  it("착샷이 아니면 확인 필요로 두어 구매 인증을 보류하고 다음 질문을 잇지 않는다. [맞아요]면 풀리고 다음 질문", async () => {
+    const h = await toPhotoQuestion();
+    const outcome = photoCheckOutcome({ shot: "screenshot", description: "쇼핑몰 화면에 헤드셋이 보여요.", seenModel: null, ai: "ok" }, "WH-CH720N");
+    expect(outcome.pending).toEqual({ shotCheck: { slot: "photo", shot: "screenshot" } });
+    expect(outcome.message.body.quick).toEqual(text.PHOTO_CHECK_QUICK);
+    const before = await h.view();
+    const next = buildCandidates(before, "소니 헤드셋", { hold: false, aiNext: null, reask: null });
+    const uploaded = await research.addPhoto({ ...h.actor, thumb: JPEG, shot: "screenshot", pending: outcome.pending, messages: [], next });
+    expect(uploaded.outcome).toBe("ok");
+    if (uploaded.outcome !== "ok") return;
+    expect(uploaded.chosen).toBeNull();
+    expect(purchaseBadge(await h.view())).toBe("bought_no_photo");
+
+    const retake = await h.step({ type: "quick", replyId: "photo.retake" });
+    expect(bodyText(retake.messages.at(-1)!)).toBe(text.PHOTO_RETAKE);
+    expect(purchaseBadge(await h.view())).toBe("bought_no_photo");
+
+    const yes = await h.step({ type: "quick", replyId: "photo.yes" });
+    expect(yes.messages.some((message) => bodyText(message) === text.PHOTO_CONFIRMED)).toBe(true);
+    const after = await h.view();
+    expect(after.pending.shotCheck).toBeUndefined();
+    expect(purchaseBadge(after)).toBe("verified");
+    expect(await h.questions()).toEqual(["model", "pros", "photo", "alts"]);
+  });
+
+  it("착샷이고 기종이 같으면 확인 없이 대체 텍스트만 알린다. 사진에 다른 기종이 보이면 확인 필요", () => {
+    const ok = photoCheckOutcome({ shot: "photo", description: "검은 헤드셋을 손에 들고 있어요.", seenModel: "WH-CH720N", ai: "ok" }, "wh ch720n");
+    expect(ok.pending).toBeNull();
+    expect(ok.message.body.text).toBe("사진을 확인했어요. 검은 헤드셋을 손에 들고 있어요.");
+    const other = photoCheckOutcome({ shot: "photo", description: null, seenModel: "WH-1000XM5", ai: "ok" }, "WH-CH720N");
+    expect(other.pending).toEqual({ mismatch: { slot: "photo", seen: "WH-1000XM5" } });
+    expect(String(other.message.body.text)).toContain("WH-1000XM5");
+    const failed = photoCheckOutcome({ shot: "unclear", description: null, seenModel: null, ai: "fallback" }, "WH-CH720N");
+    expect(failed.pending).toEqual({ shotCheck: { slot: "photo", shot: "unclear" } });
+    expect(String(failed.message.body.text)).toContain("AI가 사진을 확인하지 못했어요.");
+    expect(modelDiffers(null, "WH-CH720N")).toBe(false);
+    expect(modelDiffers("Sony WH-CH720N", "WH-CH720N")).toBe(false);
+  });
+
+  it("확인할 사진이 없을 때 [맞아요]는 확인할 내용이 없다고 알린다", async () => {
+    const h = await toPhotoQuestion();
+    const yes = await h.step({ type: "quick", replyId: "photo.yes" });
+    expect(bodyText(yes.messages.at(-1)!)).toBe(text.NO_CONFIRM);
   });
 });

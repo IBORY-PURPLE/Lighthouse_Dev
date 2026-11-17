@@ -57,6 +57,13 @@ export const PURCHASE_QUICK: QuickButton[] = [
   { id: "purchase.bought", label: "구매했어요", tone: "primary" },
   { id: "purchase.research", label: "구매하지 않았어요 · 리서치만" },
 ];
+/** 사진 확인 필요(shotCheck·mismatch) 때의 빠른 답. */
+export const PHOTO_CHECK_QUICK: QuickButton[] = [
+  { id: "photo.yes", label: "직접 찍은 사진이 맞아요", tone: "primary" },
+  { id: "photo.retake", label: "다른 사진 올릴게요" },
+];
+export const PHOTO_CONFIRMED = "확인했어요. 직접 찍은 사진으로 구매 인증에 넣을게요.";
+export const PHOTO_RETAKE = "사진 아래 [사진 지우기]를 누른 뒤 새 사진을 올려 주세요. 휴대폰으로 바로 찍어 올려도 돼요.";
 export const CONFIRM_QUICK: QuickButton[] = [
   { id: "confirm.yes", label: "넣기", tone: "primary" },
   { id: "confirm.no", label: "아니요" },

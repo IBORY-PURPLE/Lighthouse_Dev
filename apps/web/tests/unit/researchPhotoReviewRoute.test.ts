@@ -211,20 +211,22 @@ describe("POST …/research/photos", () => {
     expect((await upload(o, { image: PNG_URL })).response.status).toBe(201);
   });
 
-  it("기종 질문 중에 올리면 말풍선만 들어가고(다음 질문 없음), 사진 칸이 차서 구매 인증됨이 된다", async () => {
+  it("기종 질문 중에 올리면 사진 말풍선과 AI 사진 확인 말풍선만 들어가고(다음 질문 없음), 착샷이면 구매 인증됨이 된다", async () => {
     const o = await opened();
     await say(o, { type: "quick", replyId: "purchase.bought" });
     const { response, data } = await upload(o);
     expect(response.status).toBe(201);
-    expect(data.photo).toMatchObject({ thumb: THUMB, description: null });
-    expect(data.messages).toHaveLength(1);
+    // 가짜 AI는 착샷으로 본다(P2 사진 확인, A12). 설명은 대체 텍스트로 사진과 말풍선에 들어간다.
+    expect(data.photo).toMatchObject({ thumb: THUMB, shot: "photo", description: expect.stringContaining("가짜 설명") });
+    expect(data.messages).toHaveLength(2);
+    expect(data.messages[1]).toMatchObject({ role: "ai", tag: "notice", slot: "photo", body: { text: expect.stringContaining("사진을 확인했어요.") } });
     expect(data.messages[0]).toMatchObject({ role: "volunteer", slot: "photo", body: { kind: "photo", photoId: data.photo.id } });
     expect(data.session).toMatchObject({ verified: true, stage: "chat", slots: { photo: { status: "filled" } } });
     const view = await read(o);
     expect(view.photos.map((photo: { id: string }) => photo.id)).toEqual([data.photo.id]);
     expect(view.photos[0].thumb).toBe(THUMB);
     expect(view.version).toBe(data.version);
-    // AI를 부르지 않는다.
+    // 가짜 모드라 실제 AI를 부르지 않는다.
     expect(chatCreate).not.toHaveBeenCalled();
     expect(responsesCreate).not.toHaveBeenCalled();
     expect(logOf("research/photos").at(-1)).toMatch(/kind=photo ai=none in=0 out=0 ws=0$/);
@@ -240,13 +242,14 @@ describe("POST …/research/photos", () => {
     expect(response.status).toBe(201);
     expect(data.messages.map((message: { slot: string; tag: string | null }) => [message.slot, message.tag])).toEqual([
       ["photo", null],
+      ["photo", "notice"],
       ["alts", "question"],
     ]);
-    expect(data.messages[0].seq).toBeLessThan(data.messages[1].seq);
-    expect(data.lastSeq).toBe(data.messages[1].seq);
+    expect(data.messages[0].seq).toBeLessThan(data.messages[2].seq);
+    expect(data.lastSeq).toBe(data.messages[2].seq);
     // 같은 순서로 GET에도 있다.
     const view = await read(o);
-    expect(view.messages.slice(-2).map((message: { seq: number }) => message.seq)).toEqual(data.messages.map((message: { seq: number }) => message.seq));
+    expect(view.messages.slice(-3).map((message: { seq: number }) => message.seq)).toEqual(data.messages.map((message: { seq: number }) => message.seq));
     // 다음 턴이 baseVersion을 이어받는다(사진이 version을 한 번만 올렸다).
     expect((await say(o, { type: "skip", slot: "alts" })).messages.at(-1)).toMatchObject({ slot: "altReason" });
   });
@@ -255,8 +258,8 @@ describe("POST …/research/photos", () => {
     const o = await opened();
     const { response, data } = await upload(o);
     expect(response.status).toBe(201);
-    expect(data.messages).toHaveLength(2);
-    expect(data.messages[1]).toMatchObject({ tag: "question", slot: "purchase", body: { text: PURCHASE_QUESTION } });
+    expect(data.messages).toHaveLength(3);
+    expect(data.messages[2]).toMatchObject({ tag: "question", slot: "purchase", body: { text: PURCHASE_QUESTION } });
     expect(data.session.stage).toBe("chat");
   });
 
@@ -396,6 +399,25 @@ describe("POST …/research/review", () => {
     });
     const GOOD =
       "LH-200은 직접 구매해서 쓰는 봉사자가 사진으로 인증한 헤드셋이에요. 가벼워서 오래 써도 편하다고 해요. 같이 본 제품은 배터리가 더 오래간다고 해서 비교했어요. 구매 인증 사진은 한 장 올라와 있어요. 이 내용은 봉사자가 모은 자료를 정리한 것이라서 최신 판매 정보는 쇼핑몰에서 직접 확인해 주세요.";
+
+    it("사진 확인(P2): AI가 캡처로 보면 구매 인증을 보류하고 확인 질문과 [직접 찍은 사진이 맞아요]를 낸다", async () => {
+      const o = await opened();
+      await say(o, { type: "quick", replyId: "purchase.bought" });
+      goLive();
+      chatCreate.mockResolvedValueOnce({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ shot: "screenshot", description: "쇼핑몰 화면에 헤드셋 사진이 보여요.", seenModel: null }) } }],
+        usage: { prompt_tokens: 300, completion_tokens: 40 },
+      });
+      const { response, data } = await upload(o);
+      expect(response.status).toBe(201);
+      expect(data.photo).toMatchObject({ shot: "screenshot", description: "쇼핑몰 화면에 헤드셋 사진이 보여요." });
+      expect(data.session.verified).toBe(false);
+      expect(data.messages[1].body.text).toContain("캡처한 사진처럼 보여요");
+      expect(data.messages[1].body.quick.map((q: { id: string }) => q.id)).toEqual(["photo.yes", "photo.retake"]);
+      const params = chatCreate.mock.calls[0][0];
+      expect(params.store).toBe(true);
+      expect(params.metadata).toEqual({ app: "lighthouse", feature: "research_photo" });
+    });
 
     it("AI를 기다리는 사이 칸이 바뀌면 옛 칸으로 만든 초안을 저장하지 않고 409 stale이다", async () => {
       const o = await opened();

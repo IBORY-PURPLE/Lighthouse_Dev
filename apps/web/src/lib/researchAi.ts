@@ -22,6 +22,7 @@ import {
   cleanQuestion,
   cleanText,
   countObjects,
+  hasForbidden,
   urlKey,
   type AllowedUrls,
 } from "./researchCheck";
@@ -31,6 +32,7 @@ import {
   materialMessage,
   searchInstructions,
   VISION_INSTRUCTIONS,
+  PHOTO_CHECK_INSTRUCTIONS,
   type AskCard,
   type SearchCard,
 } from "./researchPrompt";
@@ -234,6 +236,64 @@ async function callAsk(
     "research_ask",
   );
   return reply.text;
+}
+
+/** 구매 인증 사진 확인 결과(P2). ai: ok = AI가 봄, fallback = 호출 실패·검사 탈락, none = 키 없음·한도. */
+export interface PhotoCheckResult {
+  shot: "photo" | "screenshot" | "unclear";
+  description: string | null;
+  seenModel: string | null;
+  ai: "ok" | "fallback" | "none";
+}
+
+const PHOTO_CHECK_TIMEOUT_MS = 20_000;
+const SHOTS = new Set(["photo", "screenshot", "unclear"]);
+
+/**
+ * 구매 인증 사진을 AI가 본다: 사진 종류(착샷인지), 대체 텍스트, 사진에 인쇄된 기종.
+ * AI를 못 부르거나 답이 이상하면 shot=unclear로 돌려 봉사자 확인을 받게 한다(사진은 그대로 들어간다).
+ */
+export async function checkPurchasePhoto(
+  image: string,
+  model: string,
+  options: { skipAi?: boolean; signal?: AbortSignal } = {},
+): Promise<PhotoCheckResult> {
+  if (getLlmMode() === "mock") {
+    return { shot: "photo", description: "가짜 설명이에요. 봉사자가 손에 든 제품 사진이에요.", seenModel: null, ai: "ok" };
+  }
+  if (options.skipAi || !hasKey()) return { shot: "unclear", description: null, seenModel: null, ai: "none" };
+  try {
+    const completion = await newClient(PHOTO_CHECK_TIMEOUT_MS).chat.completions.create(
+      {
+        model: LLM_MODEL,
+        max_completion_tokens: 400,
+        reasoning_effort: "none",
+        response_format: { type: "json_object" },
+        ...openAiLog("research_photo"),
+        messages: [
+          { role: "system", content: PHOTO_CHECK_INSTRUCTIONS },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: materialMessage("사진을 확인한다.", { 기종: model }) },
+              { type: "image_url", image_url: { url: image, detail: "auto" } },
+            ],
+          },
+        ],
+      },
+      { signal: options.signal },
+    );
+    const json = parseJsonObject((completion.choices[0]?.message?.content ?? "").trim());
+    if (!json || typeof json.shot !== "string" || !SHOTS.has(json.shot)) {
+      return { shot: "unclear", description: null, seenModel: null, ai: "fallback" };
+    }
+    const description = cleanText(json.description, RESEARCH_LIMITS.descriptionMax) || null;
+    const seenRaw = typeof json.seenModel === "string" ? json.seenModel.trim() : "";
+    const seenModel = seenRaw && !hasForbidden(seenRaw) ? seenRaw.slice(0, 100) : null;
+    return { shot: json.shot as PhotoCheckResult["shot"], description, seenModel, ai: "ok" };
+  } catch {
+    return { shot: "unclear", description: null, seenModel: null, ai: "fallback" };
+  }
 }
 
 /** vision: 기존 글자 읽기(OCR)와 같은 이미지 입력 모양. 출력은 설명 글이다. */

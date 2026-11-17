@@ -19,7 +19,7 @@ export function PhotoBubble({
   return (
     <div className="vc-photo">
       {photo.thumb ? (
-        <img src={photo.thumb} alt={`올린 사진 ${index}`} className="vc-photo-img" width={160} height={160} />
+        <img src={photo.thumb} alt={photo.description ? `올린 사진 ${index}: ${photo.description}` : `올린 사진 ${index}`} className="vc-photo-img" width={160} height={160} />
       ) : (
         <span className="vc-photo-img vc-photo-img--blank">사진 {index}</span>
       )}
