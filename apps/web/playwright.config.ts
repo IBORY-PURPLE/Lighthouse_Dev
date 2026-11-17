@@ -16,13 +16,13 @@ export default defineConfig({
   projects: [
     {
       name: "e2e",
-      testIgnore: ["public.spec.ts", "research-*.spec.ts"],
+      testIgnore: ["public.spec.ts", "research-*.spec.ts", "volunteer-desktop.spec.ts"],
       use: { ...devices["iPhone 15"] },
     },
     {
       // 대화형 리서치 챗은 노트북 크롬 화면이다(design.md 6절).
       name: "e2e-desktop",
-      testMatch: "research-*.spec.ts",
+      testMatch: ["research-*.spec.ts", "volunteer-desktop.spec.ts"],
       // 실제 AI 한 사이클은 공개 주소에서 따로 돈다(아래 cycle).
       testIgnore: "research-cycle.spec.ts",
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },

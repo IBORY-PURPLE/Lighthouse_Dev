@@ -8,14 +8,16 @@ import { ChatLog, type ChatActions, type OptimisticMessage } from "./ChatLog";
 import { Composer, type ComposerHandle } from "./Composer";
 import { CurrentQuestionLine } from "./CurrentQuestionLine";
 import { HeroBackdrop } from "./HeroBackdrop";
-import { StatusPill } from "./PurchaseBadge";
+import { HeroCopy } from "./HeroCopy";
 import { QuickReplies } from "./QuickReplies";
 import { ResearchTopBar } from "./ResearchTopBar";
 import { ReviewCard } from "./ReviewCard";
 import { ReviewEditor } from "./ReviewEditor";
 import { SlotPanel } from "./SlotPanel";
 import { SentView } from "@/components/SentView";
+import { SidePane } from "@/components/SidePane";
 import { shrinkPhoto } from "@/lib/researchPhoto";
+import { isWideScreen, SIDE_PANE_ID, useSidePane } from "@/lib/useSidePane";
 import {
   activeQuick,
   arrangeMessages,
@@ -199,6 +201,11 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const warn = useCallback((text: string) => setNotice({ text, loud: true }), []);
 
   const toList = useCallback(() => router.replace("/volunteer"), [router]);
+  // 왼쪽 창(대기열 + 내 담당). 열 때 목록을 한 번 읽는다(401이면 첫 화면으로).
+  const sideToggleRef = useRef<HTMLButtonElement>(null);
+  const queueHeadingRef = useRef<HTMLHeadingElement>(null);
+  const mineHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pane = useSidePane({ toggleRef: sideToggleRef, queueHeadingRef, mineHeadingRef, forceOpen: false, onUnauthorized: toList, say });
 
   // ----- 불러오기 -----
 
@@ -953,7 +960,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
           : "답을 적거나 사진을 올려 주세요";
 
   return (
-    <div ref={stageRef} className={`vol-chat vc-stage ${hero ? "is-hero" : "is-chat"}`} data-testid="research-stage" data-mode={hero ? "hero" : "chat"}>
+    <div ref={stageRef} className={`vol-chat vc-stage ${hero ? "is-hero" : "is-chat"}${pane.open ? " has-mine" : ""}`} data-testid="research-stage" data-mode={hero ? "hero" : "chat"}>
       <ResearchTopBar
         ref={headingRef}
         title={request.product}
@@ -961,24 +968,26 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         badge={badge}
         panelOpen={panelOpen}
         panelSummary={`필수 ${progress.filled}/${progress.total}`}
-        onTogglePanel={() => setPanelOpen((value) => !value)}
+        onTogglePanel={() => {
+          // 좁은 화면에서는 두 창이 겹치므로 하나만 연다.
+          if (!panelOpen && !isWideScreen()) pane.setOpen(false);
+          setPanelOpen((value) => !value);
+        }}
         panelId={PANEL_ID}
         toggleRef={panelToggleRef}
+        sideOpen={pane.open}
+        onToggleSide={() => {
+          if (!pane.open && !isWideScreen()) setPanelOpen(false);
+          pane.toggle();
+        }}
+        sideId={SIDE_PANE_ID}
+        sideToggleRef={sideToggleRef}
       />
       <div className="vc-body">
         <HeroBackdrop variant={hero ? "hero" : "chat"} />
+        <SidePane id={SIDE_PANE_ID} pane={pane} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
         <main className="vc-main">
-          {hero && (
-            <div className="vc-hero-copy">
-              <StatusPill text={`요청을 맡았어요 · 이용자: “${request.product}”`} />
-              <h2 className="vc-hero-title">
-                {subject} 구매경험
-                <br />
-                리서치 어시스턴트
-              </h2>
-              <p className="vc-hero-sub">구매했던 경험을 시각장애인 유저에게 공유해 봐요.</p>
-            </div>
-          )}
+          {hero && <HeroCopy subject={subject} pill={`요청을 맡았어요 · 이용자: “${request.product}”`} />}
           {!hero && <CurrentQuestionLine slot={slot} required={slot ? requiredSlots(view.purchase).includes(slot) : false} />}
           <div
             ref={scrollRef}
