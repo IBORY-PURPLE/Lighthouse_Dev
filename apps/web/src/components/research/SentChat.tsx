@@ -1,57 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, type Ref } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { Icon } from "./Icon";
 import { MessageBubble } from "./MessageBubble";
+import { BrandTitle } from "../BrandTitle";
+import { readSentHistory } from "@/lib/sentHistory";
 import {
   formatSentAt,
   sentModelOf,
   sentReviewOf,
-  structuredLine,
   type SentResult,
   type VolunteerRequestView,
 } from "@/lib/volunteerView";
 
-/** 보낸 요청의 위 막대: 뒤로(첫 화면) · 리서치 챗 · 이용자 요청 한 줄 · 완료 표시 · 왼쪽 창 버튼. 모은 정보·내려놓기는 없다. */
+/** 보낸 요청의 위 막대: 뒤로(첫 화면) · 서비스 이름 · 완료 표시 · 왼쪽 창 버튼. 모은 정보·내려놓기는 없다. */
 export function SentTopBar({
   request,
   headingRef,
-  sideOpen,
-  onToggleSide,
-  sideId,
-  sideToggleRef,
 }: {
   request: VolunteerRequestView;
   headingRef: Ref<HTMLHeadingElement>;
-  sideOpen: boolean;
-  onToggleSide: () => void;
-  sideId: string;
-  sideToggleRef: Ref<HTMLButtonElement>;
 }) {
   return (
     <header className="vc-topbar">
       <Link href="/volunteer" className="vc-back" aria-label="첫 화면으로">
         <Icon name="back" />
       </Link>
-      <h1 ref={headingRef} tabIndex={-1} className="vc-topbar-title">
-        리서치 챗
-      </h1>
-      <span className="vc-topbar-rule" aria-hidden="true" />
-      <div className="vc-request">
-        <p className="vc-request-title">{request.product}</p>
-        <p className="vc-request-detail">{structuredLine(request)}</p>
-      </div>
-      <button
-        ref={sideToggleRef}
-        type="button"
-        className="vc-mine-toggle"
-        aria-expanded={sideOpen}
-        aria-controls={sideId}
-        onClick={onToggleSide}
-      >
-        대기열·내 담당
-      </button>
+      <BrandTitle ref={headingRef} context={`리서치 챗 · ${request.product}`} />
+      <span className="vh-spacer" />
       <span className="vc-tag vc-tag--ink">완료</span>
     </header>
   );
@@ -62,7 +39,10 @@ export function SentTopBar({
  * 보낸 뒤 이 화면에 머물 때도, 왼쪽 창의 완료 항목이나 옛 주소로 다시 열 때도 같은 모양이다.
  * 대화 글은 보낼 때 서버가 지우므로 새로 저장하지도 읽어 오지도 않는다. 값은 요청 상세의 result 하나다.
  */
-export function SentMain({ result }: { result: SentResult }) {
+export function SentMain({ requestId, result }: { requestId: string; result: SentResult }) {
+  // 이 기기에 남긴 대화 이력(보낸 그 기기에서만, 30일). 브라우저에서만 그려지는 화면이라 처음 값을 바로 읽는다.
+  const [history] = useState(() => readSentHistory(requestId));
+  const [historyOpen, setHistoryOpen] = useState(false);
   const regionRef = useRef<HTMLElement>(null);
   const review = sentReviewOf(result);
   const model = sentModelOf(result);
@@ -102,6 +82,34 @@ export function SentMain({ result }: { result: SentResult }) {
             </p>
             <p className="vc-review-hint">이용자에게 전해진 문단이에요. 읽기만 할 수 있어요.</p>
           </section>
+          <div className="vc-history" data-testid="sent-history">
+            {history ? (
+              <button
+                type="button"
+                className="vc-btn vc-btn--small"
+                aria-expanded={historyOpen}
+                aria-controls="vc-history-list"
+                onClick={() => setHistoryOpen((open) => !open)}
+              >
+                {historyOpen ? "대화 이력 접기" : `대화 이력 보기 (${history.length})`}
+              </button>
+            ) : (
+              <p className="vc-review-hint">이 기기에는 대화 이력이 없어요. 보낸 기기에서 30일 동안 볼 수 있어요.</p>
+            )}
+          </div>
+          {history && historyOpen && (
+            <div id="vc-history-list" className="vc-history-list" role="group" aria-label="대화 이력">
+              {history.map((line, index) => (
+                <MessageBubble
+                  key={index}
+                  role={line.role}
+                  tag={line.chip ? { chip: line.chip, note: line.note ?? "" } : null}
+                  text={line.text}
+                />
+              ))}
+              <p className="vc-review-hint">이 기기에만 남은 기록이에요. 보낸 날부터 30일 뒤 지워져요.</p>
+            </div>
+          )}
         </div>
       </div>
       <div className="vc-dock">

@@ -131,7 +131,7 @@ test("공개 주소 리서치 챗 한 사이클: 맡기 → 질문 7개 → 리�
     } else if (slot === "혜택") {
       await type("카드 할인 받고 무료 배송이었어요");
       // 혜택 검색이 끝나면(카드가 없어도 끝난다) 혜택 카드 하나를 [확인했어요]로 확인한다.
-      const benefitList = page.getByRole("list", { name: "찾은 혜택" }).first();
+      const benefitList = page.getByRole("region", { name: "찾은 혜택" }).first();
       await benefitList.waitFor({ timeout: 120_000 }).catch(() => undefined);
       if ((await benefitList.count()) > 0) {
         benefitsListSeen = true;
@@ -156,7 +156,7 @@ test("공개 주소 리서치 챗 한 사이클: 맡기 → 질문 7개 → 리�
   await expect(page.getByTestId("research-stage")).toBeVisible();
   await idle(page);
   await scanScreen(page, wording);
-  if (benefitChecked) await expect(page.getByRole("list", { name: "찾은 혜택" }).first().locator('[aria-pressed="true"]').first()).toBeVisible();
+  if (benefitChecked) await expect(page.getByRole("region", { name: "찾은 혜택" }).first().locator('[aria-pressed="true"]').first()).toBeVisible();
 
   // 리뷰 만들기 → 초안(AI 또는 틀 문단)을 그대로 검수 마치기 → 보내기.
   await page.getByRole("group", { name: "빠른 답" }).getByRole("button", { name: "리뷰 만들기" }).click();

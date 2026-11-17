@@ -2,7 +2,9 @@
 
 import { useSearchParams } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
+import { LoadingOverlay } from "@/components/LoadingOverlay";
 import { SidePane } from "@/components/SidePane";
+import { BrandTitle } from "@/components/BrandTitle";
 import { Composer } from "@/components/research/Composer";
 import { HeroBackdrop } from "@/components/research/HeroBackdrop";
 import { HeroCopy } from "@/components/research/HeroCopy";
@@ -107,22 +109,12 @@ export function VolunteerHome({ onUnauthorized }: VolunteerHomeProps) {
       data-testid="home-stage"
     >
       <header className="vc-topbar vh-topbar">
-        <h1 className="vc-topbar-title">봉사자</h1>
+        <BrandTitle context="봉사자" />
         <span className="vh-spacer" />
-        <button
-          ref={toggleRef}
-          type="button"
-          className="vc-mine-toggle"
-          aria-expanded={panels.mineOpen}
-          aria-controls={SIDE_PANE_ID}
-          onClick={panels.toggleMine}
-        >
-          대기열·내 담당
-        </button>
       </header>
       <div className="vc-body">
         <HeroBackdrop variant="hero" />
-        <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
+        <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} onClose={pane.close} onOpen={panels.toggleMine} toggleRef={toggleRef} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
         <main className="vc-main">
           <HeroCopy />
           <div className="vc-dock">
@@ -184,6 +176,8 @@ export function VolunteerHome({ onUnauthorized }: VolunteerHomeProps) {
             />
             <p className="vc-hero-note">AI는 찾고 정리하는 일만 도와요. 최종 판단은 봉사자님이 해요.</p>
           </div>
+          {/* [이 요청 맡기]를 누른 뒤 요청 화면으로 넘어갈 때까지: 히어로 배경은 두고 도는 아이콘만 얹는다. */}
+          {pane.claimingId && <LoadingOverlay />}
         </main>
       </div>
     </div>

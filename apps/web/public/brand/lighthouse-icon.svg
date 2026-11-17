@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="112" height="112" viewBox="0 0 112 112" fill="none">
+  <defs>
+    <linearGradient id="lh-beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFC857" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#FFD9A1" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(-10 0)">
+    <path d="M62 30 L114 10 L114 64 L62 42 Z" fill="url(#lh-beam)"/>
+    <g stroke="#111418" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M34 26 Q48 10 62 26 Z" fill="#E4573D"/>
+      <rect x="38" y="26" width="20" height="16" fill="#FFC857"/>
+      <rect x="32" y="42" width="32" height="6" rx="2" fill="#FFFFFF"/>
+      <path d="M38 48 H58 L64 98 H32 Z" fill="#E4573D"/>
+      <path d="M36.32 62 H59.68 L60.88 72 H35.12 Z" fill="#FFFFFF"/>
+      <path d="M33.92 82 H62.08 L63.04 90 H32.96 Z" fill="#FFFFFF"/>
+      <rect x="28" y="98" width="40" height="8" rx="2" fill="#111418"/>
+    </g>
+  </g>
+</svg>

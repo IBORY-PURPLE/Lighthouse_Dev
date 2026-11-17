@@ -5,6 +5,14 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import { postPhotoLink, type PhotoLinkView } from "@/lib/researchClient";
 
 const PHONE_PATH = "/volunteer/photo";
+/**
+ * QR에 넣을 주소의 앞부분. 배포에서는 지금 화면 주소 그대로다.
+ * 로컬 개발에서 노트북이 localhost로 열려 있으면 휴대폰이 그 주소를 못 여므로, 같은 와이파이 주소(예: http://192.168.0.2:3200)를
+ * NEXT_PUBLIC_PHONE_ORIGIN으로 넘긴다.
+ */
+function phoneOrigin(): string {
+  return process.env.NEXT_PUBLIC_PHONE_ORIGIN || window.location.origin;
+}
 
 /** 남은 시간을 "9:41"로. */
 export function clock(seconds: number): string {
@@ -84,7 +92,7 @@ export function PhotoQrDialog({
       );
       return;
     }
-    const url = `${window.location.origin}${PHONE_PATH}#t=${outcome.data.token}`;
+    const url = `${phoneOrigin()}${PHONE_PATH}#t=${outcome.data.token}`;
     try {
       const qr = await QRCode.toDataURL(url, { errorCorrectionLevel: "M", margin: 1, width: 240 });
       if (!alive.current) return;

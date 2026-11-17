@@ -224,6 +224,36 @@ export function benefitsOf(body: Record<string, unknown>): { headline: string; i
   return { headline: str(body.headline) || str(body.text), items };
 }
 
+/**
+ * 서버는 혜택을 종류별 메시지 여러 개로 보낸다(메시지 크기 상한). 화면은 연달아 온 혜택 메시지를 첫 메시지 하나로 모아 한 장씩 넘겨 본다.
+ * 값: 첫 메시지 seq → 모은 묶음, 뒤 메시지 seq → null(그리지 않음). 혜택이 아닌 메시지는 들어 있지 않다.
+ * 첫 머리 줄 끝의 종류 이름("… 공식몰·제조사 행사")은 카드마다 "출처"로 나오므로 뺀다.
+ */
+export function mergeBenefitRuns(
+  messages: readonly ChatMessage[],
+): Map<number, { headline: string; items: BenefitItem[] } | null> {
+  const out = new Map<number, { headline: string; items: BenefitItem[] } | null>();
+  let head: { headline: string; items: BenefitItem[] } | null = null;
+  for (const message of messages) {
+    const benefits = benefitsOf(message.body);
+    if (!benefits) {
+      head = null;
+      continue;
+    }
+    if (head) {
+      head.items.push(...benefits.items);
+      out.set(message.seq, null);
+      continue;
+    }
+    const label = benefits.items[0]?.kind ?? "";
+    const headline =
+      label && benefits.headline.endsWith(` ${label}`) ? benefits.headline.slice(0, -label.length - 1) : benefits.headline;
+    head = { headline, items: [...benefits.items] };
+    out.set(message.seq, head);
+  }
+  return out;
+}
+
 export function linkOf(body: Record<string, unknown>): { url: string; note: string } | null {
   if (bodyKind(body) !== "link") return null;
   const url = str(body.url);
