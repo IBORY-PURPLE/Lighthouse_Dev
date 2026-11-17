@@ -850,6 +850,13 @@ test.describe("두 창 · 노트북 1440", () => {
     await expect(more).toHaveAttribute("aria-expanded", "false");
     await expect(more).toBeFocused();
 
+    // 입력창을 눌러도 초점은 더 보기로 돌아온다.
+    await more.click();
+    await expect(menu).toBeVisible();
+    await composer(page).click();
+    await expect(menu).toBeHidden();
+    await expect(more).toBeFocused();
+
     // 패널과 같은 확인·같은 release(): 돌려놓기를 누르면 첫 화면으로 간다.
     await more.click();
     await menu.getByRole("button", { name: "요청 내려놓기" }).click();
@@ -901,6 +908,22 @@ test.describe("두 창 · 노트북 1440", () => {
 
 test.describe("두 창 · 1024 (겹침)", () => {
   test.use({ viewport: { width: 1024, height: 768 } });
+
+  test("겹친 오른쪽 창을 Esc로 닫으면 닫힌 상태를 기억한다(새로 고쳐도 닫힌 채)", async ({ page }) => {
+    await begin(page);
+    await pickBought(page);
+    await pickModel(page);
+    await slotsToggle(page).click();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "true");
+    await expect.poll(async () => (await storedPanels(page))?.narrow?.slots).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(slotsToggle(page)).toBeFocused();
+    await expect.poll(async () => (await storedPanels(page))?.narrow?.slots).toBe(false);
+    await page.reload();
+    await expect(log(page).getByText(`${MODEL}의 장점이 뭐예요?`)).toBeVisible();
+    await expect(slotsToggle(page)).toHaveAttribute("aria-expanded", "false");
+  });
 
   test("둘 다 닫힌 채 시작하고 한쪽을 열면 다른 쪽이 닫힌다. 메뉴를 열면 창이 닫힌다. 칸을 누르면 창이 닫히고 질문으로 간다", async ({ page }) => {
     test.setTimeout(120_000);

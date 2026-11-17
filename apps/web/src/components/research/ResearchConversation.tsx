@@ -444,7 +444,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     if (!panels.slotsOpen || !slotsOverlay) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      panels.setSlots(false, false);
+      panels.setSlots(false);
       panelToggleRef.current?.focus();
     };
     window.addEventListener("keydown", onKey);
@@ -465,9 +465,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       const target = event.target as Node | null;
       if (target && (document.getElementById("vc-more")?.contains(target) || moreToggleRef.current?.contains(target))) return;
       setMoreOpen(false);
-      // 초점은 "더 보기"로 돌아온다. 누른 곳이 글자를 쓰는 칸이면(입력창) 쓰던 자리를 지키려고 그 칸에 둔다.
-      const typing = target instanceof HTMLElement && target.closest("input, textarea, [contenteditable]") !== null;
-      if (!typing) window.setTimeout(() => moreToggleRef.current?.focus(), 0);
+      // 초점은 항상 "더 보기"로 돌아온다(누른 곳이 받은 초점은 이 한 번 덮는다).
+      window.setTimeout(() => moreToggleRef.current?.focus(), 0);
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onPointer);
@@ -965,8 +964,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
       say("아직 묻지 않았어요");
       return;
     }
-    // 좁은 화면에서는 오른쪽 창이 대화를 덮으므로 닫은 뒤 옮긴다(저장값은 바꾸지 않는다).
-    if (!panels.wide) panels.setSlots(false, false);
+    // 좁은 화면에서는 오른쪽 창이 대화를 덮으므로 닫은 뒤 옮긴다.
+    if (!panels.wide) panels.setSlots(false);
     if (seq <= fold.foldedUpTo && !foldOpen) {
       pendingJump.current = seq;
       setFoldOpen(true);
@@ -1073,7 +1072,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         moreOpen={moreOpen}
         onToggleMore={() => {
           // 좁은 화면에서는 메뉴를 열면 오른쪽 창을 닫는다(같은 이름의 [요청 내려놓기]가 동시에 보이지 않게).
-          if (!moreOpen && !panels.wide) panels.setSlots(false, false);
+          if (!moreOpen && !panels.wide) panels.setSlots(false);
           setMoreOpen((value) => !value);
         }}
         moreId="vc-more"
