@@ -166,6 +166,11 @@ export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, open, 
     [claimingId, locked, say, router, refresh],
   );
 
+  /** 완료 항목을 눌러 그 요청 화면으로 갈 때. 좁은 화면의 겹친 창은 접는다(다음 화면이 창에 덮인 채 시작하지 않게). 넓은 화면은 기억한 대로 둔다. */
+  const openSent = useCallback(() => {
+    if (!isWideScreen()) handlers.current.setOpen(false);
+  }, []);
+
   return {
     data,
     failed,
@@ -175,6 +180,7 @@ export function useSidePane({ toggleRef, queueHeadingRef, mineHeadingRef, open, 
     claimingId,
     refresh,
     claim,
+    openSent,
     focusSection,
   };
 }

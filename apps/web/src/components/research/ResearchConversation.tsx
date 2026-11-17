@@ -12,10 +12,10 @@ import { HeroCopy } from "./HeroCopy";
 import { PhotoQrDialog } from "./PhotoQrDialog";
 import { QuickReplies } from "./QuickReplies";
 import { ResearchTopBar } from "./ResearchTopBar";
+import { SentMain, SentTopBar } from "./SentChat";
 import { ReviewCard } from "./ReviewCard";
 import { ReviewEditor } from "./ReviewEditor";
 import { SlotPanel } from "./SlotPanel";
-import { SentView } from "@/components/SentView";
 import { SidePane } from "@/components/SidePane";
 import { isPhonePhotoCommand } from "@/lib/photoCommand";
 import { shrinkPhoto } from "@/lib/researchPhoto";
@@ -247,6 +247,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     onUnauthorized: toList,
     say,
   });
+  const refreshPane = pane.refresh;
 
   // ----- 불러오기 -----
 
@@ -369,9 +370,19 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const finishSent = useCallback(async () => {
     const detail = await fetchRequest(requestId);
     if (!alive.current) return;
-    if (detail.kind === "ok" && detail.data.result) setLoad({ kind: "done", detail: detail.data });
-    else setAttempt((value) => value + 1);
-  }, [requestId]);
+    if (detail.kind === "ok" && detail.data.result) {
+      setLoad({ kind: "done", detail: detail.data });
+      // 왼쪽 창 "내 담당"에서 이 요청이 진행 중에서 완료로 옮겨 가게 목록을 다시 읽고, 창 안에서 그 구역이 보이게 스크롤한다(초점은 옮기지 않는다).
+      void refreshPane(false).then((ok) => {
+        const heading = mineHeadingRef.current;
+        const aside = heading?.closest("aside");
+        if (!ok || !heading || !aside || !alive.current) return;
+        window.setTimeout(() => {
+          aside.scrollTop += heading.getBoundingClientRect().top - aside.getBoundingClientRect().top - 12;
+        }, 0);
+      });
+    } else setAttempt((value) => value + 1);
+  }, [requestId, refreshPane]);
 
   // stage가 sent(다른 탭에서 보냄 포함)면 완료 화면으로.
   useEffect(() => {
@@ -1100,8 +1111,25 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
 
   // ----- 그리기 -----
 
+  // 보낸 요청: 같은 챗봇 화면(위 막대·왼쪽 창·본문 틀)에서 보낸 리뷰를 읽기 전용으로 보인다.
   if (load.kind === "done") {
-    return <SentView request={load.detail.request} result={load.detail.result!} />;
+    return (
+      <div className={`vol-chat vc-stage is-chat${panels.mineOpen ? " has-mine" : ""}`} data-testid="sent-stage" data-mode="sent">
+        <SentTopBar
+          request={load.detail.request}
+          headingRef={headingRef}
+          sideOpen={panels.mineOpen}
+          onToggleSide={panels.toggleMine}
+          sideId={SIDE_PANE_ID}
+          sideToggleRef={sideToggleRef}
+        />
+        <div className="vc-body">
+          <HeroBackdrop variant="chat" />
+          <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
+          <SentMain result={load.detail.result!} />
+        </div>
+      </div>
+    );
   }
 
   if (load.kind !== "ready" || !view || !request) {
