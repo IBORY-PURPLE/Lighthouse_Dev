@@ -195,6 +195,21 @@ describe("GET /api/requests/[requestId] (메모리 저장소)", () => {
     });
   });
 
+  it("봉사자가 맡으면 in_progress, 보내면 done과 리뷰 문단·보낸 시각을 돌려준다(이용자 화면이 읽어 준다)", async () => {
+    const created = await (await POST(postRequest(answers()))).json();
+    const store = requestStore.getRequestStore();
+    expect(await store.claim(created.requestId, "vol-1")).toBe("claimed");
+    expect((await (await getRequest(created.requestId)).json()).status).toBe("in_progress");
+    const outcome = await store.complete(created.requestId, "vol-1", [
+      { name: "WH-1000XM5", url: "", guide: "가볍고 오래 써도 귀가 편했어요.", summary: [] },
+    ]);
+    expect(outcome.outcome).toBe("completed");
+    const body = await (await getRequest(created.requestId)).json();
+    expect(body.status).toBe("done");
+    expect(body.review).toBe("가볍고 오래 써도 귀가 편했어요.");
+    expect(typeof body.sentAt).toBe("string");
+  });
+
   it("UUID가 아니면 400", async () => {
     const response = await getRequest("not-a-uuid");
     expect(response.status).toBe(400);
