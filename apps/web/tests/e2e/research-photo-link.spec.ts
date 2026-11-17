@@ -259,6 +259,43 @@ test.describe("휴대폰으로 찍기(QR)", () => {
     await phoneCtx.close();
   });
 
+  test("앞서 연결된 휴대폰에서 다른 요청의 QR을 열면 새 링크를 쓰고 사진은 새 요청에 올라간다", async ({ page, browser, baseURL }) => {
+    await begin(page);
+    await toPhotoQuestion(page);
+    await openQrFromSheet(page);
+    const urlA = await linkOf(page);
+
+    const phoneCtx = await phoneContext(browser);
+    const phone = await phoneCtx.newPage();
+    await phone.goto(urlA);
+    await phone.locator("input[type=file]").setInputFiles({ name: "a.png", mimeType: "image/png", buffer: PNG_1X1 });
+    await expect(phone.getByRole("status").filter({ hasText: "사진을 올렸어요" })).toBeVisible();
+    await expect(page.getByRole("img", { name: "올린 사진 1" })).toBeVisible({ timeout: 15_000 });
+
+    // 다른 봉사자가 대기 요청 하나를 맡아 링크를 만든다(화면 없이 서버 함수로).
+    const other = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": `e2e-b-${randomUUID()}` } });
+    expect((await other.request.post(`${baseURL}/api/volunteer/enter`)).ok()).toBe(true);
+    const waiting = (await (await other.request.get(`${baseURL}/api/volunteer/queue`)).json()).waiting as { requestId: string }[];
+    const idB = waiting[0].requestId;
+    expect((await other.request.post(`${baseURL}/api/volunteer/requests/${idB}/claim`)).ok()).toBe(true);
+    const base = `${baseURL}/api/volunteer/requests/${idB}/research`;
+    const sessionB = (await (await other.request.get(base)).json()).sessionId as string;
+    const issued = await other.request.post(`${base}/photo-link`, { data: { sessionId: sessionB } });
+    expect(issued.status()).toBe(201);
+    const { token } = (await issued.json()) as { token: string };
+
+    // 같은 휴대폰(A의 열쇠가 살아 있다)에서 B의 링크를 연다.
+    await phone.goto(`/volunteer/photo#t=${token}`);
+    await phone.locator("input[type=file]").setInputFiles({ name: "b.png", mimeType: "image/png", buffer: PNG_1X1 });
+    await expect(phone.getByRole("status").filter({ hasText: "사진을 올렸어요" })).toBeVisible();
+    const photosB = ((await (await other.request.get(base)).json()).photos as unknown[]).length;
+    expect(photosB).toBe(1);
+    // A는 그대로 1장이다.
+    await expect(page.getByRole("img", { name: "올린 사진 2" })).toHaveCount(0);
+    await other.close();
+    await phoneCtx.close();
+  });
+
   test("링크 없이 연 휴대폰 페이지는 안내만 보인다", async ({ browser }) => {
     const ctx = await phoneContext(browser);
     const page = await ctx.newPage();
