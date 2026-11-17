@@ -2,9 +2,10 @@ import Link from "next/link";
 import { forwardRef, type Ref } from "react";
 import { PurchaseBadge } from "./PurchaseBadge";
 import { Icon } from "./Icon";
+import { ReleaseConfirm } from "./ReleaseConfirm";
 import type { BadgeKind } from "@/lib/researchChatView";
 
-/** 위 바: 뒤로(첫 화면) · 리서치 챗 · 이용자 요청 한 줄 · 왼쪽 창 버튼 · 구매 배지. 1180 미만(히어로는 폭과 상관없이)에서는 모은 정보 패널 버튼이 붙는다. */
+/** 위 바: 뒤로(첫 화면) · 리서치 챗 · 이용자 요청 한 줄 · 왼쪽 창 버튼 · 모은 정보 버튼(모든 폭) · 구매 배지 · "…" 더 보기(요청 내려놓기). */
 export const ResearchTopBar = forwardRef<
   HTMLHeadingElement,
   {
@@ -20,9 +21,17 @@ export const ResearchTopBar = forwardRef<
     onToggleSide: () => void;
     sideId: string;
     sideToggleRef?: Ref<HTMLButtonElement>;
+    /** 새로 채워진 칸이 있는데 오른쪽 창이 닫혀 있다. */
+    unseen: boolean;
+    moreOpen: boolean;
+    onToggleMore: () => void;
+    moreId: string;
+    moreToggleRef?: Ref<HTMLButtonElement>;
+    onRelease: () => void;
+    releasing: boolean;
   }
 >(function ResearchTopBar(
-  { title, detail, badge, panelOpen, panelSummary, onTogglePanel, panelId, toggleRef, sideOpen, onToggleSide, sideId, sideToggleRef },
+  { title, detail, badge, panelOpen, panelSummary, onTogglePanel, panelId, toggleRef, sideOpen, onToggleSide, sideId, sideToggleRef, unseen, moreOpen, onToggleMore, moreId, moreToggleRef, onRelease, releasing },
   headingRef,
 ) {
   return (
@@ -57,8 +66,30 @@ export const ResearchTopBar = forwardRef<
         onClick={onTogglePanel}
       >
         모은 정보 {panelSummary}
+        {unseen && (
+          <>
+            <span className="vc-dot" aria-hidden="true" />
+            <span className="vol-sr"> 새 정보 있음</span>
+          </>
+        )}
       </button>
       <PurchaseBadge kind={badge.kind} label={badge.label} />
+      <div className="vc-more-wrap">
+        <button
+          ref={moreToggleRef}
+          type="button"
+          className="vc-more-toggle"
+          aria-label="더 보기"
+          aria-expanded={moreOpen}
+          aria-controls={moreId}
+          onClick={onToggleMore}
+        >
+          <span aria-hidden="true">…</span>
+        </button>
+        <div id={moreId} className="vc-more" hidden={!moreOpen}>
+          {moreOpen && <ReleaseConfirm onRelease={onRelease} releasing={releasing} />}
+        </div>
+      </div>
     </header>
   );
 });

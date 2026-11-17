@@ -20,19 +20,21 @@ function clock(time: number): string {
  */
 export function SidePane({
   id,
+  open,
   pane,
   currentId,
   queueHeadingRef,
   mineHeadingRef,
 }: {
   id: string;
+  open: boolean;
   pane: SidePaneState;
   queueHeadingRef: Ref<HTMLHeadingElement>;
   mineHeadingRef: Ref<HTMLHeadingElement>;
   /** 지금 열어 둔 요청 id. 진행 중 요청이 이것이면 [이어서 하기]에 aria-current="page". */
   currentId?: string;
 }) {
-  const { open, data, failed, loadedAt, newIds, locked, claimingId } = pane;
+  const { data, failed, loadedAt, newIds, locked, claimingId } = pane;
   const waiting = data?.waiting ?? [];
   const mine = data?.mine ?? null;
   const sent = data?.sent ?? [];

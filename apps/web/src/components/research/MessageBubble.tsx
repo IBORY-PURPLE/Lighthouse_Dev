@@ -17,17 +17,22 @@ export function MessageBubble({
   tag,
   text,
   pending,
+  id,
+  tabIndex,
   children,
 }: {
   role: "ai" | "volunteer" | "system";
   tag?: { chip: string; note: string } | null;
   text?: string;
   pending?: boolean;
+  /** 칸 누르기가 찾아가는 질문 말풍선의 id(vc-q-<seq>)와 초점 받기(-1). */
+  id?: string;
+  tabIndex?: number;
   children?: ReactNode;
 }) {
   if (role === "volunteer") {
     return (
-      <div className="vc-row vc-row--me vc-enter">
+      <div id={id} tabIndex={tabIndex} className="vc-row vc-row--me vc-enter">
         {text ? (
           <p className={`vc-bubble vc-bubble--me${pending ? " vc-bubble--pending" : ""}`}>{text}</p>
         ) : null}
@@ -36,7 +41,7 @@ export function MessageBubble({
     );
   }
   return (
-    <div className="vc-row vc-row--ai vc-enter">
+    <div id={id} tabIndex={tabIndex} className="vc-row vc-row--ai vc-enter">
       {tag && <AiTag chip={tag.chip} note={tag.note} />}
       {text ? (
         <p className={`vc-bubble vc-bubble--ai${role === "system" ? " vc-bubble--notice" : ""}`}>
