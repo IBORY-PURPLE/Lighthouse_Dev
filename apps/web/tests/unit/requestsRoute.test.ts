@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/requests/[requestId]/route";
 import { POST } from "@/app/api/requests/route";
+import { readRequestDetails, resetRequestDetailsForTest } from "@/lib/requestDetails";
 import * as requestStore from "@/lib/requestStore";
 
 const ORIGIN = "http://localhost:3000";
@@ -169,6 +170,119 @@ describe("POST /api/requests (메모리 저장소)", () => {
         expect(line).not.toContain(secret);
       }
     }
+  });
+});
+
+describe("POST /api/requests의 details(이용자 요청 브리핑)", () => {
+  const DETAILS = {
+    summary: "소니 무선 헤드셋, 노이즈 캔슬링",
+    qa: [
+      { q: "어디에 쓰세요?", a: "출퇴근 지하철에서 써요" },
+      { q: "예산은 얼마인가요?", a: "십만 원 정도" },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.stubEnv("STORE_MODE", "memory");
+    requestStore.resetRequestStoresForTest();
+    resetRequestDetailsForTest();
+  });
+  afterEach(() => {
+    resetRequestDetailsForTest();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  function spyLogs(): string[] {
+    const logged: string[] = [];
+    for (const method of ["log", "info", "warn", "error"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args) => {
+        logged.push(args.map(String).join(" "));
+      });
+    }
+    return logged;
+  }
+
+  it("details를 저장하고 응답 모양은 그대로다(details를 돌려주지 않는다)", async () => {
+    const body = answers({ details: DETAILS });
+    const response = await POST(postRequest(body));
+    expect(response.status).toBe(201);
+    const created = await response.json();
+    expect(created).toEqual({ requestId: expect.any(String), queueNumber: 1, status: "waiting" });
+    expect(await readRequestDetails(created.requestId)).toEqual(DETAILS);
+  });
+
+  it("details가 없으면 지금처럼 접수하고 저장하지 않는다", async () => {
+    const created = await (await POST(postRequest(answers()))).json();
+    expect(await readRequestDetails(created.requestId)).toBeNull();
+  });
+
+  it("잘못된 details는 무시하고 접수는 201이다", async () => {
+    for (const details of ["문자열", 3, [], { summary: 3, qa: "x" }, { summary: "", qa: [{ q: "답이 빔", a: "" }] }, null]) {
+      const response = await POST(postRequest(answers({ details })));
+      expect(response.status).toBe(201);
+      expect(await readRequestDetails((await response.json()).requestId)).toBeNull();
+    }
+  });
+
+  it("같은 접수를 다시 보내면(200) 처음 details를 지킨다", async () => {
+    const body = answers({ details: DETAILS });
+    const first = await (await POST(postRequest(body))).json();
+    const again = await POST(postRequest({ ...body, details: { summary: "다른 말", qa: [] } }));
+    expect(again.status).toBe(200);
+    expect((await again.json()).requestId).toBe(first.requestId);
+    expect(await readRequestDetails(first.requestId)).toEqual(DETAILS);
+  });
+
+  it("긴 말·전화번호는 다듬어서 저장한다", async () => {
+    const created = await (
+      await POST(
+        postRequest(
+          answers({ details: { summary: "가".repeat(400), qa: [{ q: "연락처는요?", a: "010-1234-5678" }] } }),
+        ),
+      )
+    ).json();
+    const saved = await readRequestDetails(created.requestId);
+    expect([...(saved?.summary ?? "")]).toHaveLength(300);
+    expect(saved?.qa).toEqual([{ q: "연락처는요?", a: "(전화번호 가림)" }]);
+  });
+
+  it("본문이 32KB를 넘으면 413 too_large이고 접수하지 않는다", async () => {
+    const register = vi.fn();
+    requestStore.resetRequestStoresForTest({ persistent: true, storeKind: () => "memory", register, get: vi.fn() });
+    const big = answers({ details: { summary: "요약", qa: [], pad: "가".repeat(40_000) } });
+    const response = await POST(postRequest(big));
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ ok: false, error: "too_large" });
+    expect(register).not.toHaveBeenCalled();
+  });
+
+  it("content-type이 없어도 받는다(검사하지 않는다). 깨진 JSON은 그대로 400이다", async () => {
+    expect((await POST(postRequest(answers({ details: DETAILS })))).status).toBe(201);
+    expect((await POST(postRequest("{깨진"))).status).toBe(400);
+    expect((await POST(postRequest(""))).status).toBe(400);
+  });
+
+  it("로그에 이용자 답(요약·질문·답)을 남기지 않고 저장 결과만 남긴다", async () => {
+    const logged = spyLogs();
+    await POST(postRequest(answers({ details: DETAILS })));
+    await POST(postRequest(answers({ details: "문자열" })));
+    await POST(postRequest(answers()));
+    const joined = logged.join("\n");
+    expect(logged.length).toBeGreaterThan(0);
+    for (const secret of [PRODUCT, BUDGET, CONDITION, DETAILS.summary, "출퇴근", "지하철", "십만 원 정도", "어디에 쓰세요"]) {
+      expect(joined).not.toContain(secret);
+    }
+    expect(joined).toMatch(/POST \/api\/requests 201 \d+ms store=\d+ms details=saved/);
+    expect(joined).toMatch(/details=ignored/);
+    expect(joined).toMatch(/details=none/);
+  });
+
+  it("이용자 상태 조회(GET)는 details를 돌려주지 않는다", async () => {
+    const created = await (await POST(postRequest(answers({ details: DETAILS })))).json();
+    const body = await (await getRequest(created.requestId)).json();
+    expect(Object.keys(body).sort()).toEqual(["product", "queueNumber", "requestId", "status"]);
+    expect(JSON.stringify(body)).not.toContain("출퇴근");
   });
 });
 

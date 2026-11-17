@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { claimDemo, enterAs, FIRST_DEMO_QUOTE, refill } from "./helpers/volunteerFlow";
+import { claimDemo, enterAs, FIRST_DEMO_QUOTE, passBrief, refill } from "./helpers/volunteerFlow";
 
 // 휴대폰 사진(QR) 시험, 노트북 크롬(e2e-desktop) + 휴대폰 문맥(같은 서버, 쿠키가 따로인 두 번째 브라우저 문맥).
 // 노트북이 QR 창을 열면 휴대폰 문맥이 그 링크(#t=토큰)를 열어 사진을 올리고, 노트북 대화에 사진 말풍선이 나타난다.
@@ -83,6 +83,7 @@ async function begin(page: Page): Promise<{ turns: string[] }> {
 /** 구매함 → 기종 → 장점까지 가서 사진 질문이 지금 질문이 되게 한다. */
 async function toPhotoQuestion(page: Page) {
   await quickGroup(page).getByRole("button", { name: "구매했어요", exact: true }).click();
+  await passBrief(page);
   await expect(log(page).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
   await page.getByRole("button", { name: MODEL, exact: true }).click();
   await expect(log(page).getByText(`${MODEL}의 장점이 뭐예요?`)).toBeVisible();

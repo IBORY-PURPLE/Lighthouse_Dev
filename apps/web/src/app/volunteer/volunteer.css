@@ -2365,6 +2365,114 @@
   font-size: 16px;
 }
 
+/* ----- 이용자 요청 브리핑(구매 여부 뒤, 기종 질문 앞) ----- */
+
+/* 제목 묶음을 위로 밀어 올리지 않게(위 막대에 가려진다) 제목 아래 빈 자리에 띄운다. */
+.vc-hero-hint {
+  position: absolute;
+  top: 100%;
+  right: 16px;
+  left: 16px;
+  margin: 4px auto 0;
+  max-width: 560px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  word-break: keep-all;
+  text-wrap: balance;
+  color: var(--c-ink);
+}
+
+.vc-brief-row {
+  align-items: stretch;
+  width: 100%;
+}
+
+.vc-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.vc-brief-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vc-brief-card {
+  gap: 10px;
+  padding: 16px;
+  border-style: solid;
+  border-width: 1px;
+  border-color: var(--c-line);
+}
+
+.vc-brief-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.vc-brief-title:focus-visible {
+  outline: 3px solid var(--c-ink);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.vc-brief-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.vc-brief-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vc-brief-line dt {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-sub);
+}
+
+.vc-brief-line dd {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.vc-brief-note {
+  margin: 0;
+  font-size: 15px;
+  color: var(--c-sub);
+}
+
+.vc-brief-count {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-sub);
+}
+
+.vc-brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* ----- 움직임 줄이기: 이동·크기 변화를 없애고 투명도 전환만 120ms로 남긴다. 반복은 멈춘다. ----- */
 
 @media (prefers-reduced-motion: reduce) {

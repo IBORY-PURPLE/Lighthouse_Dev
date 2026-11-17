@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { claimDemo, enterAs, FIRST_DEMO_QUOTE, openPane, pane, refill, shot as evidenceShot } from "./helpers/volunteerFlow";
+import { claimDemo, enterAs, FIRST_DEMO_QUOTE, openPane, pane, passBrief, refill, shot as evidenceShot } from "./helpers/volunteerFlow";
 
 // 대화형 리서치 챗(D안) 화면 시험, 노트북 크롬(e2e-desktop).
 // 실제 Next 서버(LLM_MODE=mock, 메모리 저장소, playwright.config의 webServer)에 붙는다. 가로채기로 응답을 꾸미지 않는다
@@ -104,6 +104,7 @@ async function expectNoAxe(page: Page) {
 
 async function pickBought(page: Page) {
   await quickGroup(page).getByRole("button", { name: "구매했어요", exact: true }).click();
+  await passBrief(page);
   await expect(log(page).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
 }
 
@@ -358,6 +359,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     const calls = await begin(page);
     // 구매 여부와 혜택 경험을 한 글에 적는다. 서버는 기종 질문(followUp model)을 주고 혜택 칸도 채운다.
     await sendText(page, "소니 헤드셋 샀어요. 카드 할인 받고 무료 배송이었어요");
+    await passBrief(page);
     await expect(page.getByText("AI 제안 · 웹에서 찾은 후보 3개")).toBeVisible();
     // 기종 검색 뒤에 화면이 혜택 검색을 이어서 부른다(followUp은 하나만 온다).
     await expect(page.getByRole("region", { name: "찾은 혜택" }).first()).toBeVisible({ timeout: 15_000 });
@@ -397,6 +399,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     });
     const calls = await begin(page);
     await sendText(page, "소니 헤드셋 샀어요. 카드 할인 받고 무료 배송이었어요");
+    await passBrief(page);
     await expect.poll(() => cut.size, { timeout: 15_000 }).toBe(2);
     await expect(page.getByRole("region", { name: "찾은 혜택" })).toHaveCount(0);
 
@@ -469,6 +472,8 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     });
     await begin(page);
     await sendText(page, "소니 헤드셋 샀어요.");
+    // 이용자 요청 카드를 넘겨야 기종 검색을 기다리는 "생각 중" 표시가 다시 보인다(카드를 보는 동안은 숨긴다).
+    await passBrief(page);
     await expect(page.getByTestId("thinking")).toBeVisible();
 
     const second = await page.context().newPage();
@@ -501,6 +506,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     });
     await begin(page);
     await sendText(page, "소니 헤드셋 샀어요. 카드 할인 받고 무료 배송이었어요");
+    await passBrief(page);
     await expect.poll(() => held, { timeout: 15_000 }).toBe(1);
 
     const second = await page.context().newPage();
@@ -596,6 +602,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await expect(page.getByText("보내지 못했어요. 쓴 글은 그대로 두었어요. 다시 보내 주세요.")).toBeVisible();
     await expect(composer(page)).toHaveValue("소니 헤드셋 샀어요");
     await composer(page).press("Enter");
+    await passBrief(page);
     await expect(log(page).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
   });
 
@@ -613,6 +620,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
   test("리서치만 경로: 사진 칸·첨부 없음, 필수 3칸", async ({ page }) => {
     await begin(page);
     await quickGroup(page).getByRole("button", { name: "구매하지 않았어요 · 리서치만" }).click();
+    await passBrief(page);
     await expect(log(page).getByText("어떤 기종을 알아보셨어요?")).toBeVisible();
     await expect(count(page)).toHaveText("필수 0/3");
     await expect(page.getByTestId("purchase-badge")).toHaveText("리서치만");
@@ -665,6 +673,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     await second.goto(page.url());
     await expect(second.getByTestId("research-stage")).toBeVisible();
     await quickGroup(second).getByRole("button", { name: "구매했어요", exact: true }).click();
+    await passBrief(second);
     await expect(log(second).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
 
     // 첫 탭은 아직 version 0이라 글을 보내면 서버가 409 stale로 거절한다.
@@ -691,6 +700,7 @@ test.describe("대화형 리서치 챗 · 노트북 1440", () => {
     // 기다리는 동안에도 입력할 수 있다.
     await composer(page).fill("기다리는 중에 쓰는 글");
     await expect(composer(page)).toHaveValue("기다리는 중에 쓰는 글");
+    await passBrief(page);
     await expect(log(page).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
   });
 
@@ -1022,6 +1032,7 @@ test.describe("두 창 · 휴대폰 393", () => {
     expect((await storedPanels(page))?.narrow).toEqual({ mine: false, slots: true });
     // 대화로 넘어가도 두 창이 함께 열려 있지 않다.
     await page.getByRole("button", { name: "구매했어요", exact: true }).click();
+    await passBrief(page);
     await expect(log(page).getByText("좋아요. 어떤 기종을 쓰고 계세요?")).toBeVisible();
     const both = (await sideToggle(page).getAttribute("aria-expanded")) === "true" && (await slotsToggle(page).getAttribute("aria-expanded")) === "true";
     expect(both).toBe(false);

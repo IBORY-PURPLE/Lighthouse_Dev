@@ -20,6 +20,7 @@ import {
   type SlotState,
 } from "./researchSession";
 import {
+  BRIEF_NOTE,
   CAP_DAILY,
   CAP_REQUEST,
   CONFIRM_FILL,
@@ -477,6 +478,15 @@ function fillMessage(slot: SlotKey, value: string, ai: MessageAi): NextMessage {
   };
 }
 
+/** 구매 여부가 정해진 턴에 기종 질문 앞에 넣는 표시 메시지. 화면이 이 자리에 이용자 요청 카드를 그린다. 이용자 말은 담지 않는다. */
+const briefMessage = (): NextMessage => ({
+  role: "ai",
+  tag: "brief",
+  slot: null,
+  body: textBody(BRIEF_NOTE, { kind: "brief" }),
+  ai: "none",
+});
+
 const purchaseFillMessage = (purchase: "bought" | "research", ai: MessageAi): NextMessage => ({
   role: "ai",
   tag: "fill",
@@ -804,7 +814,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
         if (session.purchase === "unset" && turn.purchase) {
           purchase = turn.purchase;
           patch.purchase = turn.purchase;
-          messages.push(purchaseFillMessage(turn.purchase, "ok"));
+          messages.push(purchaseFillMessage(turn.purchase, "ok"), briefMessage());
           filledCount += 1;
         }
         const altIncoming: string[] = [];
@@ -932,6 +942,7 @@ export function planTurn(args: PlanArgs): TurnPlan {
         if (session.purchase === "unset") {
           purchase = input.replyId === "purchase.bought" ? "bought" : "research";
           patch.purchase = purchase;
+          messages.push(briefMessage());
         } else {
           messages.push(aiNotice(PURCHASE_FIXED));
           hold = true;

@@ -1,9 +1,11 @@
 import "server-only";
 import type { NextResponse } from "next/server";
+import { readRequestDetails } from "./requestDetails";
 import { getRequestStore } from "./requestStore";
 import { guardResponse } from "./researchApi";
 import { hasUnresolvedCheck, isPastQuestionSeven, requiredMissing, type ResearchView } from "./researchSession";
 import { getResearchStore, type GuardFail } from "./researchStore";
+import type { RequestDetailsView } from "./volunteerView";
 
 // 사진·리뷰·보내기 라우트 공통 도우미(A4). 세션을 읽고 소유와 sessionId를 확인한다.
 
@@ -48,14 +50,22 @@ export interface RequestText {
   product: string;
   brand: string | null;
   item: string | null;
+  /** 이용자가 확인한 요약과 질문·답. withNeeds를 켠 호출에서만, 진행 중인 요청에만 채운다. */
+  needs?: RequestDetailsView | null;
 }
 
-/** 저장소의 요청 글(화면이 준 값은 쓰지 않는다). 못 읽으면 빈 글. */
-export async function requestText(requestId: string, volunteerId: string): Promise<RequestText> {
+/**
+ * 저장소의 요청 글(화면이 준 값은 쓰지 않는다). 못 읽으면 빈 글.
+ * withNeeds: 리뷰 문단 AI에 이용자 조건을 줄 때만 켠다(그 호출은 store:false).
+ */
+export async function requestText(requestId: string, volunteerId: string, withNeeds = false): Promise<RequestText> {
   const found = await getRequestStore()
     .getForVolunteer(requestId, volunteerId)
     .catch(() => null);
-  return found && found.kind === "ok"
-    ? { product: found.request.product, brand: found.request.brand, item: found.request.item }
-    : { product: "", brand: null, item: null };
+  if (!found || found.kind !== "ok") return { product: "", brand: null, item: null };
+  const text: RequestText = { product: found.request.product, brand: found.request.brand, item: found.request.item };
+  if (withNeeds) {
+    text.needs = found.request.status === "in_progress" ? await readRequestDetails(requestId) : null;
+  }
+  return text;
 }
