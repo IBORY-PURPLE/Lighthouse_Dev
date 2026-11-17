@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { STATUS } from "@/lib/speech";
 import {
   claimRequest,
+  clearLegacyDrafts,
   enterVolunteer,
   failureMessage,
   fetchQueue,
   releaseRequest,
-  sendResult,
 } from "@/lib/volunteerClient";
 
 function respond(status: number, body: unknown) {
@@ -58,38 +58,6 @@ describe("volunteerClient", () => {
     expect(await releaseRequest("r1")).toEqual({ kind: "not_yours" });
   });
 
-  it("보내기: 201·200 sent, 400(invalid_url·too_long·invalid_request) invalid, 403·404 내 담당 아님, 401, 그 밖은 failed", async () => {
-    const candidates = [{ name: "N", url: "https://a.example", guide: "", summary: [] }];
-    respond(201, { requestId: "r1", status: "done", sentAt: "2026-11-12T00:00:00.000Z" });
-    expect(await sendResult("r1", candidates)).toEqual({ kind: "sent", sentAt: "2026-11-12T00:00:00.000Z" });
-    const fetchMock = vi.mocked(fetch);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/volunteer/requests/r1/result");
-    expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toEqual({ candidates });
-    respond(200, { requestId: "r1", status: "done", sentAt: "2026-11-12T00:00:00.000Z" });
-    expect((await sendResult("r1", candidates)).kind).toBe("sent");
-    respond(400, { ok: false, error: "invalid_url" });
-    expect(await sendResult("r1", candidates)).toEqual({ kind: "invalid" });
-    respond(400, { ok: false, error: "too_long" });
-    expect(await sendResult("r1", candidates)).toEqual({ kind: "invalid" });
-    respond(400, { ok: false, error: "invalid_request" });
-    expect(await sendResult("r1", candidates)).toEqual({ kind: "invalid" });
-    respond(403, { ok: false, error: "not_yours" });
-    expect(await sendResult("r1", candidates)).toEqual({ kind: "not_yours" });
-    respond(404, { ok: false, error: "not_found" });
-    expect(await sendResult("r1", candidates)).toEqual({ kind: "not_yours" });
-    respond(401, { ok: false, error: "unauthorized" });
-    expect(await sendResult("r1", candidates)).toEqual({ kind: "unauthorized" });
-    respond(503, { ok: false, error: "store_unavailable" });
-    expect(await sendResult("r1", candidates)).toEqual({
-      kind: "failed",
-      message: "서버에 연결하지 못했습니다. 다시 시도해 주세요.",
-    });
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-    expect((await sendResult("r1", candidates)).kind).toBe("failed");
-  });
-
   it("입장: 코드·별명 없이 본문 없는 POST를 보낸다. 실패하면 연결 실패 문구", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -104,5 +72,49 @@ describe("volunteerClient", () => {
     });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await enterVolunteer()).toMatchObject({ kind: "error" });
+  });
+});
+
+describe("clearLegacyDrafts", () => {
+  class FakeStorage {
+    private items = new Map<string, string>();
+    get length() {
+      return this.items.size;
+    }
+    key(index: number) {
+      return [...this.items.keys()][index] ?? null;
+    }
+    getItem(key: string) {
+      return this.items.get(key) ?? null;
+    }
+    setItem(key: string, value: string) {
+      this.items.set(key, value);
+    }
+    removeItem(key: string) {
+      this.items.delete(key);
+    }
+  }
+
+  it("옛 카드형 리서치 상태(lh.vol.research.v1.*)와 요약 초안(lh.vol.draft.v1.*)만 지우고 다른 키는 둔다", () => {
+    const storage = new FakeStorage();
+    storage.setItem("lh.vol.research.v1.x", "{}");
+    storage.setItem("lh.vol.draft.v1.y", "초안");
+    storage.setItem("lh.vol.seen.v1", "[]");
+    storage.setItem("unrelated", "1");
+    vi.stubGlobal("window", { localStorage: storage });
+    clearLegacyDrafts();
+    expect(storage.getItem("lh.vol.research.v1.x")).toBeNull();
+    expect(storage.getItem("lh.vol.draft.v1.y")).toBeNull();
+    expect(storage.getItem("lh.vol.seen.v1")).toBe("[]");
+    expect(storage.getItem("unrelated")).toBe("1");
+  });
+
+  it("저장소를 못 읽어도 던지지 않는다", () => {
+    vi.stubGlobal("window", {
+      get localStorage(): Storage {
+        throw new Error("blocked");
+      },
+    });
+    expect(() => clearLegacyDrafts()).not.toThrow();
   });
 });

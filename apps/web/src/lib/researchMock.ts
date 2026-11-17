@@ -8,6 +8,8 @@ import {
   type ResearchRequestBody,
   type ResearchResponse,
 } from "./research";
+import { SLOT_KEYS, type SlotKey } from "./researchSession";
+import type { TurnMaterial } from "./researchTurnPrompt";
 
 // 가짜 모드(LLM_MODE=mock, 운영에서는 무시)의 카드별 고정 응답. 화면 시험이 이 글자를 기대한다.
 // 모든 주소는 example.com이고, 바로가기만 실제 검색 주소다.
@@ -92,4 +94,52 @@ export function mockResponse(request: ResearchRequestBody): ResearchResponse {
     case "summary":
       return { kind: "summary", ai: "ok", text: MOCK_SUMMARY_TEXT };
   }
+}
+
+// ---- 대화 턴(design.md 4.3) ---------------------------------------------------------
+
+const MODEL_WORD = /[A-Za-z]{1,6}-?[A-Za-z]*\d{2,}[A-Za-z0-9-]*/;
+const BOUGHT_WORD = /샀|샀어|구매했|구입했|쓰고 있|사용 중|써요|쓰는 중/;
+const RESEARCH_WORD = /알아보|리서치|구매하지|안 샀|사지 않|아직 안/;
+const BENEFIT_WORD = /할인|혜택|쿠폰|포인트|적립|사은품|카드|프로모션|이벤트/;
+const ASKING = /[?？]|알려\s?줘|알려\s?주세요|어디서|어떻게/;
+const clipText = (value: string, max: number) => [...value].slice(0, max).join("");
+
+/**
+ * 가짜 모드(LLM_MODE=mock)의 턴 응답 JSON 글. 봉사자 말을 그대로 옮겨 채우므로 evidence 검사를 통과한다.
+ * - 구매가 unset이면 말에서 구매 여부(와 기종 번호)를 읽는다. 혜택 말이 같이 있으면 혜택 칸도 채운다(앞질러 답하는 경우).
+ * - 직전 질문 칸이 있으면 그 칸에 말을 그대로 채운다. 묻는 말이면 찾는 방법만 준다.
+ */
+export function mockTurnJson(material: TurnMaterial): string {
+  const text = material.봉사자말.trim();
+  const evidence = clipText(text, 80);
+  const fills: { slot: SlotKey; value: string; evidence: string }[] = [];
+  let purchase: { value: "bought" | "research"; evidence: string } | undefined;
+
+  if (material.구매 === "unset") {
+    if (RESEARCH_WORD.test(text)) purchase = { value: "research", evidence };
+    else if (BOUGHT_WORD.test(text)) purchase = { value: "bought", evidence };
+    const model = MODEL_WORD.exec(text)?.[0];
+    if (purchase && model) fills.push({ slot: "model", value: model, evidence });
+    if (purchase && BENEFIT_WORD.test(text)) fills.push({ slot: "benefits", value: clipText(text, 120), evidence });
+    return JSON.stringify({ intent: "reply", fills, ...(purchase ? { purchase } : {}), reason: "가짜 응답" });
+  }
+
+  if (ASKING.test(text)) {
+    return JSON.stringify({
+      intent: "ask_back",
+      fills: [],
+      guide: {
+        queries: ["가짜 검색어"],
+        checks: ["기종 이름이 같은지"],
+        steps: ["공식 페이지를 연다"],
+      },
+      reason: "가짜 응답",
+    });
+  }
+
+  const last = material.직전질문칸;
+  const slot = SLOT_KEYS.find((key) => key === last && key !== "photo");
+  if (slot && text.length > 0) fills.push({ slot, value: clipText(text, 120), evidence });
+  return JSON.stringify({ intent: "reply", fills, reason: "가짜 응답" });
 }

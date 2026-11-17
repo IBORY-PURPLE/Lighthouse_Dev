@@ -39,11 +39,14 @@ import {
 
 export type GuardFail = "not_found" | "not_in_progress" | "not_yours" | "session_changed";
 
-/** 요청과 봉사자와 세션. sessionId가 null이면 세션 id는 확인하지 않는다(열기·폴링). */
+/**
+ * 요청과 봉사자와 세션. 쓰기 호출은 모두 sessionId를 넘긴다(DB 함수는 null이면 세션 대조를 건너뛰므로
+ * 타입에서 막는다). 세션 없이 읽는 열기·폴링은 open(requestId, volunteerId, after)를 따로 쓴다.
+ */
 export interface ResearchActor {
   requestId: string;
   volunteerId: string;
-  sessionId: string | null;
+  sessionId: string;
 }
 
 export type OpenOutcome = { outcome: "ok"; view: ResearchView } | { outcome: GuardFail };
@@ -263,7 +266,7 @@ export function createMemoryResearchStore(
     // await 사이에 내려놓기가 끝났을 수 있어, 세션은 여기서 동기로 다시 찾는다.
     const session = sessions.get(actor.requestId);
     if (!session || session.volunteerId !== actor.volunteerId) return "session_changed";
-    if (actor.sessionId !== null && session.sessionId !== actor.sessionId) return "session_changed";
+    if (session.sessionId !== actor.sessionId) return "session_changed";
     return session;
   }
 
@@ -649,9 +652,10 @@ export function createMemoryResearchStore(
       const guarded = await guard(input);
       if (typeof guarded === "string") return { outcome: guarded };
       const session = guarded;
+      // confirmed는 version을 꼭 대조하고, draft는 version을 주면 대조한다(AI 응답 사이 칸이 바뀐 초안을 막는다).
       if (
-        input.status === "confirmed" &&
-        (input.baseVersion === null || input.baseVersion !== session.version)
+        (input.status === "confirmed" && input.baseVersion === null) ||
+        (input.baseVersion !== null && input.baseVersion !== session.version)
       ) {
         return { outcome: "stale", version: session.version };
       }

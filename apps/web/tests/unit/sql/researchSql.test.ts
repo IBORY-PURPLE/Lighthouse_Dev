@@ -3,6 +3,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildResultFromSession } from "@/lib/researchResult";
+import { checkCandidate } from "@/lib/resultInput";
 
 // 리서치 챗 대화 저장 SQL 시험(PGlite = 진짜 Postgres를 WASM으로). design.md 5절, 7절.
 // 한계: PGlite는 연결이 하나라 진짜 동시 실행(잠금 대기, skip locked)은 못 본다.
@@ -13,6 +15,7 @@ const MIGRATIONS = [
   "supabase/migrations/20261109175932_requests.sql",
   "supabase/migrations/20261112010000_volunteer_flow.sql",
   "supabase/migrations/20261117000000_research_conversation.sql",
+  "supabase/migrations/20261117010000_research_review_draft_base.sql",
 ];
 const DOWN = "supabase/rollback/20261117000000_research_conversation_down.sql";
 
@@ -142,6 +145,7 @@ beforeAll(async () => {
   for (const file of MIGRATIONS.slice(0, 2)) await db.exec(sql(file));
   before = await existingDefinitions();
   await db.exec(sql(MIGRATIONS[2]));
+  await db.exec(sql(MIGRATIONS[3]));
 }, 60_000);
 
 afterAll(async () => {
@@ -418,6 +422,25 @@ describe("begin·apply", () => {
     expect(set.review).toMatchObject({ status: "confirmed", confirmedVersion: v, rev: 1 });
     const out = await apply(r, "b", v, { slots: { pros: slot("조용해요") } }, [], []);
     expect(out.response.session.review).toMatchObject({ status: "draft", rev: 2 });
+  });
+
+  it("리뷰 초안도 version을 주면 대조한다: 읽은 뒤 칸이 바뀌었으면 stale이고 저장하지 않는다", async () => {
+    const r = await opened();
+    const v = await fillRequired(r, "a", 0);
+    const set = (base: number | null, status: string) =>
+      call("public.research_set_review($1::uuid, $2, $3::uuid, $4::int, $5::jsonb)", [
+        r.id, r.volunteerId, r.sessionId, base, JSON.stringify({ text: "리뷰 본문", status }),
+      ]);
+    // AI를 기다리는 사이 칸이 바뀐다.
+    const edited = await apply(r, "b", v, { slots: { pros: slot("조용해요") } }, [], []);
+    expect(edited.outcome).toBe("ok");
+    expect(await set(v, "draft")).toEqual({ outcome: "stale", version: v + 1 });
+    const stored = await one<{ review: Json }>("select review from public.research_sessions where request_id = $1", [r.id]);
+    expect(stored.review).toEqual({});
+    expect(await set(v + 1, "draft")).toMatchObject({ outcome: "ok", review: { status: "draft", rev: 1 } });
+    expect(await set(null, "draft")).toMatchObject({ outcome: "ok", review: { rev: 2 } });
+    expect(await set(null, "confirmed")).toMatchObject({ outcome: "stale" });
+    expect(await set(v + 1, "confirmed")).toMatchObject({ outcome: "ok", review: { status: "confirmed", confirmedVersion: v + 1 } });
   });
 
   it("검색 도중 턴이 들어와도 서로 막지 않고 seq는 겹치지 않는다", async () => {
@@ -776,6 +799,68 @@ describe("내려놓기·정리·트리거", () => {
   });
 });
 
+describe("A4 라우트의 호출 순서(사진 말풍선 → 다음 질문, 결과 보내기)", () => {
+  it("add_photo(다음 질문 없음) → add_message(cache key 없음) → apply(후보 목록)로 말풍선이 질문보다 앞에 온다", async () => {
+    const r = await opened();
+    await apply(r, "a", 0, { purchase: "bought", slots: { model: slot("720N") } }, [], [ask("ask_slot", "photo", "사진을 올려 주세요")]);
+    const state = (await open(r.id, r.volunteerId)).view;
+    const added = await call("public.research_add_photo($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, JPEG, null, null, null, "{}", "[]", "[]",
+    ]);
+    expect(added).toMatchObject({ outcome: "ok", chosen: null, messages: [] });
+    const bubble = await call("public.research_add_message($1::uuid, $2, $3::uuid, $4, $5::jsonb, $6::jsonb, $7)", [
+      r.id, r.volunteerId, r.sessionId, null,
+      JSON.stringify([{ role: "volunteer", tag: null, slot: "photo", body: { kind: "photo", photoId: added.photoId }, ai: null }]),
+      null, "done",
+    ]);
+    expect(bubble.outcome).toBe("ok");
+    expect(added.session.pending.lastQuestion.slot).toBe("photo");
+    const applied = await apply(r, `photo-${added.photoId}`, added.session.version, null, [], [ask("ask_slot", "pros", "장점 질문")]);
+    expect(applied.outcome).toBe("ok");
+    expect(applied.response.chosen).toBe("ask_slot");
+    const seqs = (await db.query<{ seq: number; kind: string | null; text: string | null }>(
+      "select seq, body->>'kind' as kind, body->>'text' as text from public.research_messages where request_id = $1 order by seq",
+      [r.id],
+    )).rows;
+    expect(seqs.slice(-2).map((row) => row.kind ?? row.text)).toEqual(["photo", "장점 질문"]);
+    expect(applied.response.lastSeq).toBe(seqs.at(-1)?.seq);
+    expect(state.version + 1).toBe(added.session.version);
+    // apply가 version을 더 올리지 않고, 같은 turn id를 다시 부르면 저장된 응답이다.
+    expect(applied.response.version).toBe(added.session.version);
+    expect((await apply(r, `photo-${added.photoId}`, added.session.version, null, [], [])).outcome).toBe("duplicate");
+  });
+
+  it("buildResultFromSession의 후보로 보내면 results에 그대로 저장된다", async () => {
+    const r = await opened();
+    const v = await fillRequired(r, "a", 0, true);
+    await call("public.research_add_photo($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, JPEG, null, null, null, "{}", "[]", "[]",
+    ]);
+    const text = "720N은 직접 구매해서 쓰는 봉사자가 사진으로 인증한 헤드셋이에요. 가벼워서 편하다고 해요.";
+    const draft = await call("public.research_set_review($1::uuid, $2, $3::uuid, $4::int, $5::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, null, JSON.stringify({ text, status: "draft" }),
+    ]);
+    expect(draft.outcome).toBe("ok");
+    const confirmed = await call("public.research_set_review($1::uuid, $2, $3::uuid, $4::int, $5::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, v + 1, JSON.stringify({ text, status: "confirmed" }),
+    ]);
+    const view = (await open(r.id, r.volunteerId)).view;
+    const candidates = buildResultFromSession(view);
+    expect(candidates[0]).toMatchObject({ name: "720N", guide: text });
+    const sent = await call("public.research_send($1::uuid, $2, $3::uuid, $4::int, $5::int, $6::jsonb)", [
+      r.id, r.volunteerId, r.sessionId, v + 1, confirmed.review.rev, JSON.stringify(candidates),
+    ]);
+    expect(sent.outcome).toBe("sent");
+    const stored = await one<{ candidates: { name: string; guide: string; summary: { label: string; value: string }[] }[] }>(
+      "select candidates from public.results where request_id = $1",
+      [r.id],
+    );
+    expect(stored.candidates[0].guide).toBe(text);
+    expect(stored.candidates[0].summary.find((entry) => entry.label === "구매 인증")?.value).toBe("구매 인증됨");
+    for (const candidate of stored.candidates) expect(checkCandidate(candidate).ok).toBe(true);
+  });
+});
+
 describe("마이그레이션 되돌리기", () => {
   it("적용 → 되돌리기 → 다시 적용", async () => {
     const before = await one<{ fns: number }>(
@@ -795,11 +880,13 @@ describe("마이그레이션 되돌리기", () => {
     const c = await claimed();
     expect((await one<{ r: string }>("select public.release_request($1, $2) as r", [c.id, c.volunteerId])).r).toBe("released");
     await db.exec(sql(MIGRATIONS[2]));
+    await db.exec(sql(MIGRATIONS[3]));
     const again = await opened();
     expect(again.sessionId).toBeTruthy();
     // 한 번 더 되돌렸다 올려도 된다(멱등하게 반복 가능).
     await db.exec(sql(DOWN));
     await db.exec(sql(MIGRATIONS[2]));
+    await db.exec(sql(MIGRATIONS[3]));
     expect((await opened()).sessionId).toBeTruthy();
   });
 });

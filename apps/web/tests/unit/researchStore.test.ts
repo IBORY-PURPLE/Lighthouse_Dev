@@ -261,7 +261,7 @@ describe("메모리 상한과 사용량", () => {
     const again = await research.open(r.id, r.volunteerId);
     expect(again.outcome === "ok" && again.view.sessionId).not.toBe(r.sessionId);
     expect(again.outcome === "ok" && again.view).toMatchObject({ purchase: "unset", lastSeq: 0 });
-    const actor = { ...r.actor, sessionId: again.outcome === "ok" ? again.view.sessionId : null };
+    const actor = { ...r.actor, sessionId: again.outcome === "ok" ? again.view.sessionId : "" };
     expect(await research.begin({ ...actor, kind: "turn", clientTurnId: "b", caps })).toMatchObject({ ai: "capped", cap: "request" });
     // 옛 세션 id로는 쓸 수 없다.
     expect((await research.begin({ ...r.actor, kind: "turn", clientTurnId: "c", caps })).outcome).toBe("session_changed");
@@ -313,6 +313,28 @@ describe("메모리 사진·리뷰·보내기", () => {
     const removed = await research.removePhoto(r.actor, photoId);
     expect(removed.outcome === "ok" && removed.session.slots.photo).toBeUndefined();
     expect(removed.outcome === "ok" && removed.session.photos).toEqual([]);
+  });
+
+  it("리뷰 초안도 읽은 시점의 version과 다르면 stale이고 저장하지 않는다(null이면 대조 없음)", async () => {
+    const r = await opened(newVol());
+    const filled = await research.apply({
+      ...r.actor, clientTurnId: "a", baseVersion: 0,
+      patch: { purchase: "research", slots: { model: slot("720N"), pros: slot("가벼워요"), altReason: slot("편해요") } },
+      messages: [], next: [],
+    });
+    const version = filled.outcome === "ok" ? filled.response.version : -1;
+    // AI를 기다리는 사이 다른 탭에서 칸을 고쳤다.
+    const edited = await research.apply({
+      ...r.actor, clientTurnId: "b", baseVersion: version, patch: { slots: { pros: slot("조용해요") } }, messages: [], next: [],
+    });
+    expect(edited.outcome).toBe("ok");
+    const stale = await research.setReview({ ...r.actor, baseVersion: version, text: "옛 초안", status: "draft" });
+    expect(stale).toEqual({ outcome: "stale", version: version + 1 });
+    const open = await research.open(r.actor.requestId, r.actor.volunteerId, null);
+    expect(open.outcome === "ok" && open.view.review).toEqual({});
+    expect((await research.setReview({ ...r.actor, baseVersion: version + 1, text: "새 초안", status: "draft" })).outcome).toBe("ok");
+    expect((await research.setReview({ ...r.actor, baseVersion: null, text: "대조 없는 초안", status: "draft" })).outcome).toBe("ok");
+    expect((await research.setReview({ ...r.actor, baseVersion: null, text: "확정", status: "confirmed" })).outcome).toBe("stale");
   });
 
   it("보내기: 필수 → review → 보냄. 세션은 지워지고 다시 보내면 existing", async () => {
@@ -405,7 +427,7 @@ describe("메모리 내려놓기·6시간 반환", () => {
     await requests.release(r.id, r.volunteerId);
     await requests.claim(r.id, r.volunteerId);
     const again = await research.open(r.id, r.volunteerId);
-    const actor = { ...r.actor, sessionId: again.outcome === "ok" ? again.view.sessionId : null };
+    const actor = { ...r.actor, sessionId: again.outcome === "ok" ? again.view.sessionId : "" };
     expect(await research.begin({ ...actor, kind: "turn", clientTurnId: "b", caps })).toMatchObject({ ai: "capped" });
   });
 });
@@ -447,7 +469,7 @@ describe("Supabase 저장소", () => {
     await store.removePhoto(actor, "p1");
     expect(calls[3]).toMatchObject({ fn: "research_remove_photo", args: { p_photo_id: "p1" } });
     await store.setReview({ ...actor, baseVersion: 2, text: "글", status: "confirmed" });
-    expect(calls[4]).toMatchObject({ fn: "research_set_review", args: { p_review: { text: "글", status: "confirmed" } } });
+    expect(calls[4]).toMatchObject({ fn: "research_set_review", args: { p_base_version: 2, p_review: { text: "글", status: "confirmed" } } });
     await store.send({ ...actor, baseVersion: 2, reviewRev: 1, candidates: [{}] });
     expect(calls[5]).toMatchObject({ fn: "research_send", args: { p_review_rev: 1 } });
   });

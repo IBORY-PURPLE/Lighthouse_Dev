@@ -6,8 +6,12 @@ import {
   cleanQuestion,
   cleanText,
   dropForbiddenSentences,
+  hasBenefitForbidden,
+  hasContact,
   hasForbidden,
   modelTokens,
+  nameGrounded,
+  tokensCovered,
   unknownModelTokens,
   urlKey,
 } from "@/lib/researchCheck";
@@ -491,5 +495,172 @@ describe("F3: 자료에 없는 기종 이름이 든 문장은 버린다", () => 
     expect(cleanQuestion("소니 WH-CH720N의 장점을 알려 주세요.", "기본 질문", ["소니 WH-CH720N"], material)).toBe(
       "소니 WH-CH720N의 장점을 알려 주세요.",
     );
+  });
+});
+
+describe("tokensCovered: 값의 핵심 낱말이 자료에 있나", () => {
+  it("낱말 절반 이상이 자료에 있으면 통과, 아니면 실패", () => {
+    expect(tokensCovered("배터리가 오래감", ["배터리가 오래가요"])).toBe(true);
+    expect(tokensCovered("오래 써도 귀가 안 아픔", ["리뷰에서 오래 써도 귀가 안 아프다고 해서 골랐어요", "귀가 안 아프다고"])).toBe(true);
+    // 봉사자가 말하지 않은 내용을 AI가 덧붙인 값
+    expect(tokensCovered("노이즈캔슬링이 가장 강력함", ["가벼워요", "가벼워요"])).toBe(false);
+    expect(tokensCovered("무게가 1.5배 가벼워요", ["가벼워요"])).toBe(false);
+  });
+  it("정규화(전각·대소문자·공백·기호) 뒤에 비교한다", () => {
+    expect(tokensCovered("WH-CH720N", ["wh ch720n 쓰고 있어요"])).toBe(true);
+    expect(tokensCovered("ＷＨ-ＣＨ７２０Ｎ", ["WH CH720N"])).toBe(true);
+  });
+  it("낱말이 하나도 없으면 값 전체가 들어 있어야 한다, 빈 값은 실패", () => {
+    expect(tokensCovered("좋", ["좋아요"])).toBe(true);
+    expect(tokensCovered("싫", ["좋아요"])).toBe(false);
+    expect(tokensCovered("   ", ["좋아요"])).toBe(false);
+  });
+});
+
+describe("nameGrounded / cleanItems(sources): 후보 이름은 그 후보가 인용한 출처 하나에 근거해야 한다", () => {
+  const url = "https://shop.example/a";
+  const material = ["Sony WH-CH720N 무선 노이즈캔슬링 헤드폰", "https://shop.example/a"];
+  it("기종 토큰이 출처에 있으면 통과, 없으면(지어낸 모델) 버린다", () => {
+    expect(nameGrounded("Sony WH-CH720N", material)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N", material)).toBe(true);
+    expect(nameGrounded("소니 WH-1000XM9", material)).toBe(false);
+  });
+  it("기종 토큰이 없는 이름도 모든 낱말이 출처에 있어야 한다", () => {
+    expect(nameGrounded("소니 헤드폰", material)).toBe(true);
+    expect(nameGrounded("소니 스피커", material)).toBe(false);
+    expect(nameGrounded("프리미엄 스튜디오 모니터", material)).toBe(false);
+  });
+  it("이름의 브랜드가 출처에 없으면 기종 토큰이 맞아도 버린다(소니·Sony는 같은 말)", () => {
+    const bose = ["보스 QC45 노이즈캔슬링 헤드폰", "https://shop.example/bose-qc45"];
+    expect(nameGrounded("소니 QC45", bose)).toBe(false);
+    expect(nameGrounded("Sony QC45", bose)).toBe(false);
+    expect(nameGrounded("보스 QC45", bose)).toBe(true);
+    expect(nameGrounded("Bose QC45", bose)).toBe(true);
+  });
+  it("재현: 출처 'Sony WH-CH720N'에 한글 변형 '소니 WH-CH720N 울트라'는 거부, 모든 낱말이 있으면 통과", () => {
+    const sony = ["Sony WH-CH720N", "https://shop.example/sony-wh-ch720n"];
+    expect(nameGrounded("소니 WH-CH720N 울트라", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N 프리미엄 한정판", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N", sony)).toBe(true);
+    expect(nameGrounded("sony wh-ch720n", sony)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N 울트라", ["소니 WH-CH720N 울트라 헤드폰"])).toBe(true);
+    // 조사가 붙은 한글 낱말은 한글 낱말 안에 들어 있으면 된다.
+    expect(nameGrounded("소니 헤드폰", ["소니는 헤드폰을 팝니다"])).toBe(true);
+    // 영문·숫자 낱말은 부분 일치가 아니라 낱말이 같아야 한다.
+    expect(nameGrounded("Sony Pro", ["Sony product page"])).toBe(false);
+    expect(nameGrounded("  ", sony)).toBe(false);
+  });
+  it("출처에 없는 영문·숫자 낱말이 붙은 변형명은 버린다(WH-CH720N Magic)", () => {
+    const sony = ["Sony WH-CH720N", "https://shop.example/sony-wh-ch720n"];
+    expect(nameGrounded("Sony WH-CH720N Magic", sony)).toBe(false);
+    expect(nameGrounded("Sony WH-CH720N 2세대 Pro", sony)).toBe(false);
+    expect(nameGrounded("소니 WH-CH720N Plus", sony)).toBe(false);
+    expect(nameGrounded("Sony WH-CH720N", sony)).toBe(true);
+    expect(nameGrounded("소니 WH-CH720N 헤드폰", sony)).toBe(false);
+  });
+  it("cleanItems는 sources가 있을 때만 이름을 대조하고, 후보마다 자기 출처 글로만 대조한다", () => {
+    const other = "https://shop.example/a?x=1";
+    const raw = [
+      { name: "Sony WH-CH720N", url },
+      { name: "Bose QC-Ultra9", url: other },
+    ];
+    expect(cleanItems(raw, allowed(url, other)).map((item) => item.name)).toEqual(["Sony WH-CH720N", "Bose QC-Ultra9"]);
+    const sources = new Map([[urlKey(url)!, material], [urlKey(other)!, ["Sony WH-CH720N 리뷰"]]]);
+    expect(cleanItems(raw, allowed(url, other), undefined, sources).map((item) => item.name)).toEqual(["Sony WH-CH720N"]);
+  });
+  it("재현: 요청 '소니', 검색 자료 '보스 QC45' 페이지, AI 후보 '소니 QC45'+보스 URL → 거부", () => {
+    const bose = "https://shop.example/bose-qc45";
+    const sources = new Map([[urlKey(bose)!, ["보스 QC45 노이즈캔슬링 헤드폰", bose]]]);
+    expect(cleanItems([{ name: "소니 QC45", url: bose }], allowed(bose), undefined, sources)).toEqual([]);
+    expect(
+      cleanItems([{ name: "보스 QC45", url: bose }], allowed(bose), undefined, sources).map((item) => item.name),
+    ).toEqual(["보스 QC45"]);
+  });
+  it("후보의 출처 글이 없으면(인용 제목·주소 없음) 버린다", () => {
+    expect(cleanItems([{ name: "Sony WH-CH720N", url }], allowed(url), undefined, new Map())).toEqual([]);
+  });
+});
+
+describe("hasBenefitForbidden: 혜택 글은 퍼센트·천만 단위 수·포인트 수량을 낱말과 상관없이 막는다", () => {
+  it("hasForbidden이 놓치는 표현을 막는다(돈 낱말이 6자 밖, 돈 낱말이 아닌 이웃, 원 없는 포인트)", () => {
+    for (const text of [
+      "20% 포인트 추가 적립을 받아요",
+      "즉시 5% 혜택",
+      "상당 10%의 혜택이 있어요",
+      "카드 결제 시 최대 15 % 를 돌려받아요",
+      "청구 할인 30퍼센트",
+      "최대 3천 포인트",
+      "5,000P 적립",
+      "5000 포인트를 줘요",
+      "최대 3만",
+      "결제하면 2천P",
+      "삼만 포인트를 받아요",
+      "１０％ 혜택",
+      "10 프로 혜택",
+      "이십 프로 적립",
+      "오백 포인트 적립",
+      "삼천 포인트",
+    ]) {
+      expect(hasBenefitForbidden(text), text).toBe(true);
+    }
+    // 이 가운데 일부는 일반 검사로는 통과한다(그래서 혜택 전용 검사가 따로 있다).
+    expect(hasForbidden("20% 포인트 추가 적립을 받아요")).toBe(false);
+    expect(hasForbidden("최대 3천 포인트")).toBe(false);
+  });
+
+  it("일반 금지 표현도 그대로 막는다", () => {
+    expect(hasBenefitForbidden("19,900원 이상 주문하면")).toBe(true);
+    expect(hasBenefitForbidden("최저가 보장")).toBe(true);
+  });
+
+  it("종류와 조건만 말하는 혜택 글은 통과한다", () => {
+    for (const text of [
+      "제휴 카드 청구 할인",
+      "대상 카드로 결제하면 받아요",
+      "12개월 무이자 할부",
+      "멤버십 회원이면 무료 배송",
+      "포인트 적립 혜택이 있어요",
+      "공식몰에서 주문하면 사은품을 줘요",
+      "2주 안에 도착해요",
+      "카드사 포인트 적립",
+      "프로모션 사은품 행사",
+      "이 포인트로 결제해요",
+      "10 프로그램 연동 혜택",
+      "프로 모델 전용 사은품",
+    ]) {
+      expect(hasBenefitForbidden(text), text).toBe(false);
+    }
+  });
+});
+
+describe("hasContact: 전화번호·이메일·메신저 연락처", () => {
+  it("걸리는 것", () => {
+    for (const text of [
+      "문의 010-1234-5678",
+      "전화 02 123 4567",
+      "031-123-4567로 연락",
+      "01012345678",
+      "help@example.com 으로 보내 주세요",
+      "카카오톡으로 문의하세요",
+      "카톡 상담",
+      "오픈채팅방에서 받아요",
+      "https://open.kakao.com/o/abc",
+      "텔레그램으로 연락",
+    ]) {
+      expect(hasContact(text), text).toBe(true);
+    }
+  });
+
+  it("기종 번호·사양·연도 범위는 안 걸린다", () => {
+    for (const text of ["소니 WH-1000XM5", "배터리 5000mAh", "2023-2024 모델", "1500-2000 사이", "카카오페이 결제 혜택"]) {
+      expect(hasContact(text), text).toBe(false);
+    }
+  });
+});
+
+describe("imageSearchUrl", () => {
+  it("제품 이름을 인코딩한 새 탭용 이미지 검색 주소를 만든다", async () => {
+    const { imageSearchUrl } = await import("@/lib/shopLinks");
+    expect(imageSearchUrl("소니 WH-CH720N")).toBe("https://www.google.com/search?tbm=isch&q=%EC%86%8C%EB%8B%88%20WH-CH720N");
   });
 });

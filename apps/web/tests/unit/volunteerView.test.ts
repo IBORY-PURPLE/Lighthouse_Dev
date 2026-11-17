@@ -43,6 +43,15 @@ describe("quoteOf·structuredLine", () => {
     );
   });
 
+  it("브랜드가 있으면 품목 뒤에 붙는다(이용자가 말한 조건도 그대로 남는다)", () => {
+    expect(
+      structuredLine({ item: "헤드셋", brand: "소니", budget: "30만 원", conditionKind: "used", condition: "중고" }),
+    ).toBe("품목 헤드셋 · 브랜드 소니 · 예산 30만 원 · 중고");
+    expect(structuredLine({ item: null, brand: null, budget: "5만 원", conditionKind: null, condition: "상관없어요" })).toBe(
+      "예산 5만 원 · 상관없어요",
+    );
+  });
+
   it("품목이 없으면 품목 부분을 빼고, 조건 종류를 모르면 원문을 쓴다", () => {
     expect(
       structuredLine({ item: null, budget: "5만 원쯤", conditionKind: null, condition: "깨끗하면 돼요" }),

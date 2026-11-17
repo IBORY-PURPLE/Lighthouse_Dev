@@ -55,15 +55,22 @@ function sectionViolations(answer: string): AnswerViolation[] {
   return violations;
 }
 
+/** 가격·재고 표현만 본다(화면에 보이는 AI 말풍선·리뷰처럼 세 항목 형식이 없는 글에 쓴다). */
+export function priceStockViolations(text: string): AnswerViolation[] {
+  return [
+    ...PRICE_PATTERNS.flatMap((pattern) => matches(text, pattern)).map(
+      (detail): AnswerViolation => ({ rule: "price", detail }),
+    ),
+    ...matches(text, STOCK_PATTERN).map(
+      (detail): AnswerViolation => ({ rule: "stock", detail }),
+    ),
+  ];
+}
+
 export function checkAnswer(answer: string): AnswerViolation[] {
   return [
     ...sectionViolations(answer),
-    ...PRICE_PATTERNS.flatMap((pattern) => matches(answer, pattern)).map(
-      (detail): AnswerViolation => ({ rule: "price", detail }),
-    ),
-    ...matches(answer, STOCK_PATTERN).map(
-      (detail): AnswerViolation => ({ rule: "stock", detail }),
-    ),
+    ...priceStockViolations(answer),
     ...matches(answer, MODEL_PATTERN).map(
       (detail): AnswerViolation => ({ rule: "model", detail }),
     ),
