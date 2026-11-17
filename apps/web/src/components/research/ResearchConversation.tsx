@@ -8,6 +8,7 @@ import { ChatLog, type ChatActions, type OptimisticMessage } from "./ChatLog";
 import { Composer, type ComposerHandle } from "./Composer";
 import { CurrentQuestionLine } from "./CurrentQuestionLine";
 import { HeroBackdrop } from "./HeroBackdrop";
+import { PhotoQrDialog } from "./PhotoQrDialog";
 import { StatusPill } from "./PurchaseBadge";
 import { QuickReplies } from "./QuickReplies";
 import { ResearchTopBar } from "./ResearchTopBar";
@@ -15,6 +16,7 @@ import { ReviewCard } from "./ReviewCard";
 import { ReviewEditor } from "./ReviewEditor";
 import { SlotPanel } from "./SlotPanel";
 import { SentView } from "@/components/SentView";
+import { isPhonePhotoCommand } from "@/lib/photoCommand";
 import { shrinkPhoto } from "@/lib/researchPhoto";
 import {
   activeQuick,
@@ -34,6 +36,7 @@ import {
 import {
   applySnapshot,
   deletePhoto,
+  deletePhotoLink,
   fetchResearch,
   isStaleFailure,
   maxSeq,
@@ -71,6 +74,8 @@ const PURCHASE_QUICK: QuickReply[] = [
 
 const PANEL_ID = "vc-panel";
 const POLL_MS = 2000;
+/** 휴대폰 사진 링크가 열려 있는 동안 새 사진을 읽어 오는 간격. */
+const PHONE_POLL_MS = 2500;
 const POLL_MAX = 45;
 
 const COPY = {
@@ -79,6 +84,8 @@ const COPY = {
   searchFailed: "찾지 못했어요. 쇼핑몰에서 직접 찾아도 돼요.",
   photoRead: "사진을 읽지 못했어요. 다른 사진을 골라 주세요.",
   photoFailed: "사진을 올리지 못했어요. 다시 해 주세요.",
+  phonePhoto: "휴대폰에서 사진을 받았어요.",
+  photosFull: "사진은 3장까지 올릴 수 있어요.",
   photoDone: "사진을 올렸어요.",
   photoRemoved: "사진을 지웠어요.",
   reviewNotReady: "아직 리뷰를 만들 수 없어요. 빠진 칸을 먼저 채워 주세요.",
@@ -138,6 +145,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const [uploadingThumb, setUploadingThumb] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>({ text: "", loud: false });
   const [attachOpen, setAttachOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [foldOpen, setFoldOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -168,6 +176,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const leftProgressRef = useRef<(outcome: Outcome<unknown>) => boolean>(() => false);
   const panelToggleRef = useRef<HTMLButtonElement>(null);
   const focusSend = useRef(false);
+  /** QR 창을 닫을 때 초점을 돌려줄 곳(첨부 버튼에서 열었으면 그 버튼, 입력창의 말로 열었으면 입력창). */
+  const qrReturn = useRef<"attach" | "composer">("attach");
   /** 맨 아래를 보던 중인가. 스크롤을 직접 올리면 false가 되고, 새 말풍선이 붙어 맨 아래로 가면 true가 된다. */
   const stick = useRef(true);
   const ignoreScrollUntil = useRef(0);
@@ -631,6 +641,18 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const submitDraft = useCallback(() => {
     const text = draft.trim();
     if (!text || editing) return;
+    // "QR", "휴대폰으로 찍을게요" 같은 말은 턴을 보내지 않고 사진 QR 창을 연다(낱말 대조, AI 호출 없음).
+    const now = viewRef.current;
+    if (now && now.purchase !== "research" && isPhonePhotoCommand(text)) {
+      setDraft("");
+      if (now.photos.length >= 3) say(COPY.photosFull);
+      else {
+        qrReturn.current = "composer";
+        setAttachOpen(false);
+        setQrOpen(true);
+      }
+      return;
+    }
     if (turnBusy.current) {
       say("이전 답을 처리하는 중이에요. 잠시 뒤에 보내 주세요.");
       return;
@@ -709,6 +731,104 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     },
     [requestId, reload, say, warn, toList, leftProgress],
   );
+
+  // ----- 휴대폰 사진(QR) -----
+
+  const openQr = useCallback(() => {
+    qrReturn.current = "attach";
+    setAttachOpen(false);
+    setQrOpen(true);
+  }, []);
+
+  /** 창을 닫는다. 휴대폰이 아직 안 쓴 링크(waiting)는 더 보이지 않으니 끊는다. 연결된 뒤에는 사진을 계속 받는다. */
+  const closeQr = useCallback(() => {
+    const current = viewRef.current;
+    setQrOpen(false);
+    if (current?.photoLink?.state === "waiting") {
+      updateView((prev) => ({ ...prev, photoLink: { state: "none", expiresAt: null } }));
+      void deletePhotoLink(requestId, current.sessionId);
+    }
+    if (qrReturn.current === "attach") attachButtonRef.current?.focus();
+    else composerRef.current?.focus();
+  }, [requestId, updateView]);
+
+  const onQrIssued = useCallback(
+    (expiresAt: string) => updateView((prev) => ({ ...prev, photoLink: { state: "waiting", expiresAt } })),
+    [updateView],
+  );
+
+  const qrOpenRef = useRef(false);
+  useEffect(() => {
+    qrOpenRef.current = qrOpen;
+  }, [qrOpen]);
+
+  const photoLinkState = view?.photoLink?.state;
+  const watchingPhone = qrOpen || photoLinkState === "waiting" || photoLinkState === "connected";
+
+  // QR 창이 열려 있거나 휴대폰이 연결돼 있는 동안 새 사진·말풍선을 읽어 온다(GET ?after, 사진 썸네일은 따로 한 번).
+  // 검색을 기다리는 동안은 그 폴링이 같은 응답을 읽으니 건너뛴다.
+  useEffect(() => {
+    if (!watchingPhone) return;
+    let stopped = false;
+    let busy = false;
+    const lastAltsAsked = (messages: readonly ChatMessage[]) =>
+      messages.reduce((top, m) => (m.role === "ai" && m.tag === "question" && m.slot === "alts" ? Math.max(top, m.seq) : top), 0);
+    let altsSeen = viewRef.current ? lastAltsAsked(viewRef.current.messages) : 0;
+    const tick = async () => {
+      const current = viewRef.current;
+      if (stopped || busy || !current || turnBusy.current || searching.current) return;
+      busy = true;
+      try {
+        const result = await fetchResearch(requestId, current.lastSeq);
+        if (stopped || !alive.current) return;
+        if (result.kind === "unauthorized") {
+          toList();
+          return;
+        }
+        if (result.kind === "failed") {
+          leftProgressRef.current(result);
+          return;
+        }
+        if (result.kind !== "ok") return;
+        let incoming = result.data;
+        const before = viewRef.current;
+        if (!before || incoming.version < before.version) return;
+        // 썸네일은 처음 읽을 때만 오므로, 새 사진이 보이면 한 번 전체를 읽어 채운다.
+        const known = new Set(before.photos.filter((photo) => photo.thumb).map((photo) => photo.id));
+        if (incoming.photos.some((photo) => !known.has(photo.id))) {
+          const full = await fetchResearch(requestId);
+          if (stopped || !alive.current) return;
+          if (full.kind === "ok" && full.data.version >= incoming.version) incoming = full.data;
+        }
+        const gained = incoming.photos.length - before.photos.length;
+        updateView((prev) => (incoming.version < prev.version ? prev : mergeView(prev, incoming)));
+        if (gained > 0) {
+          say(COPY.phonePhoto);
+          // 사진을 받았으면 창을 닫고 입력창으로 돌아간다. 연결은 그대로라 같은 휴대폰에서 더 올릴 수 있다.
+          if (qrOpenRef.current) {
+            setQrOpen(false);
+            composerRef.current?.focus();
+          }
+        }
+        const merged = viewRef.current;
+        if (merged) {
+          const asked = lastAltsAsked(merged.messages);
+          // 사진 뒤 다음 질문이 같이 고민한 제품이면 웹에서 후보를 찾는다(노트북 올리기와 같다).
+          if (asked > altsSeen) {
+            altsSeen = asked;
+            runSearch("alts");
+          }
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = window.setInterval(() => void tick(), PHONE_POLL_MS);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [watchingPhone, requestId, toList, say, updateView, runSearch]);
 
   // ----- 리뷰 -----
 
@@ -1034,10 +1154,22 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
             <p role="status" className={`vc-notice${notice.text && notice.loud ? " is-loud" : ""}`}>
               {notice.text}
             </p>
+            {qrOpen && (
+              <PhotoQrDialog
+                requestId={requestId}
+                sessionId={view.sessionId}
+                link={view.photoLink}
+                onIssued={onQrIssued}
+                onClose={closeQr}
+                onUnauthorized={toList}
+              />
+            )}
             {attachOpen && (
               <AttachSheet
                 uploading={Boolean(uploadingThumb)}
                 full={photoCount >= 3}
+                phoneVisible={slot === "photo"}
+                onPhone={openQr}
                 onFiles={(files) => void uploadFiles(files)}
                 onClose={() => {
                   setAttachOpen(false);
