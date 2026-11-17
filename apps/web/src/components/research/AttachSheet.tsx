@@ -3,18 +3,23 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 
 /**
- * 사진 올리기 창(끌어 놓기·파일 고르기). 구매 인증용 사진만 받는다. 11/18 뒤에 휴대폰 QR 자리가 생긴다.
+ * 사진 올리기 창(끌어 놓기·파일 고르기). 구매 인증용 사진만 받는다. 사진을 지금 묻는 중이면 [휴대폰으로 찍기]가 함께 나온다(QR 창).
  * 창이 열리면 파일 입력으로 초점이 가고, Esc나 [닫기]로 닫으면 호출한 버튼으로 돌아간다.
  */
 export function AttachSheet({
   uploading,
   full,
+  phoneVisible,
   onFiles,
+  onPhone,
   onClose,
 }: {
   uploading: boolean;
   full: boolean;
+  /** 사진 칸 질문이 지금 질문일 때만 [휴대폰으로 찍기]를 보인다. */
+  phoneVisible: boolean;
   onFiles: (files: File[]) => void;
+  onPhone: () => void;
   onClose: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -70,6 +75,11 @@ export function AttachSheet({
             }}
           />
         </label>
+        {phoneVisible && (
+          <button type="button" className="vc-btn" aria-disabled={full || uploading ? true : undefined} onClick={() => !full && !uploading && onPhone()}>
+            휴대폰으로 찍기
+          </button>
+        )}
         {full && <p className="vc-drop-note">사진은 3장까지 올릴 수 있어요.</p>}
       </div>
       <button type="button" className="vc-btn vc-btn--ghost" onClick={onClose}>

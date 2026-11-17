@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { PHOTO_GRANT_TTL_MS, PHOTO_LINK_TTL_MS } from "./photoLink";
 import {
   getRequestStore,
   getSupabaseRpcClient,
@@ -120,6 +121,8 @@ export interface AddPhotoInput extends ResearchActor {
   pending?: Record<string, unknown> | null;
   messages: NextMessage[];
   next: NextCandidate[];
+  /** 휴대폰 올리기면 grant의 sha256. 저장소가 잠근 안에서 이 요청·세션·봉사자의 살아 있는 grant인지 다시 확인한다. 노트북 올리기는 null. */
+  grantHash?: string | null;
 }
 export type AddPhotoOutcome =
   | {
@@ -129,7 +132,7 @@ export type AddPhotoOutcome =
       messages: ResearchMessage[];
       session: ResearchView;
     }
-  | { outcome: "photos_full" | "photo_not_needed" | "bad_request" }
+  | { outcome: "photos_full" | "photo_not_needed" | "bad_request" | "grant_gone" }
   | { outcome: GuardFail };
 
 export type RemovePhotoOutcome =
@@ -161,6 +164,21 @@ export type SendOutcome =
   | { outcome: "review_not_confirmed" | "bad_request" }
   | { outcome: GuardFail };
 
+/** 휴대폰 사진 링크 상태(design.md 3.3). waiting = 링크를 만들고 아직 안 씀, connected = 휴대폰이 연결돼 grant가 살아 있음. */
+export interface PhotoLinkState {
+  state: "none" | "waiting" | "connected" | "expired";
+  expiresAt: string | null;
+}
+export type IssueLinkOutcome =
+  | { outcome: "ok"; expiresAt: string }
+  | { outcome: "photo_not_needed" | "photos_full" | "bad_request" }
+  | { outcome: GuardFail };
+export type RedeemLinkOutcome = { outcome: "ok"; grantExpiresAt: string } | { outcome: "gone" | "bad_request" };
+export type GrantCheckOutcome =
+  | { outcome: "ok"; requestId: string; volunteerId: string; sessionId: string; expiresAt: string }
+  | { outcome: "gone" };
+export type RevokeLinksOutcome = { outcome: "ok"; revoked: number } | { outcome: "bad_request" } | { outcome: GuardFail };
+
 export interface ResearchStore {
   storeKind(): "supabase" | "memory";
   /** 세션 만들기(afterSeq가 null) 또는 읽기만(afterSeq가 있음, 폴링). 열 때 6시간 정리도 한다. */
@@ -178,6 +196,15 @@ export interface ResearchStore {
   send(input: SendInput): Promise<SendOutcome>;
   /** 6시간 넘게 활동이 없는 요청을 대기열로 돌린다. 돌린 수. */
   sweep(): Promise<number>;
+  /** 휴대폰 사진 링크(토큰 sha256만 받는다). 새 링크를 만들면 이 세션의 앞 링크는 끊긴다. */
+  issuePhotoLink(actor: ResearchActor, tokenHash: string): Promise<IssueLinkOutcome>;
+  /** 링크를 쓴다(한 번만). 같은 세션의 다른 grant는 끊긴다. */
+  redeemPhotoLink(tokenHash: string, grantHash: string): Promise<RedeemLinkOutcome>;
+  /** grant가 살아 있는지 본다. 진짜 확인은 addPhoto가 한다. */
+  checkPhotoGrant(grantHash: string): Promise<GrantCheckOutcome>;
+  revokePhotoLinks(actor: ResearchActor): Promise<RevokeLinksOutcome>;
+  /** 노트북 화면이 읽는 링크 상태. 읽기만 한다. */
+  photoLinkState(actor: ResearchActor): Promise<PhotoLinkState>;
 }
 
 // ---------- 메모리 ----------
@@ -218,6 +245,23 @@ interface MemorySession {
   photos: MemoryPhoto[];
 }
 
+/** 휴대폰 사진 링크 한 줄(DB photo_links와 같은 열). 시각은 밀리초. 세션이 지워지면 같이 지워진다. */
+interface MemoryLink {
+  id: string;
+  requestId: string;
+  sessionId: string;
+  volunteerId: string;
+  tokenHash: string;
+  createdAt: number;
+  expiresAt: number;
+  usedAt: number | null;
+  grantHash: string | null;
+  grantExpiresAt: number | null;
+  revokedAt: number | null;
+}
+
+const HASH_PATTERN = /^[0-9a-f]{64}$/;
+
 interface MemoryUsage {
   turns: number;
   searches: number;
@@ -239,12 +283,15 @@ export function createMemoryResearchStore(
 ): ResearchStore & { drop(requestId: string): void; close(): void } {
   const now = options.now ?? Date.now;
   const sessions = new Map<string, MemorySession>();
+  // 휴대폰 사진 링크는 세션과 같이 산다(requestId별).
+  const links = new Map<string, MemoryLink[]>();
   // 요청당 사용량은 세션이 지워져도 남는다(요청이 지워질 때만 같이 지운다).
   const usage = new Map<string, MemoryUsage>();
   const daily = new Map<string, { searches: number; aiCalls: number }>();
 
   function drop(requestId: string) {
     sessions.delete(requestId);
+    links.delete(requestId);
   }
   // 내려놓기·보내기·6시간 반환·요청 삭제 때 requestStore 메모리판이 알려 준다(DB 트리거와 같다).
   // usage는 내려놓기·보내기로는 남고 요청이 지워질 때만 지워진다. 메모리판은 알림 종류를 나누지 않아
@@ -561,6 +608,19 @@ export function createMemoryResearchStore(
       if (input.thumb.length > THUMB_MAX || !THUMB_PATTERN.test(input.thumb)) {
         return { outcome: "bad_request" };
       }
+      if (input.grantHash != null) {
+        const at = now();
+        const alive = (links.get(input.requestId) ?? []).some(
+          (link) =>
+            link.grantHash === input.grantHash &&
+            link.sessionId === input.sessionId &&
+            link.volunteerId === input.volunteerId &&
+            link.usedAt !== null &&
+            link.revokedAt === null &&
+            (link.grantExpiresAt ?? 0) > at,
+        );
+        if (!alive) return { outcome: "grant_gone" };
+      }
       if (session.purchase === "research") return { outcome: "photo_not_needed" };
       if (session.photos.length >= MAX_PHOTOS) return { outcome: "photos_full" };
       const photo: MemoryPhoto = {
@@ -709,6 +769,101 @@ export function createMemoryResearchStore(
       }
       return { outcome: done.outcome === "not_found" ? "not_found" : "not_in_progress" };
     },
+    async issuePhotoLink(actor, tokenHash) {
+      if (!HASH_PATTERN.test(tokenHash)) return { outcome: "bad_request" };
+      const guarded = await guard(actor);
+      if (typeof guarded === "string") return { outcome: guarded };
+      const session = guarded;
+      if (session.purchase === "research") return { outcome: "photo_not_needed" };
+      if (session.photos.length >= MAX_PHOTOS) return { outcome: "photos_full" };
+      const at = now();
+      const rows = links.get(actor.requestId) ?? [];
+      for (const row of rows) if (row.revokedAt === null) row.revokedAt = at;
+      rows.push({
+        id: randomUUID(),
+        requestId: actor.requestId,
+        sessionId: actor.sessionId,
+        volunteerId: actor.volunteerId,
+        tokenHash,
+        createdAt: at,
+        expiresAt: at + PHOTO_LINK_TTL_MS,
+        usedAt: null,
+        grantHash: null,
+        grantExpiresAt: null,
+        revokedAt: null,
+      });
+      links.set(actor.requestId, rows);
+      return { outcome: "ok", expiresAt: isoOf(at + PHOTO_LINK_TTL_MS) };
+    },
+    async redeemPhotoLink(tokenHash, grantHash) {
+      if (!HASH_PATTERN.test(tokenHash) || !HASH_PATTERN.test(grantHash)) return { outcome: "bad_request" };
+      let found: MemoryLink | undefined;
+      for (const rows of links.values()) {
+        found = rows.find((row) => row.tokenHash === tokenHash);
+        if (found) break;
+      }
+      if (!found) return { outcome: "gone" };
+      const target = found;
+      const guarded = await guard({ requestId: target.requestId, volunteerId: target.volunteerId, sessionId: target.sessionId });
+      if (typeof guarded === "string") return { outcome: "gone" };
+      // 기다리는 사이 내려놓았으면 링크가 이미 지워졌다. 이 줄은 동기로 다시 확인한다.
+      const rows = links.get(target.requestId) ?? [];
+      const link = rows.find((row) => row.id === target.id);
+      const at = now();
+      if (!link || link.revokedAt !== null || link.usedAt !== null || link.expiresAt <= at) return { outcome: "gone" };
+      link.usedAt = at;
+      link.grantHash = grantHash;
+      link.grantExpiresAt = at + PHOTO_GRANT_TTL_MS;
+      for (const row of rows) if (row.id !== link.id && row.revokedAt === null) row.revokedAt = at;
+      return { outcome: "ok", grantExpiresAt: isoOf(link.grantExpiresAt) };
+    },
+    async checkPhotoGrant(grantHash) {
+      if (!HASH_PATTERN.test(grantHash)) return { outcome: "gone" };
+      let found: MemoryLink | undefined;
+      for (const rows of links.values()) {
+        found = rows.find((row) => row.grantHash === grantHash);
+        if (found) break;
+      }
+      const at = now();
+      if (!found || found.usedAt === null || found.revokedAt !== null || (found.grantExpiresAt ?? 0) <= at) {
+        return { outcome: "gone" };
+      }
+      const guarded = await guard({ requestId: found.requestId, volunteerId: found.volunteerId, sessionId: found.sessionId });
+      if (typeof guarded === "string") return { outcome: "gone" };
+      return {
+        outcome: "ok",
+        requestId: found.requestId,
+        volunteerId: found.volunteerId,
+        sessionId: found.sessionId,
+        expiresAt: isoOf(found.grantExpiresAt as number),
+      };
+    },
+    async revokePhotoLinks(actor) {
+      const guarded = await guard(actor);
+      if (typeof guarded === "string") return { outcome: guarded };
+      const at = now();
+      let revoked = 0;
+      for (const row of links.get(actor.requestId) ?? []) {
+        if (row.revokedAt === null) {
+          row.revokedAt = at;
+          revoked += 1;
+        }
+      }
+      return { outcome: "ok", revoked };
+    },
+    async photoLinkState(actor) {
+      const rows = (links.get(actor.requestId) ?? []).filter(
+        (row) => row.volunteerId === actor.volunteerId && row.sessionId === actor.sessionId && row.revokedAt === null,
+      );
+      const latest = rows[rows.length - 1];
+      if (!latest) return { state: "none", expiresAt: null };
+      const at = now();
+      if (latest.usedAt === null) {
+        return { state: latest.expiresAt > at ? "waiting" : "expired", expiresAt: isoOf(latest.expiresAt) };
+      }
+      const grantEnds = latest.grantExpiresAt ?? 0;
+      return { state: grantEnds > at ? "connected" : "expired", expiresAt: isoOf(grantEnds) };
+    },
   };
   return store;
 }
@@ -800,6 +955,8 @@ export function createSupabaseResearchStore(client: RpcClient): ResearchStore {
         p_pending: input.pending ?? null,
         p_messages: input.messages,
         p_next: input.next,
+        // 마이그레이션 2 전의 옛 함수(인자 10개)에도 노트북 올리기가 되도록, grant가 있을 때만 보낸다.
+        ...(input.grantHash ? { p_grant_hash: input.grantHash } : {}),
       })) as unknown as AddPhotoOutcome;
     },
     async removePhoto(actor, photoId) {
@@ -832,6 +989,29 @@ export function createSupabaseResearchStore(client: RpcClient): ResearchStore {
       }
       if (result.error) throw new StoreUnavailableError("research_sweep failed");
       return typeof result.data === "number" ? result.data : 0;
+    },
+    async issuePhotoLink(actor, tokenHash) {
+      return (await call("photo_link_issue", { ...actorArgs(actor), p_token_hash: tokenHash })) as unknown as IssueLinkOutcome;
+    },
+    async redeemPhotoLink(tokenHash, grantHash) {
+      return (await call("photo_link_redeem", {
+        p_token_hash: tokenHash,
+        p_grant_hash: grantHash,
+      })) as unknown as RedeemLinkOutcome;
+    },
+    async checkPhotoGrant(grantHash) {
+      return (await call("photo_link_check", { p_grant_hash: grantHash })) as unknown as GrantCheckOutcome;
+    },
+    async revokePhotoLinks(actor) {
+      return (await call("photo_link_revoke", actorArgs(actor))) as unknown as RevokeLinksOutcome;
+    },
+    async photoLinkState(actor) {
+      const out = await call("photo_link_state", actorArgs(actor));
+      const state = out.state;
+      if (state !== "none" && state !== "waiting" && state !== "connected" && state !== "expired") {
+        throw new StoreUnavailableError("photo_link_state returned an unexpected shape");
+      }
+      return { state, expiresAt: typeof out.expiresAt === "string" ? out.expiresAt : null };
     },
   };
 }

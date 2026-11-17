@@ -1,6 +1,19 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  async headers() {
+    return [
+      {
+        // 휴대폰 사진 페이지: 링크 토큰이 주소(#t=)에 있으므로 저장·전달·검색 노출을 막는다(design.md 3.3).
+        source: "/volunteer/photo",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     return [
       // public/ 폴더는 index.html을 자동으로 찾지 않는다.
