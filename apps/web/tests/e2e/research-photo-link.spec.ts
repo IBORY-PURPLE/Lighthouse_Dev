@@ -296,6 +296,31 @@ test.describe("휴대폰으로 찍기(QR)", () => {
     await phoneCtx.close();
   });
 
+  test("닫자마자 다시 열어도(끊기 응답이 늦어도) 새로 만든 링크가 끊기지 않는다", async ({ page, browser }) => {
+    await begin(page);
+    await toPhotoQuestion(page);
+    // 링크 끊기(DELETE) 응답을 1.5초 늦춘다.
+    await page.route("**/research/photo-link?*", async (route) => {
+      if (route.request().method() === "DELETE") await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    const first = await openQrFromSheet(page);
+    await first.getByRole("button", { name: "닫기" }).click();
+    await expect(first).toHaveCount(0);
+    const dialog = await openQrFromSheet(page);
+    const url = await linkOf(page);
+    // 늦은 DELETE가 닿을 시간을 준 뒤에도 새 링크는 살아 있다.
+    await page.waitForTimeout(2000);
+    const phoneCtx = await phoneContext(browser);
+    const phone = await phoneCtx.newPage();
+    await phone.goto(url);
+    await phone.locator("input[type=file]").setInputFiles({ name: "r.png", mimeType: "image/png", buffer: PNG_1X1 });
+    await expect(phone.getByRole("status").filter({ hasText: "사진을 올렸어요" })).toBeVisible();
+    await expect(page.getByRole("img", { name: "올린 사진 1" })).toBeVisible({ timeout: 15_000 });
+    void dialog;
+    await phoneCtx.close();
+  });
+
   test("링크 없이 연 휴대폰 페이지는 안내만 보인다", async ({ browser }) => {
     const ctx = await phoneContext(browser);
     const page = await ctx.newPage();

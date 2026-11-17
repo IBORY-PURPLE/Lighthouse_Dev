@@ -36,6 +36,7 @@ export function PhotoQrDialog({
   onIssued,
   onClose,
   onUnauthorized,
+  settled,
 }: {
   requestId: string;
   sessionId: string;
@@ -44,6 +45,8 @@ export function PhotoQrDialog({
   onIssued: (expiresAt: string) => void;
   onClose: () => void;
   onUnauthorized: () => void;
+  /** 앞서 닫으면서 보낸 링크 끊기(DELETE)가 끝나길 기다린다. 끝나기 전에 새 링크를 만들면 늦게 닿은 DELETE가 새 링크를 끊는다. */
+  settled?: () => Promise<unknown>;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
@@ -63,6 +66,8 @@ export function PhotoQrDialog({
   const issue = useCallback(async () => {
     setBusy(true);
     setFailure("");
+    await settled?.();
+    if (!alive.current) return;
     const outcome = await postPhotoLink(requestId, { sessionId });
     if (!alive.current) return;
     if (outcome.kind === "unauthorized") {
@@ -89,7 +94,7 @@ export function PhotoQrDialog({
       if (alive.current) setFailure("QR을 그리지 못했어요. 새로 만들기를 눌러 주세요.");
     }
     if (alive.current) setBusy(false);
-  }, [requestId, sessionId, onIssued, onUnauthorized]);
+  }, [requestId, sessionId, onIssued, onUnauthorized, settled]);
 
   useEffect(() => {
     if (started.current) return;

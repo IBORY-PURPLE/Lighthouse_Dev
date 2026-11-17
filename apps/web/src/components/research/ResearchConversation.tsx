@@ -190,6 +190,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const focusSend = useRef(false);
   /** QR 창을 닫을 때 초점을 돌려줄 곳(첨부 버튼에서 열었으면 그 버튼, 입력창의 말로 열었으면 입력창). */
   const qrReturn = useRef<"attach" | "composer">("attach");
+  /** 창을 닫을 때 보낸 링크 끊기(DELETE). 바로 다시 열어도 이것이 끝난 뒤에 새 링크를 만든다(늦게 닿은 끊기가 새 링크를 끊지 않게). */
+  const qrRevoke = useRef<Promise<unknown>>(Promise.resolve());
   /** 맨 아래를 보던 중인가. 스크롤을 직접 올리면 false가 되고, 새 말풍선이 붙어 맨 아래로 가면 true가 된다. */
   const stick = useRef(true);
   const ignoreScrollUntil = useRef(0);
@@ -803,11 +805,13 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     setQrOpen(false);
     if (current?.photoLink?.state === "waiting") {
       updateView((prev) => ({ ...prev, photoLink: { state: "none", expiresAt: null } }));
-      void deletePhotoLink(requestId, current.sessionId);
+      qrRevoke.current = deletePhotoLink(requestId, current.sessionId);
     }
     if (qrReturn.current === "attach") attachButtonRef.current?.focus();
     else composerRef.current?.focus();
   }, [requestId, updateView]);
+
+  const qrSettled = useCallback(() => qrRevoke.current, []);
 
   const onQrIssued = useCallback(
     (expiresAt: string) => updateView((prev) => ({ ...prev, photoLink: { state: "waiting", expiresAt } })),
@@ -1268,6 +1272,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
                 onIssued={onQrIssued}
                 onClose={closeQr}
                 onUnauthorized={toList}
+                settled={qrSettled}
               />
             )}
             {attachOpen && (
