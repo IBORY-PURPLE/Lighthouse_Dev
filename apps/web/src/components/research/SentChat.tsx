@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState, type Ref } from "react";
-import { Icon } from "./Icon";
 import { MessageBubble } from "./MessageBubble";
 import { BrandTitle } from "../BrandTitle";
 import { readSentHistory } from "@/lib/sentHistory";
@@ -14,7 +12,7 @@ import {
   type VolunteerRequestView,
 } from "@/lib/volunteerView";
 
-/** 보낸 요청의 위 막대: 뒤로(첫 화면) · 서비스 이름 · 완료 표시 · 왼쪽 창 버튼. 모은 정보·내려놓기는 없다. */
+/** 보낸 요청의 위 막대: 서비스 로고(누르면 첫 화면) · 완료 표시 · 왼쪽 창 버튼. 모은 정보·내려놓기는 없다. */
 export function SentTopBar({
   request,
   headingRef,
@@ -24,9 +22,6 @@ export function SentTopBar({
 }) {
   return (
     <header className="vc-topbar">
-      <Link href="/volunteer" className="vc-back" aria-label="첫 화면으로">
-        <Icon name="back" />
-      </Link>
       <BrandTitle ref={headingRef} context={`리서치 챗 · ${request.product}`} />
       <span className="vh-spacer" />
       <span className="vc-tag vc-tag--ink">완료</span>

@@ -1,5 +1,6 @@
 import "server-only";
 import OpenAI from "openai";
+import { openAiLog } from "./openaiLog";
 import { getLlmMode, LLM_MODEL } from "./llm";
 import { parseJsonObject, type Upstream } from "./researchAi";
 import { cleanText, clip, hasForbidden, unknownModelTokens, urlKey } from "./researchCheck";
@@ -289,6 +290,7 @@ export async function writeReview(
         reasoning_effort: "none",
         temperature: 0,
         response_format: { type: "json_object" },
+        ...openAiLog("research_review"),
         messages: [
           { role: "system", content: reviewInstructions() },
           {
