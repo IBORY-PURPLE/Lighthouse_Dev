@@ -4,7 +4,7 @@
  * 남기면 OpenAI가 요청·응답 글을 보관한다(대시보드 기본 보관 기간을 따른다). 끄려면 환경 변수 OPENAI_STORE_LOGS=off.
  * metadata의 feature로 대시보드에서 호출 종류를 거를 수 있다(값에 이용자·봉사자 정보를 넣지 않는다).
  */
-export type OpenAiLogFeature = "research_turn" | "research_ask" | "research_review";
+export type OpenAiLogFeature = "research_turn" | "research_ask" | "research_review" | "research_photo";
 
 export function openAiLog(feature: OpenAiLogFeature): { store: boolean; metadata?: Record<string, string> } {
   if (process.env.OPENAI_STORE_LOGS?.trim().toLowerCase() === "off") return { store: false };

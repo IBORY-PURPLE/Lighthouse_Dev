@@ -44,6 +44,8 @@ import {
   questionQuick,
   turnQuestion,
   type QuestionContext,
+  PHOTO_CONFIRMED,
+  PHOTO_RETAKE,
 } from "./researchTurnText";
 import { buildTurnMaterial, shownNames } from "./researchTurnPrompt";
 import { isUuid } from "./volunteerApi";
@@ -73,6 +75,8 @@ export const QUICK_IDS = [
   "confirm.yes",
   "confirm.no",
   "review.more",
+  "photo.yes",
+  "photo.retake",
 ] as const;
 export type QuickId = (typeof QUICK_IDS)[number];
 
@@ -917,6 +921,10 @@ export function planTurn(args: PlanArgs): TurnPlan {
             return "아니요";
           case "review.more":
             return "더 답할게요";
+          case "photo.yes":
+            return "직접 찍은 사진이 맞아요";
+          case "photo.retake":
+            return "다른 사진 올릴게요";
         }
       })();
       messages.push(volunteerMessage(label0));
@@ -941,6 +949,20 @@ export function planTurn(args: PlanArgs): TurnPlan {
         } else {
           pendingPatch.confirmFill = null;
           patch.asked = [slot];
+        }
+      } else if (input.replyId === "photo.yes" || input.replyId === "photo.retake") {
+        // 사진 확인 필요(P2): 맞다고 하면 확인을 풀어 구매 인증이 되고 다음 질문으로 간다. 다시 올린다면 지우는 법만 알린다.
+        const checking = isRecord(session.pending.shotCheck) || isRecord(session.pending.mismatch);
+        if (!checking) {
+          messages.push(aiNotice(NO_CONFIRM));
+          hold = true;
+        } else if (input.replyId === "photo.yes") {
+          pendingPatch.shotCheck = null;
+          pendingPatch.mismatch = null;
+          messages.push(aiNotice(PHOTO_CONFIRMED));
+        } else {
+          messages.push(aiNotice(PHOTO_RETAKE));
+          hold = true;
         }
       } else {
         // review.more

@@ -43,6 +43,7 @@ export interface ReviewMaterial {
   혜택경험: string;
   확인한혜택: ConfirmedBenefit[];
   사진장수: number;
+  사진설명: string[];
 }
 
 export interface ReviewSource {
@@ -112,6 +113,8 @@ export function buildReviewMaterial({ view, context }: ReviewSource): ReviewMate
     혜택경험: benefitsSlot?.status === "skipped" ? "없었어요" : safeFact(slotText(view, "benefits")),
     확인한혜택: confirmedBenefits(view),
     사진장수: view.photos.length,
+    // AI가 본 사진 설명(대체 텍스트). 착샷인지 확인한 뒤의 것만 있다.
+    사진설명: view.photos.map((photo) => photo.description).filter((text): text is string => Boolean(text)),
   };
 }
 
