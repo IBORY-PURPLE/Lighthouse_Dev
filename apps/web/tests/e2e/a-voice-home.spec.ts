@@ -138,7 +138,8 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     await openVoiceHome(page);
     await page.getByRole("button", { name: "저장된 상품 목록" }).click();
     await expect(page.locator("#list")).toHaveClass(/active/);
-    await page.locator("#list .card", { hasText: "소형 전기밥솥" }).click();
+    // 이용자 화면은 정적 시연 화면이라 저장된 정보 카드는 모두 이 소니 헤드셋 상세를 연다(서버에서 결과를 받아 그리는 곳은 아직 없다).
+    await page.locator("#list .card:not(.pending)", { hasText: "소니 무선 헤드셋" }).click();
     const detail = page.locator("#detail");
     await expect(detail).toHaveClass(/active/);
     // 읽히는 것은 봉사자가 검수한 리뷰 문단 하나다.
@@ -149,6 +150,8 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     // 버튼은 뒤로 가기와 목록으로 이동 둘뿐이다("상품 링크 바로가기"는 없다).
     await expect(detail.getByRole("button")).toHaveCount(2);
     await expect(detail.getByRole("button", { name: "요청 목록으로 이동" })).toBeVisible();
+    // 리뷰 상자(article)는 제목과 리뷰 문단 하나뿐이다.
+    await expect(review.locator("p")).toHaveCount(1);
     const text = await detail.innerText();
     expect(text).not.toMatch(/링크|\d[\d,]*\s*원|후보|상세 요약/);
     await page.screenshot({ path: "../../test-results/demo6-shots/user-result-review-only.png", fullPage: true });
