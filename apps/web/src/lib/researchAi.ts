@@ -1,5 +1,6 @@
 import "server-only";
 import OpenAI from "openai";
+import { openAiLog, type OpenAiLogFeature } from "./openaiLog";
 import { demoCandidatesFor } from "./demoCandidates";
 import { getLlmMode, LLM_MODEL } from "./llm";
 import {
@@ -194,6 +195,7 @@ async function callJson(
   userMessage: string,
   timeoutMs: number,
   signal: AbortSignal | undefined,
+  feature: OpenAiLogFeature,
 ): Promise<{ text: string; finish: string | null; usage: { in: number; out: number } }> {
   // 추론을 끈다. 켜 두면 추론 토큰이 먼저 쓰여 글자 없이 끝날 수 있다. temperature는 추론이 none일 때만 둘 수 있다.
   const completion = await newClient(timeoutMs).chat.completions.create(
@@ -203,6 +205,7 @@ async function callJson(
       reasoning_effort: "none",
       temperature: 0,
       response_format: { type: "json_object" },
+      ...openAiLog(feature),
       messages: [
         { role: "system", content: instructions },
         { role: "user", content: userMessage },
@@ -228,6 +231,7 @@ async function callAsk(
     materialMessage("자료를 읽고 출력 모양대로 답한다.", material),
     ASK_TIMEOUT_MS,
     signal,
+    "research_ask",
   );
   return reply.text;
 }
@@ -579,7 +583,7 @@ export async function answerTurn(material: TurnMaterial, signal?: AbortSignal): 
   }
   if (!hasKey()) return { json: null, upstream: "nokey", usage: none };
   try {
-    const reply = await callJson(turnInstructions(), turnMessage(material), TURN_TIMEOUT_MS, signal);
+    const reply = await callJson(turnInstructions(), turnMessage(material), TURN_TIMEOUT_MS, signal, "research_turn");
     if (reply.finish === "length") return { json: null, upstream: "empty", usage: reply.usage };
     const json = parseJsonObject(reply.text);
     return { json, upstream: json ? null : "empty", usage: reply.usage };

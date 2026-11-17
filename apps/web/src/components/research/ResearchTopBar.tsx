@@ -1,12 +1,10 @@
-import Link from "next/link";
 import { forwardRef, type Ref } from "react";
 import { PurchaseBadge } from "./PurchaseBadge";
-import { Icon } from "./Icon";
 import { ReleaseConfirm } from "./ReleaseConfirm";
 import { BrandTitle } from "../BrandTitle";
 import type { BadgeKind } from "@/lib/researchChatView";
 
-/** 위 바: 뒤로(첫 화면) · 서비스 이름(요청 제목은 화면 읽기 프로그램에만) · 모은 정보 버튼(모든 폭) · 구매 배지 · "…" 더 보기(요청 내려놓기). */
+/** 위 바: 서비스 로고(누르면 첫 화면)(요청 제목은 화면 읽기 프로그램에만) · 모은 정보 버튼(모든 폭) · 구매 배지 · "…" 더 보기(요청 내려놓기). */
 export const ResearchTopBar = forwardRef<
   HTMLHeadingElement,
   {
@@ -32,9 +30,6 @@ export const ResearchTopBar = forwardRef<
 ) {
   return (
     <header className="vc-topbar">
-      <Link href="/volunteer" className="vc-back" aria-label="첫 화면으로">
-        <Icon name="back" />
-      </Link>
       <BrandTitle ref={headingRef} context={`리서치 챗 · ${title}`} />
       <span className="vh-spacer" />
       <button
