@@ -101,8 +101,21 @@ export async function refill(page: Page): Promise<void> {
   );
 }
 
+/** 들어오는 움직임(반복하지 않는 것)이 끝날 때까지 기다린다. 움직임 중에는 글자 색이 옅게 보여 색 대비 검사가 흔들린다. */
+async function settleAnimations(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );
+}
+
 /** wcag2a·2aa·21aa 위반 중 critical·serious가 0건. */
 export async function expectNoBlockingAxe(page: Page): Promise<void> {
+  await settleAnimations(page);
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
     .analyze();
@@ -138,14 +151,7 @@ export async function claimDemo(page: Page, quote: string): Promise<void> {
 
 /** 화면 증거: 저장소 루트 test-results/demo6-shots/<name>.png. 들어오는 움직임이 끝난 뒤 찍는다. */
 export async function shot(page: Page, name: string): Promise<void> {
-  await page.evaluate(() =>
-    Promise.all(
-      document
-        .getAnimations()
-        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
-        .map((animation) => animation.finished.catch(() => undefined)),
-    ),
-  );
+  await settleAnimations(page);
   await page.waitForTimeout(400);
   const dir = path.resolve(process.cwd(), "../../test-results/demo6-shots");
   mkdirSync(dir, { recursive: true });
