@@ -986,32 +986,42 @@ describe("POST …/research/search (alts, benefits)", () => {
   });
 });
 
+// queue 라우트의 lastSweepAt은 모듈 변수라 앞선 시험이 실제 시각으로 부르면 그 시각이 남는다.
+// 고정된 가짜 시각이 실제 시각보다 앞서면 sweep이 건너뛰어지므로, 이 묶음은 실제 시각 + 하루를 기준으로 삼는다.
+// 그래서 앞선 호출(실제 시각 이하)이나 앞 시험의 가짜 시각보다 늘 뒤다.
+const DAY_MS = 24 * 60 * 60 * 1000;
+function clockFromTomorrow(): (ms: number) => void {
+  const base = Date.now() + DAY_MS;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  return (ms: number) => vi.setSystemTime(new Date(base + ms));
+}
+
 describe("queue 라우트의 6시간 정리", () => {
   it("인스턴스당 1분에 한 번만 sweep을 부르고, 실패해도 목록은 준다", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-11-17T00:00:00Z"));
+    const at = clockFromTomorrow();
+    at(0);
     const cookie = await signIn();
     const list = () => queue(new NextRequest(`${ORIGIN}/api/volunteer/queue`, { headers: { "x-forwarded-for": freshClient(), cookie } }));
-    vi.setSystemTime(new Date("2026-11-17T03:00:00Z"));
+    at(3 * 60 * 60 * 1000);
     const before = storeProbe.sweeps;
     expect((await list()).status).toBe(200);
     expect(storeProbe.sweeps).toBe(before + 1);
-    vi.setSystemTime(new Date("2026-11-17T03:00:30Z"));
+    at(3 * 60 * 60 * 1000 + 30 * 1000);
     expect((await list()).status).toBe(200);
     expect(storeProbe.sweeps).toBe(before + 1);
-    vi.setSystemTime(new Date("2026-11-17T03:01:10Z"));
+    at(3 * 60 * 60 * 1000 + 70 * 1000);
     storeProbe.unavailable = true;
     expect((await list()).status).toBe(200);
   });
 
   it("메모리 저장소: 6시간 넘게 활동이 없으면 대기열로 돌아가고 대화가 지워진다", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-11-17T10:00:00Z"));
+    const at = clockFromTomorrow();
+    at(10 * 60 * 60 * 1000);
     resetRequestStoresForTest();
     resetResearchStoresForTest();
     const o = await opened();
     await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }));
-    vi.setSystemTime(new Date("2026-11-17T17:00:00Z"));
+    at(17 * 60 * 60 * 1000);
     const other = await signIn();
     const list = await (await queue(new NextRequest(`${ORIGIN}/api/volunteer/queue`, { headers: { "x-forwarded-for": freshClient(), cookie: other } }))).json();
     expect(list.waiting.map((entry: { requestId: string }) => entry.requestId)).toContain(o.id);
