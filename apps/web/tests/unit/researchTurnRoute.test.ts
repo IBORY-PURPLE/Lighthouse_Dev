@@ -986,32 +986,34 @@ describe("POST …/research/search (alts, benefits)", () => {
   });
 });
 
+// queue 라우트의 lastSweepAt은 모듈 변수라 앞선 시험이 실제 시각으로 부르면 그 시각이 남는다.
+// 가짜 시각이 실제 시각보다 앞서면 sweep이 건너뛰어지므로, 이 묶음은 먼 미래(2099년) 시각을 쓴다.
 describe("queue 라우트의 6시간 정리", () => {
   it("인스턴스당 1분에 한 번만 sweep을 부르고, 실패해도 목록은 준다", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-11-17T00:00:00Z"));
+    vi.setSystemTime(new Date("2099-11-17T00:00:00Z"));
     const cookie = await signIn();
     const list = () => queue(new NextRequest(`${ORIGIN}/api/volunteer/queue`, { headers: { "x-forwarded-for": freshClient(), cookie } }));
-    vi.setSystemTime(new Date("2026-11-17T03:00:00Z"));
+    vi.setSystemTime(new Date("2099-11-17T03:00:00Z"));
     const before = storeProbe.sweeps;
     expect((await list()).status).toBe(200);
     expect(storeProbe.sweeps).toBe(before + 1);
-    vi.setSystemTime(new Date("2026-11-17T03:00:30Z"));
+    vi.setSystemTime(new Date("2099-11-17T03:00:30Z"));
     expect((await list()).status).toBe(200);
     expect(storeProbe.sweeps).toBe(before + 1);
-    vi.setSystemTime(new Date("2026-11-17T03:01:10Z"));
+    vi.setSystemTime(new Date("2099-11-17T03:01:10Z"));
     storeProbe.unavailable = true;
     expect((await list()).status).toBe(200);
   });
 
   it("메모리 저장소: 6시간 넘게 활동이 없으면 대기열로 돌아가고 대화가 지워진다", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-11-17T10:00:00Z"));
+    vi.setSystemTime(new Date("2099-11-17T10:00:00Z"));
     resetRequestStoresForTest();
     resetResearchStoresForTest();
     const o = await opened();
     await post(o.id, o.cookie, body(o, { type: "quick", replyId: "purchase.bought" }));
-    vi.setSystemTime(new Date("2026-11-17T17:00:00Z"));
+    vi.setSystemTime(new Date("2099-11-17T17:00:00Z"));
     const other = await signIn();
     const list = await (await queue(new NextRequest(`${ORIGIN}/api/volunteer/queue`, { headers: { "x-forwarded-for": freshClient(), cookie: other } }))).json();
     expect(list.waiting.map((entry: { requestId: string }) => entry.requestId)).toContain(o.id);
