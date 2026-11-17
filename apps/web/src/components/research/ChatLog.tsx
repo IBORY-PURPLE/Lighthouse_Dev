@@ -85,6 +85,7 @@ export function ChatLog({
         </MessageBubble>
       );
     }
+    const isQuestion = message.role === "ai" && message.tag === "question";
     const chips = chipsOf(body);
     const products = productsOf(body);
     const benefits = benefitsOf(body);
@@ -98,6 +99,8 @@ export function ChatLog({
         role={message.role}
         tag={message.role === "volunteer" ? null : tagLabel(message)}
         text={benefits ? benefits.headline : text}
+        id={isQuestion ? `vc-q-${message.seq}` : undefined}
+        tabIndex={isQuestion ? -1 : undefined}
       >
         {chips && (
           <ModelChips

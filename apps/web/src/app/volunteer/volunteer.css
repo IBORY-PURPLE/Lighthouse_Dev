@@ -146,8 +146,6 @@
 }
 
 .vol-btn:focus-visible,
-.vol-tab:focus-visible,
-.vol-card-link:focus-visible,
 .vol-input:focus-visible,
 .vol-back:focus-visible {
   outline: 3px solid #2f6fed;
@@ -209,76 +207,6 @@
   overflow-wrap: anywhere;
 }
 
-/* ----- 카드 ----- */
-
-.vol-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.vol-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 15px;
-  border: 1.5px solid var(--vol-line);
-  border-radius: 12px;
-  background: var(--vol-bg);
-}
-
-.vol-card-link {
-  color: inherit;
-  text-decoration: none;
-}
-
-.vol-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.vol-chips {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.vol-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 1px 10px;
-  border: 1.5px solid var(--vol-ink);
-  border-radius: 999px;
-  background: var(--vol-ink);
-  color: #ffffff;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.vol-chip--outline {
-  background: var(--vol-bg);
-  color: var(--vol-ink);
-}
-
-.vol-meta {
-  color: var(--vol-ink);
-  font-size: 0.8125rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.vol-meta--sub {
-  color: var(--vol-sub);
-  font-weight: 400;
-}
-
 .vol-quote {
   margin: 0;
   font-size: 1.0625rem;
@@ -289,69 +217,10 @@
   overflow-wrap: anywhere;
 }
 
-.vol-sub {
-  margin: 0;
-  color: var(--vol-sub);
-  font-size: 0.875rem;
-}
-
 .vol-empty {
   margin: 0;
   padding: 18px 0;
   color: var(--vol-sub);
-}
-
-.vol-notice {
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border: 1.5px solid var(--vol-line);
-  border-radius: 8px;
-  color: var(--vol-ink);
-  font-size: 0.875rem;
-}
-
-.vol-demo {
-  margin-top: 28px;
-  padding-top: 16px;
-  border-top: 1px dashed var(--vol-line);
-}
-
-.vol-demo .vol-foot {
-  margin-top: 8px;
-}
-
-/* ----- 하단 탭 ----- */
-
-.vol-tabs {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  z-index: 10;
-  display: flex;
-  gap: 8px;
-  width: 100%;
-  max-width: 520px;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--vol-line);
-  background: var(--vol-bg);
-  transform: translateX(-50%);
-}
-
-.vol-tab {
-  flex: 1;
-  min-height: 48px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--vol-sub);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.vol-tab[aria-current="page"] {
-  background: var(--vol-ink);
-  color: #ffffff;
 }
 
 /* ----- 요청 요약 상자·버튼 줄 ----- */
@@ -708,7 +577,9 @@
 }
 
 .vc-panel-toggle {
-  display: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   flex: none;
   min-height: 44px;
   padding: 0 16px;
@@ -720,6 +591,111 @@
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
+}
+
+
+/* 위 막대의 왼쪽 창 버튼(대기열·내 담당). 모든 폭에서 보인다. */
+.vc-mine-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1.5px solid var(--c-linestrong);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.vh-spacer {
+  flex: 1;
+}
+
+/* 새 칸이 채워졌다는 점(모은 정보 버튼). 글자로도 "새 정보 있음"을 읽힌다. */
+.vc-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--c-oncheck);
+}
+
+/* 위 막대 "…" 더 보기 */
+.vc-more-wrap {
+  position: relative;
+  flex: none;
+}
+
+.vc-more-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1.5px solid var(--c-linestrong);
+  border-radius: 50%;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.vc-more {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 6;
+  width: min(300px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 16px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 28px rgba(18, 20, 23, 0.14);
+}
+
+.vc-more[hidden] {
+  display: none;
+}
+
+/* 모은 정보 칸 누르기: 칸 전체를 덮는 투명 버튼. */
+.vc-slot {
+  position: relative;
+}
+
+.vc-slot-jump {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.vc-slot-jump:hover {
+  background: rgba(17, 20, 24, 0.04);
+}
+
+.vol-chat .vc-slot-jump:focus-visible {
+  outline: 3px solid var(--c-ink);
+  outline-offset: -3px;
+}
+
+/* 칸 누르기로 찾아온 질문 말풍선. */
+.vol-chat .vc-row:focus {
+  outline: 3px solid var(--c-ink);
+  outline-offset: 4px;
+  border-radius: 14px;
 }
 
 /* ----- 본문 틀 ----- */
@@ -774,7 +750,9 @@
   max-width: none;
   margin: 0;
   padding: 0;
-  transition: margin-right var(--lh-motion-card) var(--lh-ease-standard);
+  transition:
+    margin-right var(--lh-motion-card) var(--lh-ease-standard),
+    margin-left var(--lh-motion-card) var(--lh-ease-standard);
 }
 
 .vc-current,
@@ -1713,6 +1691,170 @@
   padding-left: 18px;
 }
 
+
+/* ----- 왼쪽 창(대기열 + 내 담당) ----- */
+
+.vc-mine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 300px;
+  padding: 20px 16px;
+  overflow-y: auto;
+  background: var(--c-surface);
+  border-right: 1px solid var(--c-line);
+  visibility: hidden;
+  transform: translateX(-100%);
+  transition:
+    transform var(--lh-motion-card) var(--lh-ease-enter) var(--lh-motion-fast),
+    visibility 0s linear var(--lh-motion-card);
+}
+
+.vc-mine.is-open {
+  visibility: visible;
+  transform: none;
+  transition:
+    transform var(--lh-motion-card) var(--lh-ease-enter),
+    visibility 0s;
+}
+
+.vc-mine-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vc-mine-sec + .vc-mine-sec {
+  padding-top: 20px;
+  border-top: 1px solid var(--c-line);
+}
+
+.vc-mine-headrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vc-mine-title {
+  margin: 0;
+  font-size: 19px;
+  line-height: 29px;
+  font-weight: 700;
+}
+
+.vc-mine-sub {
+  margin: 4px 0 0;
+  font-size: 15px;
+  line-height: 23px;
+  font-weight: 700;
+  color: var(--c-sub);
+}
+
+.vc-mine-asof,
+.vc-mine-foot,
+.vc-mine-empty {
+  margin: 0;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--c-sub);
+}
+
+.vc-mine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vc-mine-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  text-decoration: none;
+}
+
+.vc-mine-card--link {
+  display: flex;
+}
+
+.vc-mine-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.vc-mine-meta {
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--c-sub);
+}
+
+.vc-mine-quote {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.vh-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vh-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--c-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.vh-chip--new {
+  background: var(--c-check);
+  color: var(--c-oncheck);
+}
+
+/* 첫 화면: 시연 초기화 확인과 "/" 명령 메뉴 */
+.vh-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: var(--c-surface);
+}
+
+.vh-confirm-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.vh-slash {
+  order: 0;
+}
+
 /* ----- 모은 정보 패널 ----- */
 
 .vc-panel {
@@ -1928,7 +2070,12 @@
 /* ----- 폭에 따라 ----- */
 
 @media (min-width: 1180px) {
-  .is-chat .vc-panel {
+  .vol-chat.has-mine main.vc-main {
+    margin-left: 300px;
+  }
+
+  /* 대화(is-chat)에서는 열린 창이 대화 옆에 붙고, 닫으면 대화가 넓어진다(오른쪽 여백 0). */
+  .is-chat .vc-panel.is-open {
     visibility: visible;
     transform: none;
     transition:
@@ -1936,16 +2083,11 @@
       visibility 0s;
   }
 
-  .vol-chat.is-chat main.vc-main {
+  .vol-chat.is-chat.has-slots main.vc-main {
     margin-right: 360px;
   }
 
-  /* 히어로(맡은 직후)에는 패널이 숨어 있지만 [요청 내려놓기]는 거기서도 닿아야 한다. 버튼으로 열고 닫는다. */
-  .is-hero .vc-panel-toggle {
-    display: inline-flex;
-    align-items: center;
-  }
-
+  /* 히어로(맡은 직후)는 겹쳐서 열고 닫는다. */
   .is-hero .vc-panel.is-open {
     visibility: visible;
     transform: none;
@@ -1957,9 +2099,8 @@
 }
 
 @media (max-width: 1179px) {
-  .vc-panel-toggle {
-    display: inline-flex;
-    align-items: center;
+  .vc-mine.is-open {
+    box-shadow: 12px 0 28px rgba(18, 20, 23, 0.14);
   }
 
   .vc-panel.is-open {
@@ -1973,9 +2114,37 @@
 }
 
 @media (max-width: 760px) {
+  /* 좁은 폭에서는 위 막대를 줄로 나눈다: 뒤로·제목·구매 배지·더 보기 / 이용자 요청 / 두 창 버튼. */
   .vc-topbar {
-    gap: 8px;
-    padding-right: 12px;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    height: auto;
+    min-height: 64px;
+    padding: 8px 12px;
+  }
+
+  .vc-topbar .vc-back {
+    order: 0;
+  }
+
+  .vc-topbar .vc-topbar-title {
+    order: 1;
+    margin-right: auto;
+  }
+
+  .vc-topbar .vc-badge,
+  .vc-topbar .vc-more-wrap {
+    order: 2;
+  }
+
+  .vc-topbar .vc-request {
+    order: 3;
+    flex: 1 1 100%;
+  }
+
+  .vc-topbar .vc-mine-toggle,
+  .vc-topbar .vc-panel-toggle {
+    order: 4;
   }
 
   .vc-topbar-rule,
@@ -1989,6 +2158,15 @@
 
   .vc-panel {
     width: min(360px, 100%);
+  }
+
+  .vc-mine {
+    width: min(300px, 100%);
+  }
+
+  .vc-mine-toggle {
+    padding: 0 12px;
+    font-size: 14px;
   }
 }
 

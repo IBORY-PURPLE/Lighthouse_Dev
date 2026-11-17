@@ -8,16 +8,20 @@ import { ChatLog, type ChatActions, type OptimisticMessage } from "./ChatLog";
 import { Composer, type ComposerHandle } from "./Composer";
 import { CurrentQuestionLine } from "./CurrentQuestionLine";
 import { HeroBackdrop } from "./HeroBackdrop";
+import { HeroCopy } from "./HeroCopy";
 import { PhotoQrDialog } from "./PhotoQrDialog";
-import { StatusPill } from "./PurchaseBadge";
 import { QuickReplies } from "./QuickReplies";
 import { ResearchTopBar } from "./ResearchTopBar";
 import { ReviewCard } from "./ReviewCard";
 import { ReviewEditor } from "./ReviewEditor";
 import { SlotPanel } from "./SlotPanel";
 import { SentView } from "@/components/SentView";
+import { SidePane } from "@/components/SidePane";
 import { isPhonePhotoCommand } from "@/lib/photoCommand";
 import { shrinkPhoto } from "@/lib/researchPhoto";
+import { lastQuestionSeq, newlyFilled } from "@/lib/chatPanelView";
+import { usePanels } from "@/lib/usePanels";
+import { SIDE_PANE_ID, useSidePane } from "@/lib/useSidePane";
 import {
   activeQuick,
   arrangeMessages,
@@ -54,6 +58,7 @@ import {
   type PhotoView,
   type ResearchView,
   type SearchKind,
+  type SlotKey,
   type TurnInput,
   type TurnResponse,
 } from "@/lib/researchClient";
@@ -146,7 +151,9 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const [notice, setNotice] = useState<Notice>({ text: "", loud: false });
   const [attachOpen, setAttachOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
+  /** 새로 채워진 칸이 있는데 오른쪽 창이 닫혀 있다(버튼에 점). 창을 열면 지운다. */
+  const [unseen, setUnseen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [foldOpen, setFoldOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -175,6 +182,11 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   /** 폴링처럼 leftProgress보다 먼저 정의되는 곳이 쓴다(409 not_in_progress면 요청 상세를 다시 읽는다). */
   const leftProgressRef = useRef<(outcome: Outcome<unknown>) => boolean>(() => false);
   const panelToggleRef = useRef<HTMLButtonElement>(null);
+  const moreToggleRef = useRef<HTMLButtonElement>(null);
+  /** putView가 오른쪽 창이 닫혀 있는지 알려고 읽는다. */
+  const slotsOpenRef = useRef(false);
+  /** 접힌 앞부분의 질문으로 가려고 접힌 목록을 연 뒤, 그려진 다음 옮길 질문 seq. */
+  const pendingJump = useRef<number | null>(null);
   const focusSend = useRef(false);
   /** QR 창을 닫을 때 초점을 돌려줄 곳(첨부 버튼에서 열었으면 그 버튼, 입력창의 말로 열었으면 입력창). */
   const qrReturn = useRef<"attach" | "composer">("attach");
@@ -193,6 +205,9 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
 
   /** 화면 상태의 기준은 viewRef다. 바꾸면 곧바로 ref에 반영해(렌더를 기다리지 않아) 이어지는 호출이 최신 version을 쓴다. */
   const putView = useCallback((next: ResearchView) => {
+    // 오른쪽 창이 닫힌 동안 칸이 새로 채워지면 버튼에 점을 단다(처음 읽을 때는 이전 값이 없어 달지 않는다).
+    const prev = viewRef.current;
+    if (prev && !slotsOpenRef.current && newlyFilled(prev.slots, next.slots).length > 0) setUnseen(true);
     viewRef.current = next;
     setView(next);
   }, []);
@@ -209,6 +224,27 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const warn = useCallback((text: string) => setNotice({ text, loud: true }), []);
 
   const toList = useCallback(() => router.replace("/volunteer"), [router]);
+  // 히어로(맡은 직후)는 대화가 비어 있는 동안이다. 두 창의 열림이 이 값을 쓴다.
+  const hero =
+    !!view && view.stage === "hero" && view.messages.length === 0 && optimistic.length === 0 && !uploadingThumb && !thinking;
+  // 두 창(왼쪽 대기열·내 담당, 오른쪽 모은 정보)의 열림과 기억.
+  const panels = usePanels({ hero });
+  useEffect(() => {
+    slotsOpenRef.current = panels.slotsOpen;
+  }, [panels.slotsOpen]);
+  // 왼쪽 창 데이터. 열 때 목록을 한 번 읽는다(401이면 첫 화면으로).
+  const sideToggleRef = useRef<HTMLButtonElement>(null);
+  const queueHeadingRef = useRef<HTMLHeadingElement>(null);
+  const mineHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pane = useSidePane({
+    toggleRef: sideToggleRef,
+    queueHeadingRef,
+    mineHeadingRef,
+    open: panels.mineOpen,
+    setOpen: panels.setMine,
+    onUnauthorized: toList,
+    say,
+  });
 
   // ----- 불러오기 -----
 
@@ -386,9 +422,6 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     return () => observer?.disconnect();
   }, [load.kind]);
 
-  const hero =
-    !!view && view.stage === "hero" && view.messages.length === 0 && optimistic.length === 0 && !uploadingThumb && !thinking;
-
   // 히어로 → 대화: 입력창이 가운데에서 아래로 내려앉는다(같은 DOM, 위치만 움직임).
   const wasHero = useRef<boolean | null>(null);
   const heroTop = useRef<number | null>(null);
@@ -415,19 +448,43 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     sendRef.current?.focus();
   }, [editing, view?.review.status]);
 
-  // 패널이 열린 채 Esc를 누르면 닫고 버튼으로 돌아간다.
+  // 겹쳐 열린 오른쪽 창(1179px 이하, 히어로)은 Esc로 닫고 초점을 버튼으로 돌려준다. 붙어 있는 창(1180px 이상 대화)은 그대로 둔다.
+  const slotsOverlay = !panels.wide || hero;
   useEffect(() => {
-    if (!panelOpen) return;
+    if (!panels.slotsOpen || !slotsOverlay) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      // 패널 안에 있던 초점은 패널을 열었던 버튼으로 돌려준다(패널이 숨겨지면 초점이 body로 떨어진다).
-      const inside = document.getElementById(PANEL_ID)?.contains(document.activeElement) ?? false;
-      setPanelOpen(false);
-      if (inside) panelToggleRef.current?.focus();
+      panels.setSlots(false);
+      panelToggleRef.current?.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelOpen]);
+  }, [panels, slotsOverlay]);
+
+  // "더 보기" 메뉴: Esc나 바깥을 누르면 닫고 초점을 "더 보기"로 돌려준다.
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = () => {
+      setMoreOpen(false);
+      moreToggleRef.current?.focus();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && (document.getElementById("vc-more")?.contains(target) || moreToggleRef.current?.contains(target))) return;
+      setMoreOpen(false);
+      // 초점은 항상 "더 보기"로 돌아온다(누른 곳이 받은 초점은 이 한 번 덮는다).
+      window.setTimeout(() => moreToggleRef.current?.focus(), 0);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer);
+    };
+  }, [moreOpen]);
 
   // ----- 서버 호출 -----
 
@@ -1001,6 +1058,42 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     [view, shown],
   );
 
+  // ----- "모은 정보" 칸 누르기: 그 칸의 마지막 질문 말풍선으로 스크롤하고 초점을 옮긴다(서버 호출 없음) -----
+
+  const performJump = useCallback((seq: number) => {
+    const el = document.getElementById(`vc-q-${seq}`);
+    if (!el) return;
+    // 직접 올려 본 것처럼 취급해 새 말풍선이 와도 끌려 내려가지 않고, 이 스크롤이 맨 아래 고정을 풀지 않는다.
+    stick.current = false;
+    ignoreScrollUntil.current = Date.now() + 900;
+    el.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+    el.focus({ preventScroll: true });
+  }, []);
+
+  // 접힌 목록을 연 다음 그려지면 옮긴다.
+  useEffect(() => {
+    if (pendingJump.current === null || !foldOpen) return;
+    const seq = pendingJump.current;
+    pendingJump.current = null;
+    performJump(seq);
+  }, [foldOpen, performJump]);
+
+  const jumpTo = (slotKey: SlotKey) => {
+    const seq = hero ? null : lastQuestionSeq(shown, slotKey);
+    if (seq === null) {
+      say("아직 묻지 않았어요");
+      return;
+    }
+    // 좁은 화면에서는 오른쪽 창이 대화를 덮으므로 닫은 뒤 옮긴다.
+    if (!panels.wide) panels.setSlots(false);
+    if (seq <= fold.foldedUpTo && !foldOpen) {
+      pendingJump.current = seq;
+      setFoldOpen(true);
+      return;
+    }
+    performJump(seq);
+  };
+
   // ----- 그리기 -----
 
   if (load.kind === "done") {
@@ -1073,32 +1166,45 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
           : "답을 적거나 사진을 올려 주세요";
 
   return (
-    <div ref={stageRef} className={`vol-chat vc-stage ${hero ? "is-hero" : "is-chat"}`} data-testid="research-stage" data-mode={hero ? "hero" : "chat"}>
+    <div ref={stageRef} className={`vol-chat vc-stage ${hero ? "is-hero" : "is-chat"}${panels.mineOpen ? " has-mine" : ""}${panels.slotsOpen && !hero ? " has-slots" : ""}`} data-testid="research-stage" data-mode={hero ? "hero" : "chat"}>
       <ResearchTopBar
         ref={headingRef}
         title={request.product}
         detail={detailLine}
         badge={badge}
-        panelOpen={panelOpen}
+        panelOpen={panels.slotsOpen}
         panelSummary={`필수 ${progress.filled}/${progress.total}`}
-        onTogglePanel={() => setPanelOpen((value) => !value)}
+        onTogglePanel={() => {
+          if (!panels.slotsOpen) {
+            setUnseen(false);
+            // 좁은 화면에서는 한 번에 한 창만 보이므로 "더 보기" 메뉴도 접는다.
+            if (!panels.wide) setMoreOpen(false);
+          }
+          panels.toggleSlots();
+        }}
         panelId={PANEL_ID}
         toggleRef={panelToggleRef}
+        sideOpen={panels.mineOpen}
+        onToggleSide={panels.toggleMine}
+        sideId={SIDE_PANE_ID}
+        sideToggleRef={sideToggleRef}
+        unseen={unseen && !panels.slotsOpen}
+        moreOpen={moreOpen}
+        onToggleMore={() => {
+          // 좁은 화면에서는 메뉴를 열면 오른쪽 창을 닫는다(같은 이름의 [요청 내려놓기]가 동시에 보이지 않게).
+          if (!moreOpen && !panels.wide) panels.setSlots(false);
+          setMoreOpen((value) => !value);
+        }}
+        moreId="vc-more"
+        moreToggleRef={moreToggleRef}
+        onRelease={() => void release()}
+        releasing={releasing}
       />
       <div className="vc-body">
         <HeroBackdrop variant={hero ? "hero" : "chat"} />
+        <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
         <main className="vc-main">
-          {hero && (
-            <div className="vc-hero-copy">
-              <StatusPill text={`요청을 맡았어요 · 이용자: “${request.product}”`} />
-              <h2 className="vc-hero-title">
-                {subject} 구매경험
-                <br />
-                리서치 어시스턴트
-              </h2>
-              <p className="vc-hero-sub">구매했던 경험을 시각장애인 유저에게 공유해 봐요.</p>
-            </div>
-          )}
+          {hero && <HeroCopy subject={subject} pill={`요청을 맡았어요 · 이용자: “${request.product}”`} />}
           {!hero && <CurrentQuestionLine slot={slot} required={slot ? requiredSlots(view.purchase).includes(slot) : false} />}
           <div
             ref={scrollRef}
@@ -1205,10 +1311,11 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
           slots={view.slots}
           photoCount={photoCount}
           currentSlot={slot}
-          open={panelOpen}
+          open={panels.slotsOpen}
           reviewReady={reviewReady}
           onRelease={() => void release()}
           releasing={releasing}
+          onJump={jumpTo}
         />
       </div>
     </div>
