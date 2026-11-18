@@ -192,7 +192,10 @@ describe("POST /api/voice/chat (가짜 AI)", () => {
     expect(await registered.json()).toMatchObject({ queueNumber: 1, status: "waiting" });
   });
 
-  it("품목을 알아볼 수 없는 확정은 request 없이 돌려준다(기기 안 목록에만 남는다)", async () => {
+  it("품목 사전에 없는 물건도 확정되면 request를 돌려주고, 그 request로 접수된다(A6)", async () => {
+    vi.stubEnv("STORE_MODE", "memory");
+    requestStore.resetRequestStoresForTest();
+    const id = sessionId();
     const history = [
       user(VOICE_START_MESSAGE),
       ai("어떤 상품을 찾으세요?"),
@@ -202,10 +205,19 @@ describe("POST /api/voice/chat (가짜 AI)", () => {
       ai("전기밥솥, 예산 5만 원. 이 내용으로 구매 요청을 등록할까요?", { status: "confirming" }),
     ];
     const body = await (
-      await POST(voiceRequest({ sessionId: sessionId(), message: "네", history }))
+      await POST(voiceRequest({ sessionId: id, message: "네", history }))
     ).json();
     expect(body.status).toBe("done");
-    expect(body).not.toHaveProperty("request");
+    expect(body.request).toEqual({ product: "전기밥솥", budget: "5만 원", condition: "정하지 않음" });
+    const registered = await REGISTER(
+      new NextRequest(`${ORIGIN}/api/requests`, {
+        method: "POST",
+        body: JSON.stringify({ clientRequestId: id, ...body.request }),
+        headers: { "x-forwarded-for": freshClient() },
+      }),
+    );
+    expect(registered.status).toBe(201);
+    expect(await registered.json()).toMatchObject({ queueNumber: 1, status: "waiting" });
   });
 
   describe("입력 검사(원본 메시지 그대로)", () => {
@@ -486,9 +498,18 @@ describe("toQueueRequest(확정 요청 → 접수 본문)", () => {
     expect(toQueueRequest("헤드셋", "이 원하는 헤드셋")?.budget).toBe("정하지 않음");
   });
 
-  it("품목을 알아볼 수 없으면 null(접수가 422로 거절하는 요청)", () => {
-    expect(toQueueRequest("전기밥솥", "소형 전기밥솥 5만 원")).toBeNull();
+  it("품목 사전에 없는 물건은 product를, product가 비면 summary를 그대로 쓴다(A6)", () => {
+    expect(toQueueRequest("전기밥솥", "소형 전기밥솥 5만 원")).toEqual({
+      product: "전기밥솥",
+      budget: "5만 원",
+      condition: "정하지 않음",
+    });
+    expect(toQueueRequest("", "소형 전기밥솥 5만 원")?.product).toBe("소형 전기밥솥 5만 원");
+  });
+
+  it("product와 summary가 모두 비었을 때만 null", () => {
     expect(toQueueRequest("", "")).toBeNull();
+    expect(toQueueRequest("  ", " ")).toBeNull();
   });
 
   it("접수 상한(200자)에 맞게 자른다", () => {

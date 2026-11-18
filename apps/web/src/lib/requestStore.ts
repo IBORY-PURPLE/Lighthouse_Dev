@@ -24,7 +24,8 @@ export interface RegisterInput {
   budget: string;
   condition: string;
   brand: string | null;
-  item: string;
+  /** 품목 사전으로 알아본 품목. 사전에 없는 물건이면 null이다(A6). */
+  item: string | null;
   conditionKind: ConditionKind | null;
 }
 
