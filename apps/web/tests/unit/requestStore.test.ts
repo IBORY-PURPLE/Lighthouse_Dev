@@ -25,6 +25,7 @@ function input(clientRequestId: string, overrides: Partial<RegisterInput> = {}):
     brand: "Sony",
     item: "헤드셋",
     conditionKind: "new",
+    deviceId: null,
     ...overrides,
   };
 }

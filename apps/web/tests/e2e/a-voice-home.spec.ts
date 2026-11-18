@@ -142,6 +142,151 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     await volunteer.screenshot({ path: "test-results/voice-volunteer-queue.png" });
   });
 
+  test("기기 두 대에서 보낸 요청은 기기마다 자기 것만 내 구매 요청 목록에 보인다", async ({ browser }) => {
+    const mark = randomUUID().slice(0, 8);
+    const productA = `기기A 키보드 ${mark}`;
+    const productB = `기기B 마우스 ${mark}`;
+    const open = async () => {
+      const context = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": `test-${randomUUID()}` } });
+      const page = await context.newPage();
+      await installFakeSpeech(page);
+      await installFakeSynthesis(page);
+      return { context, page };
+    };
+    const send = (page: Page, product: string) =>
+      page.request.post("/api/requests", {
+        data: { clientRequestId: randomUUID(), product, budget: BUDGET, condition: "새 제품" },
+      });
+
+    const a = await open();
+    const b = await open();
+    try {
+      expect((await send(a.page, productA)).status()).toBe(201);
+      expect((await send(b.page, productB)).status()).toBe(201);
+      // 쿠키는 기기마다 따로 심긴다.
+      const cookieOf = async (context: typeof a.context) =>
+        (await context.cookies()).find((cookie) => cookie.name === "lh_device");
+      const cookieA = await cookieOf(a.context);
+      const cookieB = await cookieOf(b.context);
+      // SameSite=lax는 단위 시험이 헤더로 확인한다(page.request의 쿠키 해석기는 소문자 lax를 None으로 읽는다).
+      expect(cookieA).toMatchObject({ httpOnly: true, path: "/" });
+      expect(cookieA?.value).not.toBe(cookieB?.value);
+
+      for (const [device, mine, other] of [
+        [a, productA, productB],
+        [b, productB, productA],
+      ] as const) {
+        await device.page.goto("/");
+        await device.page.getByRole("button", { name: "저장된 상품 목록" }).click();
+        await expect(device.page.locator("#list")).toHaveClass(/active/);
+        await expect(device.page.locator("#requests .card", { hasText: mine })).toHaveCount(1);
+        await expect(device.page.locator("#requests .card", { hasText: other })).toHaveCount(0);
+      }
+      // 서버가 이 기기 목록을 기준으로 주므로 다른 기기 요청 번호의 단건 조회도 막힌다.
+      const listA = (await (await a.page.request.get("/api/requests")).json()).items as { requestId: string }[];
+      expect(listA).toHaveLength(1);
+      expect((await b.page.request.get(`/api/requests/${listA[0].requestId}`)).status()).toBe(404);
+      expect((await a.page.request.get(`/api/requests/${listA[0].requestId}`)).status()).toBe(200);
+    } finally {
+      await a.context.close();
+      await b.context.close();
+    }
+  });
+
+  test("쿠키 없는 새 기기가 화면 대화로 첫 요청을 내도 기기 쿠키는 하나고 목록에는 그 요청 카드가 한 장만 남는다", async ({ browser }) => {
+    const context = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": `test-${randomUUID()}` } });
+    const page = await context.newPage();
+    try {
+      await installFakeSpeech(page);
+      await installFakeSynthesis(page);
+      await page.goto("/");
+      await page.getByRole("button", { name: "상품 요청", exact: true }).click();
+      await heardAI(page, "어떤 상품을 찾으세요?");
+      await say(page, "sony 헤드셋");
+      await heardAI(page, "예산은 얼마인가요?");
+      await say(page, BUDGET);
+      await heardAI(page, "sony 헤드셋, 예산 10만 원 이하. 이 내용으로 구매 요청을 등록할까요?");
+      await say(page, "네");
+      await expect(page.locator("#list")).toHaveClass(/active/);
+      await expect.poll(async () => ((await (await page.request.get("/api/requests")).json()).items as unknown[]).length).toBe(1);
+      expect((await context.cookies()).filter((cookie) => cookie.name === "lh_device")).toHaveLength(1);
+      // 접수 응답이 번호를 저장한 뒤 다시 열어도 카드는 한 장이다(접수 중 카드와 서버 카드가 겹치지 않는다).
+      await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("lh-requests") || "[]")[0]?.requestId ?? "")).not.toBe("");
+      await page.reload();
+      await page.getByRole("button", { name: "저장된 상품 목록" }).click();
+      await expect(page.locator("#requests .card", { hasText: "sony 헤드셋" })).toHaveCount(1);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("서버가 전체 목록(complete)이라고 알리면 서버에 없는 번호는 한 건씩 물어 400·404인 기록만 지운다. 기기 쿠키 전 요청과 번호 없는 기록은 남긴다. 전체가 아니면 그대로 둔다", async ({ browser }) => {
+    // 이 화면은 /sw.js를 등록하면 page.route가 요청을 가로채지 못한다. 서비스 워커를 막은 새 기기로 시험한다.
+    const context = await browser.newContext({
+      serviceWorkers: "block",
+      extraHTTPHeaders: { "x-forwarded-for": `test-${randomUUID()}` },
+    });
+    const page = await context.newPage();
+    let complete = true;
+    let gets = 0;
+    await page.route("**/api/requests", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      gets += 1;
+      return route.fulfill({ json: { items: [], complete } });
+    });
+    // 기기 쿠키 전에 접수한 요청(주인 기기 없음)은 기기 목록에 없지만 단건 조회는 된다. 서버에서 지워진 요청은 404다.
+    const LEGACY = "11111111-1111-4111-8111-111111111111";
+    const DELETED = "22222222-2222-4222-8222-222222222222";
+    await page.route("**/api/requests/*", (route) => {
+      const url = route.request().url();
+      if (url.endsWith(LEGACY)) {
+        return route.fulfill({
+          json: { requestId: LEGACY, queueNumber: 1, status: "done", product: "기기 쿠키 전 요청", review: "봉사자가 확인한 리뷰 문단" },
+        });
+      }
+      if (url.endsWith(DELETED)) return route.fulfill({ status: 404, json: { error: "not_found", persistent: true } });
+      return route.fallback();
+    });
+    await page.addInitScript(
+      ({ legacy, deleted }) => {
+        if (localStorage.getItem("lh-requests")) return;
+        localStorage.setItem(
+          "lh-requests",
+          JSON.stringify([
+            { cid: "c-1", requestId: "gone-1", product: "서버에 없는 요청", summary: "x", date: "2026. 11. 18.", status: "waiting" },
+            { cid: "c-2", product: "접수 중인 요청", summary: "x", date: "2026. 11. 18.", status: "waiting" },
+            { cid: "c-3", requestId: legacy, product: "기기 쿠키 전 요청", summary: "x", date: "2026. 11. 18.", status: "waiting" },
+            { cid: "c-4", requestId: deleted, product: "서버에서 지워진 요청", summary: "x", date: "2026. 11. 18.", status: "waiting" },
+          ]),
+        );
+      },
+      { legacy: LEGACY, deleted: DELETED },
+    );
+    await installFakeSpeech(page);
+    await installFakeSynthesis(page);
+    await page.goto("/");
+    // 전체 목록이 아니면(저장소 폴백 등) 서버가 빈 목록을 줘도 기록을 지키는 쪽이다.
+    complete = false;
+    await page.getByRole("button", { name: "저장된 상품 목록" }).click();
+    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
+    await expect.poll(() => gets).toBeGreaterThanOrEqual(2);
+    await page.waitForTimeout(300);
+    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
+    complete = true;
+    await page.evaluate(() => (window as unknown as { refreshRequests: () => Promise<void> }).refreshRequests());
+    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(0);
+    await expect(page.locator("#requests .card", { hasText: "서버에서 지워진 요청" })).toHaveCount(0);
+    await expect(page.locator("#requests .card", { hasText: "접수 중인 요청" })).toHaveCount(1);
+    // 기기 쿠키 전 요청은 남고, 단건 조회로 받은 상태(done)와 리뷰로 바뀐다.
+    await expect(page.locator("#requests .card", { hasText: "기기 쿠키 전 요청" })).toHaveCount(1);
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("lh-requests") || "[]"));
+    expect(stored.find((x: { requestId?: string }) => x.requestId === LEGACY)).toMatchObject({
+      status: "done",
+      review: "봉사자가 확인한 리뷰 문단",
+    });
+    await context.close();
+  });
+
   test("저장된 상품 상세에는 검증 리뷰 한 문단만 있고 후보 목록·구매 링크·가격이 없다", async ({ page }) => {
     await openVoiceHome(page);
     await page.getByRole("button", { name: "저장된 상품 목록" }).click();

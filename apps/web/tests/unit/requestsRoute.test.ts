@@ -156,6 +156,8 @@ describe("POST /api/requests (메모리 저장소)", () => {
       brand: "Sony",
       item: "헤드셋",
       conditionKind: "used",
+      // 서명 비밀(DEMO_ACCESS_CODE)이 없으면 기기를 구분하지 못한다.
+      deviceId: null,
     });
   });
 
@@ -357,6 +359,7 @@ describe("GET /api/requests/[requestId] (메모리 저장소)", () => {
       storeKind: () => "supabase",
       register: vi.fn(),
       get: () => Promise.reject(new requestStore.StoreUnavailableError("down")),
+      getForDevice: () => Promise.reject(new requestStore.StoreUnavailableError("down")),
     });
     const response = await getRequest(randomUUID());
     expect(response.status).toBe(503);

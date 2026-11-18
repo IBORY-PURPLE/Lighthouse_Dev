@@ -42,6 +42,7 @@ async function claimed(volunteerId = "d-0123456789abcdef"): Promise<{ id: string
     brand: "Sony",
     item: "헤드셋",
     conditionKind: "new",
+    deviceId: null,
   });
   expect(await requests.claim(reg.requestId, volunteerId)).toBe("claimed");
   return { id: reg.requestId, volunteerId };
@@ -74,7 +75,7 @@ describe("메모리 열기", () => {
     expect((await research.open(crypto.randomUUID(), newVol())).outcome).toBe("not_found");
     const waiting = await requests.register({
       clientRequestId: crypto.randomUUID(), product: "키보드", budget: "5만", condition: "새 제품",
-      brand: null, item: "키보드", conditionKind: "new",
+      brand: null, item: "키보드", conditionKind: "new", deviceId: null,
     });
     expect((await research.open(waiting.requestId, newVol())).outcome).toBe("not_in_progress");
     const c = await claimed(newVol());
