@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getLlmMode } from "@/lib/llm";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
+import { readLimitedText } from "@/lib/readLimited";
 import {
   callVoiceAI,
   readVoiceBody,
   toQueueRequest,
+  voiceDetails,
   type VoiceTurn,
 } from "@/lib/voiceChat";
 
@@ -25,24 +27,6 @@ function failure(status: number, error: string, headers: Record<string, string> 
   return NextResponse.json({ error }, { status, headers: { ...NO_STORE, ...headers } });
 }
 
-/** 크기를 밝히지 않은 본문도 있으므로 읽으면서 끊는다. */
-async function readLimitedText(request: NextRequest): Promise<string | null> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const pieces: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return Buffer.concat(pieces).toString("utf8");
-    size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
-      await reader.cancel();
-      return null;
-    }
-    pieces.push(value);
-  }
-}
-
 async function handleChat(request: NextRequest, note: (text: string) => void) {
   const limit = checkRateLimit(clientKey(request.headers));
   if (!limit.allowed) {
@@ -53,7 +37,7 @@ async function handleChat(request: NextRequest, note: (text: string) => void) {
 
   let raw: string | null;
   try {
-    raw = await readLimitedText(request);
+    raw = await readLimitedText(request, MAX_BODY_BYTES);
   } catch {
     return failure(400, "요청 형식 오류");
   }
@@ -78,7 +62,10 @@ async function handleChat(request: NextRequest, note: (text: string) => void) {
     const queue =
       result.status === "done" ? toQueueRequest(result.product, result.summary) : null;
     if (result.status === "done" && !queue) note(" queue=skipped");
-    return NextResponse.json(queue ? { ...result, request: queue } : result, {
+    // 이용자가 확인한 요약과 질문·답을 접수에 실어 보낸다(화면은 request를 그대로 접수로 보낸다). 로그에는 글을 남기지 않는다.
+    const details = queue ? voiceDetails(next, result.summary) : null;
+    const request = queue ? (details ? { ...queue, details } : queue) : null;
+    return NextResponse.json(request ? { ...result, request } : result, {
       headers: NO_STORE,
     });
   } catch (error) {

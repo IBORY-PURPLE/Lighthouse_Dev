@@ -200,6 +200,9 @@ const hasUnknownModel = (text: string, material: readonly string[] | undefined) 
 
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
 
+// 전화번호 모양: 휴대폰·지역번호(010-1234-5678, 02 123 4567, +82 10…), 대표번호(1588-1234).
+export const PHONE = /(?<!\d)0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|\+82[-\s.]?\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|(?<!\d)1[5-9]\d{2}[-\s.]\d{4}(?!\d)/;
+
 export function clip(value: string, max: number): string {
   const chars = [...value];
   return chars.length <= max ? value : `${chars.slice(0, max - 1).join("").trimEnd()}…`;

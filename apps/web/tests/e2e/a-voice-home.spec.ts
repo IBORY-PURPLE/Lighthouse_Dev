@@ -104,6 +104,14 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
       product,
       budget: BUDGET,
       condition: "정하지 않음",
+      // 이용자가 확인한 요약과 질문·답(봉사자 브리핑). 확인 질문과 마지막 동의는 뺀다.
+      details: {
+        summary: `${product}, 예산 ${BUDGET}`,
+        qa: [
+          { q: "어떤 상품을 찾으세요?", a: product },
+          { q: "예산은 얼마인가요?", a: BUDGET },
+        ],
+      },
     });
 
     // 원본 흐름 그대로: 읽어 준 뒤 목록 화면으로 가고 기기 안 목록에 카드가 생긴다.

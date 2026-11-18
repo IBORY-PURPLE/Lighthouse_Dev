@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { BenefitResults } from "./BenefitResults";
 import { FoldedTopic } from "./FoldedTopic";
 import { GuideCard } from "./GuideCard";
@@ -9,9 +9,11 @@ import { MessageBubble } from "./MessageBubble";
 import { ModelChips } from "./ModelChips";
 import { PhotoBubble } from "./PhotoBubble";
 import { ProductCards } from "./ProductCards";
+import { RequestBrief } from "./RequestBrief";
 import { Thinking } from "./Thinking";
 import {
   altNames,
+  bodyKind,
   mergeBenefitRuns,
   checkedUrls,
   chipsOf,
@@ -28,6 +30,7 @@ import {
   type ThinkingKind,
 } from "@/lib/researchChatView";
 import type { ChatMessage, PhotoView, SlotMap } from "@/lib/researchClient";
+import type { BriefStep } from "@/lib/volunteerView";
 
 export interface ChatActions {
   pickChip: (chip: ChipView) => void;
@@ -36,6 +39,13 @@ export interface ChatActions {
   noAlts: () => void;
   checkLink: (url: string) => void;
   removePhoto: (photo: PhotoView) => void;
+}
+
+/** 이용자 요청 카드(brief 메시지 자리에 그린다). done이면 버튼 없이 전부 펼쳐 보인다. */
+export interface BriefView {
+  steps: BriefStep[];
+  done: boolean;
+  onDone: () => void;
 }
 
 export interface OptimisticMessage {
@@ -55,6 +65,7 @@ export function ChatLog({
   thinking,
   uploadingThumb,
   actions,
+  brief,
   children,
 }: {
   messages: ChatMessage[];
@@ -67,6 +78,7 @@ export function ChatLog({
   thinking: { kind: ThinkingKind; startedAt: number } | null;
   uploadingThumb: string | null;
   actions: ChatActions;
+  brief?: BriefView;
   children?: ReactNode;
 }) {
   const names = altNames(slots);
@@ -88,6 +100,17 @@ export function ChatLog({
         <MessageBubble key={message.seq} role="volunteer">
           <PhotoBubble photo={index === -1 ? null : photos[index]} index={index + 1} onRemove={actions.removePhoto} />
         </MessageBubble>
+      );
+    }
+    // 이용자 요청 카드는 이용자가 말한 글이라 AI 말풍선(.vc-row--ai) 안에 넣지 않고, 안내 말풍선 바로 아래 따로 그린다.
+    if (brief && bodyKind(body) === "brief") {
+      return (
+        <Fragment key={message.seq}>
+          <MessageBubble role={message.role} tag={tagLabel(message)} text={text} />
+          <div className="vc-row vc-brief-row vc-enter">
+            <RequestBrief steps={brief.steps} done={brief.done} onDone={brief.onDone} />
+          </div>
+        </Fragment>
       );
     }
     const isQuestion = message.role === "ai" && message.tag === "question";

@@ -24,6 +24,8 @@ export const PENDING_NOTICE = "먼저 위에서 물어본 내용을 확인해 �
 export const REASK_PREFIX = "한 번만 더 알려 주세요. ";
 export const REVIEW_MORE = "좋아요. 더 알려 주실 내용을 적어 주세요. 칸은 오른쪽 패널에서 고칠 수도 있어요.";
 export const PURCHASE_FIXED = "구매 여부는 이미 정해졌어요.";
+/** 구매 여부를 정한 직후, 기종 질문 앞에 놓는 표시 메시지 글. 이용자가 말한 내용은 넣지 않는다(보낸 대화 기록이 봉사자 기기에 글로 남는다). */
+export const BRIEF_NOTE = "기종을 묻기 전에 이용자가 말한 요청을 하나씩 확인해요.";
 export const NO_CONFIRM = "확인할 내용이 없어요.";
 export const LINK_NOTE = "AI가 열 수 없는 주소라 직접 확인이 필요해요. 확인했으면 눌러 주세요.";
 export const LINK_FULL = "확인을 기다리는 링크가 5개예요. 앞의 링크 카드에서 [확인했어요]를 눌러 주세요.";

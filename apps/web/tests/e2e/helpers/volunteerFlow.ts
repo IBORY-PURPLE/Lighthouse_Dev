@@ -151,6 +151,20 @@ export async function claimDemo(page: Page, quote: string): Promise<void> {
   ).toBeVisible();
 }
 
+/**
+ * 구매 여부를 고른 뒤 나오는 이용자 요청 카드를 끝까지 넘기고 [다 봤어요 · 질문 이어 가기]를 누른다.
+ * 카드가 여러 장이면 [한 번에 모두 보기]로 연다. 끝나면 카드는 버튼 없이 펼쳐진 채 남고 입력창이 열린다.
+ * (새 단계를 거치는 것이다. 기존 시험의 기준을 낮추는 것이 아니다.)
+ */
+export async function passBrief(page: Page): Promise<void> {
+  const brief = page.getByTestId("request-brief");
+  await expect(brief).toBeVisible();
+  const openAll = brief.getByRole("button", { name: "한 번에 모두 보기" });
+  if (await openAll.isVisible()) await openAll.click();
+  await brief.getByRole("button", { name: "다 봤어요 · 질문 이어 가기" }).click();
+  await expect(brief).toHaveAttribute("data-done", "true");
+}
+
 /** 화면 증거: 저장소 루트 test-results/demo6-shots/<name>.png. 들어오는 움직임이 끝난 뒤 찍는다. */
 export async function shot(page: Page, name: string): Promise<void> {
   await settleAnimations(page);

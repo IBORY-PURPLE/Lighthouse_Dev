@@ -85,8 +85,9 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 이용자 기기의 지난 요청 표시 | 이용자 `localStorage` `lh.request.v1` | "새 요청하기"까지 |
 | 리서치 챗 대화, 칸 7개 값, 구매 여부, 추가 답, 검수한 리뷰 문단, 구매 인증 사진 작은 썸네일(JPEG, 최대 3장) | Supabase `research_sessions`·`research_messages`·`research_turns`·`research_photos`(v2.2 초안) | 보내기·내려놓기 때 즉시 삭제(DB 트리거). 6시간 활동이 없으면 요청을 대기열로 돌리고 같이 삭제. §8.3 |
 | 보낸 요청의 대화 이력(글만, 사진은 "사진을 올렸어요" 글로) | 보낸 봉사자 기기 `localStorage` `lh.vol.sentHistory.v1` | 보낸 날부터 30일 뒤 화면이 지움(A8 이용자 결정 2026-11-17). 다른 기기에서는 보이지 않는다 |
-| 리서치 챗 AI 호출 기록(대화 턴·추가 질문·리뷰 문단의 요청·응답 글) | OpenAI 대시보드 Logs(`store: true`, `metadata.feature` = research_turn·research_ask·research_review, `src/lib/openaiLog.ts`) | OpenAI 보관 기간을 따른다. `OPENAI_STORE_LOGS=off`면 남기지 않는다(이용자 요청 2026-11-17). 웹 검색·이용자 음성 대화는 `store: false` 그대로 |
+| 리서치 챗 AI 호출 기록(대화 턴·추가 질문·리뷰 문단의 요청·응답 글) | OpenAI 대시보드 Logs(`store: true`, `metadata.feature` = research_turn·research_ask·research_review, `src/lib/openaiLog.ts`) | OpenAI 보관 기간을 따른다. `OPENAI_STORE_LOGS=off`면 남기지 않는다(이용자 요청 2026-11-17). 웹 검색·이용자 음성 대화는 `store: false` 그대로. 이용자 질문·답(`이용자조건`)이 든 리뷰 문단 호출은 `OPENAI_STORE_LOGS`와 상관없이 `store: false`(대화 턴 AI에는 넘기지 않는다) |
 | 이용자 리뷰 도착 알림 구독(웹 푸시 endpoint·p256dh·auth) | Supabase `push_subscriptions`(요청 하나에 하나, 마이그레이션 20261120000000) | 리뷰를 보내 알림을 한 번 보내면 지운다. 요청이 지워지면 같이 지워진다(A13 이용자 결정 2026-11-17). 키 `VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`가 없으면 기능이 꺼진다 |
+| 이용자가 확인한 요약과 질문·답(봉사자 브리핑, 이용자가 말한 그대로. 요약 300자·질문 150자·답 200자·12짝 이하, 전화번호 모양은 "(전화번호 가림)") | Supabase `request_details`(요청 하나에 하나, 마이그레이션 20261122000000. 없으면 메모리) | 맡은 봉사자 1명에게만, 그 요청이 진행 중인 동안만 내보낸다. 요청이 `done`·`expired`가 되면 DB 트리거가 지우고 요청이 지워지면 함께 지워진다. 내려놓기·6시간 반환 때는 남긴다(다음 봉사자가 봐야 한다). 이용자 상태 조회·대기열·로그·봉사자 기기(`sentHistory`)에는 나가지 않는다. 이름·주소 같은 말은 가리지 못한다(이용자가 말한 그대로이므로 시연에서는 개인정보를 말하지 않는다) |
 | 이용자 기기의 요청 기록(대화 id·요청 번호·상태·리뷰) | 이용자 `localStorage` `lh-requests`, 알림 켬 여부 `lh-push` | 최근 20건. 목록을 열면 `GET /api/requests/{id}`로 상태·리뷰를 다시 묻는다 |
 | 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
 | (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
@@ -324,6 +325,17 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 | `release_request(p_request_id, p_volunteer_id)` | 맡은 본인일 때만 `waiting`으로, `volunteer_id`·`claimed_at` null, `release_count+1` | `released` / `not_yours` / `not_in_progress` / `not_found` |
 | `complete_request(p_request_id, p_volunteer_id, 결과 필드)` | 한 트랜잭션에서 `results` 삽입과 `status='done', done_at=now()`. 이미 `done`이고 본인 결과면 기존 행을 돌려줌(재전송해도 같은 결과) | `completed` / `existing` / `not_yours` / `not_in_progress` / `not_found` |
 
+**`request_details`** (마이그레이션 `20261122000000_request_details.sql`, 되돌리기 `supabase/rollback/20261122000000_request_details_down.sql`. 추가형이라 기존 표·함수를 바꾸지 않는다)
+
+| 열 | 형 | 비고 |
+|---|---|---|
+| `request_id` | uuid pk references requests(id) on delete cascade | 요청 하나에 하나. 서버는 처음 저장한 것을 지킨다(`ignoreDuplicates`) |
+| `summary` | text not null default '', 300자 이하 | 이용자가 확인한 요약 |
+| `qa` | jsonb not null default '[]', 배열·12짝 이하·16,000바이트 이하 | `[{q, a}]` 질문과 이용자 답 |
+| `created_at` | timestamptz default now() | |
+
+RLS 켬, 정책 없음, `anon`·`authenticated` 권한 회수, `service_role`만 select·insert·delete. 트리거 `request_details_drop_on_close`(`requests.status`가 `done`·`expired`로 바뀔 때 그 행을 지운다, `security invoker`)가 보관을 맡는다.
+
 - 동시 선택은 Postgres Read Committed에서 UPDATE의 WHERE를 다시 평가하는 성질로 막는다(먼저 누른 사람만 성공). advisory lock이나 SKIP LOCKED는 쓰지 않는다. 근거: https://www.postgresql.org/docs/current/transaction-iso.html
 - 반환 열 이름은 `out_`으로 시작하고 표 열은 별칭으로 한정한다. 반환 이름이 열 이름과 같으면 PL/pgSQL에서 "ambiguous" 오류가 난다.
 - 초안 SQL은 `tsd-review.md`의 근거 문서와 워크플로 산출물에 있다. 실제 Postgres에서 돌려 보기 전까지는 추정이다(§10, §13).
@@ -361,8 +373,10 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 
 | 경로 | 성공 | 실패 |
 |---|---|---|
-| `POST /api/requests` `{clientRequestId, product, budget, condition}` | 201 `{requestId, queueNumber, status:"waiting"}`, 같은 `clientRequestId` 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`, 401, 429, 503. 품목 사전(헤드셋)에 없는 물건도 받고 `item`은 null로 둔다(2026-11-18 A6, 전에는 422 `need_item`) |
+| `POST /api/requests` `{clientRequestId, product, budget, condition, details?}` | 201 `{requestId, queueNumber, status:"waiting"}`, 같은 `clientRequestId` 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`, 413 `too_large`(본문 32KB 초과), 401, 429, 503. 품목 사전(헤드셋)에 없는 물건도 받고 `item`은 null로 둔다(2026-11-18 A6, 전에는 422 `need_item`) |
 | `GET /api/requests/{id}` | 200 `{requestId, queueNumber, status, product}`. `status="done"`이면 `result:{candidateName, purchaseUrl, guide, summary}`를 덧붙임(플로우 C 경계) | 400, 404 `not_found`, 401, 429, 503 |
+
+- `details`는 선택이다: `{summary, qa:[{q, a}]}`(이용자 음성 대화가 확정할 때 서버가 `request`에 실어 주고 화면은 그대로 접수로 보낸다). 서버가 길이·개수·제어 문자·전화번호 모양을 거르고, 쓸 수 없는 `details`는 무시한 채 접수는 그대로 된다. 처음 접수된 대기 요청에만 `request_details`에 저장하며, 표가 없거나(마이그레이션 전) 저장이 실패해도 접수는 성공한다. 로그에는 ` details=saved|exists|none|ignored|unavailable|failed`만 남기고 글은 남기지 않는다. 이용자 상태 조회(`GET /api/requests/{id}`)와 대기열에는 `details`를 내보내지 않는다.
 
 세부(검사 순서, 낭독 문구, 다시 열기)는 플로우 A 계획(`docs/plans/2026-11-09-overnight/`)을 따른다.
 
@@ -372,7 +386,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 |---|---|---|---|
 | 1 | `GET /api/volunteer/queue` | 200 `{items:[{requestId, queueNumber, product, budget, condition, createdAt, waitingMinutes}], mine:[내가 맡은 in_progress]}`, 오래된 순 최대 20개 | 공통 |
 | 2 | `POST /api/volunteer/requests/{id}/claim` | 200 `{requestId, status:"in_progress", claimedAt, alreadyMine, request: VolunteerRequestView}` | 409 `already_claimed` / `already_done` / `expired`, 404 |
-| 3 | `GET /api/volunteer/requests/{id}` | 200 `VolunteerRequestView` + `status` | 403 `not_yours`, 404 |
+| 3 | `GET /api/volunteer/requests/{id}` | 200 `{request: VolunteerRequestView, result, details}` + `status`. `details`(`{summary, qa}` 또는 null)는 내가 진행 중인 요청에만 오고 보낸 뒤·저장된 글이 없을 때는 null | 403 `not_yours`, 404 |
 | 4 | `POST /api/volunteer/requests/{id}/release` (선택) | 200 `{requestId, status:"waiting"}` | 403 `not_yours`, 409 `not_in_progress` |
 | 5 | *(v2.2 초안에서 `POST /api/volunteer/requests/{id}/research/send`로 대체됨. 이 줄의 `/result`는 지웠다)* `POST /api/volunteer/requests/{id}/result` `{candidateName, purchaseUrl, guide, summary, summarySource, summaryEdited}` | 201 `{requestId, status:"done", sentAt, durationSeconds}`, 같은 봉사자 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`/`invalid_url`, 403 `not_yours`, 409 `not_in_progress`, 404 |
 
@@ -419,7 +433,7 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 | 항목 | 값 |
 |---|---|
 | 요청 | `{sessionId, message, reset, history}`. 원본 `{sessionId, message, reset}`에 `history: [{role, content}]`만 더했다. `reset`이면 history는 무시한다 |
-| 응답 | 200 `{reply, status, summary, product, request?}`. `status`는 `asking`·`confirming`·`done`. `request`는 `done`이고 `product`나 `summary`에 글이 있을 때 `{product, budget, condition}`(접수 본문 모양). 둘 다 비면 없다(로그 `queue=skipped`) |
+| 응답 | 200 `{reply, status, summary, product, request?}`. `status`는 `asking`·`confirming`·`done`. `request`는 `done`이고 `product`나 `summary`에 글이 있을 때 `{product, budget, condition, details?}`(접수 본문 모양). 둘 다 비면 없다(로그 `queue=skipped`). `details`는 서버가 받은 `history`에서 질문(AI가 묻거나 확인한 `asking`·`confirming` 답)과 바로 다음 이용자 말을 짝지어 만든 `{summary, qa}`이고, 마지막 동의 짝과 시작 문장은 뺀다 |
 | 실패 | 원본 메시지 그대로: 400(세션 식별자·메시지 길이·답변 비어 있음·대화가 길어짐), 503(키 없음), 500(AI 실패·시간 초과). 새로 더한 것: 400 `대화 기록 오류`·`요청이 너무 큽니다`, 429(주소당 분당 20회) |
 | 호출 | OpenAI Responses API. 모델 `OPENAI_MODEL`(없으면 `gpt-4.1-mini`), `max_output_tokens: 450`, JSON 모드, `store: false`, 25초 마감. 키는 `OPENAI_API_KEY` |
 | 상한 | 기록 36칸 미만(원본과 같다), 기록 한 칸 2000자, 이용자 문장 1000자, 본문 64KB |

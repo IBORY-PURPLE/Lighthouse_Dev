@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { priceStockViolations } from "../../src/lib/answerRules";
-import { claimDemo, enterAs, FIRST_DEMO_QUOTE, refill } from "./helpers/volunteerFlow";
+import { claimDemo, enterAs, FIRST_DEMO_QUOTE, passBrief, refill } from "./helpers/volunteerFlow";
 
 // 대화형 리서치 챗 한 사이클(실제 AI, 공개 주소). `npm run test:research-cycle`, BASE_URL이 필요하다.
 // 입장 → 시연용 요청 채우기 → 헤드셋 맡기 → 지금 묻는 칸(질문 n)에 맞춰 답하기 → 리뷰 만들기 → 검수 마치기 → 보내기 → 완료 화면.
@@ -88,6 +88,7 @@ test("공개 주소 리서치 챗 한 사이클: 맡기 → 질문 7개 → 리�
 
   // 히어로 → 구매했어요(AI 없음) → 질문 따라 답하기.
   await page.getByRole("group", { name: "빠른 답" }).getByRole("button", { name: "구매했어요", exact: true }).click();
+  await passBrief(page);
 
   let reviewProposed = false;
   for (let step = 0; step < 30 && !reviewProposed; step += 1) {

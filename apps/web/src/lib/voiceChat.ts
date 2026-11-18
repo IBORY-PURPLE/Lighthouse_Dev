@@ -1,6 +1,8 @@
 import "server-only";
 import { getLlmMode } from "@/lib/llm";
 import { parseRequest } from "@/lib/parseRequest";
+import { cleanRequestDetails } from "@/lib/requestDetails";
+import type { RequestDetailsView, RequestQa } from "@/lib/volunteerView";
 import { VOICE_INSTRUCTIONS } from "@/lib/voiceInstructions";
 
 // 이용자 음성 대화 한 턴(POST /api/voice/chat). apps/user-voice-ui/server.js의 /api/chat 계약을 옮겼다.
@@ -32,11 +34,12 @@ export interface VoiceResult {
   product: string;
 }
 
-/** 접수(POST /api/requests)가 받는 본문(clientRequestId 제외). */
+/** 접수(POST /api/requests)가 받는 본문(clientRequestId 제외). details는 이용자가 확인한 요약과 질문·답이다. */
 export interface QueueRequest {
   product: string;
   budget: string;
   condition: string;
+  details?: RequestDetailsView;
 }
 
 export type VoiceBody =
@@ -181,6 +184,37 @@ export function toQueueRequest(product: string, summary: string): QueueRequest |
     budget: (BUDGET_PHRASE.exec(summary || product)?.[0] ?? UNDECIDED).trim(),
     condition,
   };
+}
+
+// ---------- 봉사자 브리핑 ----------
+
+/**
+ * 확정한 대화(turns: 이용자 마지막 동의까지 포함)에서 질문·답 짝을 뽑는다. 이용자 화면과 지시문은 바꾸지 않고 서버가 history에서 읽는다.
+ * - 짝 = AI가 묻거나 확인한 칸(status asking·confirming의 reply)과 바로 다음 이용자 말. 시작 문장(VOICE_START_MESSAGE)은 짝이 아니다.
+ * - 마지막 짝(이용자의 최종 동의)은 뺀다. 확인 중에 고친 말은 남긴다.
+ * - 깨진 JSON 칸은 건너뛴다. 길이·개수·전화번호 정리는 cleanRequestDetails가 한다.
+ */
+export function voiceDetails(turns: VoiceTurn[], summary: string): RequestDetailsView | null {
+  const qa: RequestQa[] = [];
+  const last = turns.length - 1;
+  for (let index = 0; index < last; index += 1) {
+    const asked = turns[index];
+    const answer = turns[index + 1];
+    if (asked.role !== "assistant" || answer.role !== "user") continue;
+    if (index + 1 === last || answer.content === VOICE_START_MESSAGE) continue;
+    try {
+      const parsed = JSON.parse(asked.content) as { reply?: unknown; status?: unknown };
+      if (
+        typeof parsed.reply === "string" &&
+        (parsed.status === "asking" || parsed.status === "confirming")
+      ) {
+        qa.push({ q: parsed.reply, a: answer.content });
+      }
+    } catch {
+      // 깨진 칸은 건너뛴다.
+    }
+  }
+  return cleanRequestDetails({ summary, qa });
 }
 
 // ---------- 시험용 가짜 대화(LLM_MODE=mock) ----------

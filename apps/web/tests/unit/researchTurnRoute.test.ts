@@ -240,7 +240,9 @@ describe("POST …/research/turn", () => {
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data).toMatchObject({ version: 1, ai: "none", followUp: { search: "model" }, session: { stage: "chat", purchase: "bought" } });
-    expect(data.messages.map((message: { role: string }) => message.role)).toEqual(["volunteer", "ai"]);
+    // 봉사자 말풍선, 이용자 요청 확인 표시(brief), 기종 질문 순서다.
+    expect(data.messages.map((message: { role: string }) => message.role)).toEqual(["volunteer", "ai", "ai"]);
+    expect(data.messages[1]).toMatchObject({ tag: "brief", slot: null, body: { kind: "brief" } });
     expect(data.messages.at(-1)).toMatchObject({ tag: "question", slot: "model", body: { text: MODEL_QUESTION_BOUGHT } });
     expect(turnLogs().at(-1)).toMatch(/kind=turn ai=none in=0 out=0 ws=0$/);
   });
@@ -308,7 +310,7 @@ describe("POST …/research/turn", () => {
     expect(two.messages).toEqual(one.messages);
     expect(two.version).toBe(one.version);
     const view = await (await get(o.id, o.cookie)).json();
-    expect(view.messages).toHaveLength(2);
+    expect(view.messages).toHaveLength(3);
   });
 
   it("글 턴을 같은 clientTurnId로 다시 보내면 ai 표시도 첫 응답과 같다", async () => {

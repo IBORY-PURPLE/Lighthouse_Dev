@@ -8,6 +8,8 @@ import {
   chipsOf,
   currentSlot,
   failureText,
+  hasBrief,
+  holdAfterBrief,
   holdsRefsQuestion,
   imageSearchUrl,
   missingText,
@@ -22,6 +24,7 @@ import {
   requiredSlots,
   shortcutsOf,
   slotTag,
+  tagLabel,
   thinkingPhase,
 } from "@/lib/researchChatView";
 import { mergeMessages, mergeView, normalizeView, type ChatMessage } from "@/lib/researchClient";
@@ -275,5 +278,43 @@ describe("질문 7 보류(holdsRefsQuestion)", () => {
     // 새로 고친 뒤 진행 중이던 혜택 검색의 폴링이 카드 없이 끝나면(시간 초과) 서버 pending이 남아도 보류가 풀린다.
     const stuck = { slots: { benefits: filled }, messages: [question(1, "refs")], pending: { search: { kind: "benefits" } } };
     expect(holdsRefsQuestion(stuck, null, true)).toBe(false);
+  });
+});
+
+const brief = (seq: number): ChatMessage => ({ seq, role: "ai", tag: "brief", slot: null, body: { kind: "brief", text: "기종을 묻기 전에 이용자가 말한 요청을 하나씩 확인해요." } });
+
+describe("이용자 요청 카드(brief): holdAfterBrief·hasBrief·tagLabel", () => {
+  const log = [volunteer(1), brief(2), question(3, "model"), volunteer(4), question(5, "pros")];
+
+  it("brief 메시지가 있으면 hasBrief가 true다", () => {
+    expect(hasBrief(log)).toBe(true);
+    expect(hasBrief([volunteer(1), question(2, "model")])).toBe(false);
+    expect(hasBrief([])).toBe(false);
+  });
+
+  it("다 보기 전에는 첫 brief 메시지까지만 보인다(기종 질문 이후는 숨긴다)", () => {
+    expect(holdAfterBrief(log, false).map((message) => message.seq)).toEqual([1, 2]);
+  });
+
+  it("다 봤으면 전부 보인다. brief가 없으면 done과 상관없이 그대로다", () => {
+    expect(holdAfterBrief(log, true).map((message) => message.seq)).toEqual([1, 2, 3, 4, 5]);
+    const plain = [volunteer(1), question(2, "model")];
+    expect(holdAfterBrief(plain, false)).toEqual(plain);
+    expect(holdAfterBrief(plain, true)).toEqual(plain);
+  });
+
+  it("원본 배열을 바꾸지 않는다(서버 대화는 그대로, 화면이 잠시 숨길 뿐이다)", () => {
+    const copy = [...log];
+    holdAfterBrief(log, false);
+    expect(log).toEqual(copy);
+    expect(holdAfterBrief(log, true)).not.toBe(log);
+  });
+
+  it("brief가 둘이면 첫 번째까지만 보인다", () => {
+    expect(holdAfterBrief([brief(1), question(2, "model"), brief(3)], false).map((message) => message.seq)).toEqual([1]);
+  });
+
+  it("꼬리표는 \"이용자 요청\" · \"기종 질문 전에 확인\"이다", () => {
+    expect(tagLabel(brief(2))).toEqual({ chip: "이용자 요청", note: "기종 질문 전에 확인" });
   });
 });

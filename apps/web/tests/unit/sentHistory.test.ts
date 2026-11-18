@@ -32,6 +32,22 @@ describe("sentHistory(완료 건 대화 이력, 이 기기 30일)", () => {
     expect(JSON.stringify(lines)).not.toContain("p1");
   });
 
+  it("이용자 요청 확인 표시(brief)는 안내 글만 남고 이용자가 말한 글은 없다", () => {
+    const withBrief: ChatMessage[] = [
+      { seq: 1, role: "volunteer", body: { text: "구매했어요" } },
+      { seq: 2, role: "ai", tag: "brief", slot: null, body: { kind: "brief", text: "기종을 묻기 전에 이용자가 말한 요청을 하나씩 확인해요." } },
+      { seq: 3, role: "ai", tag: "question", slot: "model", body: { text: "어떤 기종을 쓰고 계세요?" } },
+    ];
+    const lines = toHistoryLines(withBrief);
+    expect(lines[1]).toEqual({
+      role: "ai",
+      chip: "이용자 요청",
+      note: "기종 질문 전에 확인",
+      text: "기종을 묻기 전에 이용자가 말한 요청을 하나씩 확인해요.",
+    });
+    expect(JSON.stringify(lines)).not.toMatch(/소니|헤드셋|예산|만 원/);
+  });
+
   it("저장한 이력을 읽고, 30일이 지나면 지운다", () => {
     const now = Date.now();
     saveSentHistory("req-1", messages, now);
