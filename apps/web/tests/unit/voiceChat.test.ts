@@ -94,6 +94,20 @@ describe("원본(apps/user-voice-ui)과의 일치", () => {
     expect(merged).toContain("rel:'manifest',href:'/manifest.webmanifest'");
     expect(merged).toContain("fetch('/api/push/key'");
   });
+
+  it("상세 화면(리뷰·진행 상황)은 음성 합성으로 읽지 않고 문단에 초점만 옮긴다(VoiceOver와 겹쳐 두 번 읽히지 않게)", () => {
+    const merged = readFileSync(path.join(ROOT, "web/public/voice/index.html"), "utf8");
+    const body = (name: string) => {
+      const start = merged.indexOf(`function ${name}(`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const end = merged.indexOf("\nfunction ", start + 1);
+      return merged.slice(start, end === -1 ? undefined : end);
+    };
+    for (const name of ["showReview", "openRequest"]) {
+      expect(body(name)).not.toMatch(/sayText\(|speechSynthesis/);
+      expect(body(name)).toContain(".focus()");
+    }
+  });
 });
 
 describe("POST /api/voice/chat (가짜 AI)", () => {
