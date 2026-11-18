@@ -89,8 +89,10 @@ describe("원본(apps/user-voice-ui)과의 일치", () => {
     }
     // 합병본은 목록이 이 기기의 요청 목록(진행 상황·리뷰 포함)을 서버에 묻고(2026-11-18 기기 쿠키로 구분), "아직 연결되지 않았다"는 옛 안내를 띄우지 않는다.
     // 요청마다 따로 묻던 옛 방식(GET /api/requests/{id} 반복)은 목록 한 번으로 바뀌었다(시험 변경).
+    // 다만 기기 목록에 없는 번호는 한 건씩 물어 400·404일 때만 지운다(기기 쿠키 전 요청은 남김, 2026-11-18 이용자 결정).
     expect(merged).toContain("fetch('/api/requests',{cache:'no-store'})");
     expect(merged).not.toContain("fetch('/api/requests/'+encodeURIComponent(item.requestId),{cache");
+    expect(merged).toContain("if(r.status===404||r.status===400){checked.set(x.requestId,null);return}");
     expect(merged).not.toContain("아직 연결되지 않았습니다");
     // 웹 앱(PWA)·웹 푸시(A13): head 태그와 알림 버튼은 스크립트로 붙인다(마크업은 원본과 같다).
     expect(merged).toContain("rel:'manifest',href:'/manifest.webmanifest'");
