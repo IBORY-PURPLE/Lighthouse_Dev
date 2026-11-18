@@ -222,7 +222,15 @@ describe("POST /api/voice/chat (가짜 AI)", () => {
       await POST(voiceRequest({ sessionId: id, message: "네", history }))
     ).json();
     expect(body.status).toBe("done");
-    expect(body.request).toEqual({ product: "전기밥솥", budget: "5만 원", condition: "정하지 않음" });
+    expect(body.request).toMatchObject({ product: "전기밥솥", budget: "5만 원", condition: "정하지 않음" });
+    // 브리핑(#61): 사전에 없는 물건도 이용자 질문·답이 접수 본문에 함께 실린다.
+    expect(body.request.details).toEqual({
+      summary: "전기밥솥, 예산 5만 원",
+      qa: [
+        { q: "어떤 상품을 찾으세요?", a: "전기밥솥" },
+        { q: "예산은 얼마인가요?", a: "5만 원" },
+      ],
+    });
     const registered = await REGISTER(
       new NextRequest(`${ORIGIN}/api/requests`, {
         method: "POST",
