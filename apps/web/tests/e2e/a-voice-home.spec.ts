@@ -193,6 +193,74 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     }
   });
 
+  test("쿠키 없는 새 기기가 화면 대화로 첫 요청을 내도 기기 쿠키는 하나고 목록에는 그 요청 카드가 한 장만 남는다", async ({ browser }) => {
+    const context = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": `test-${randomUUID()}` } });
+    const page = await context.newPage();
+    try {
+      await installFakeSpeech(page);
+      await installFakeSynthesis(page);
+      await page.goto("/");
+      await page.getByRole("button", { name: "상품 요청", exact: true }).click();
+      await heardAI(page, "어떤 상품을 찾으세요?");
+      await say(page, "sony 헤드셋");
+      await heardAI(page, "예산은 얼마인가요?");
+      await say(page, BUDGET);
+      await heardAI(page, "sony 헤드셋, 예산 10만 원 이하. 이 내용으로 구매 요청을 등록할까요?");
+      await say(page, "네");
+      await expect(page.locator("#list")).toHaveClass(/active/);
+      await expect.poll(async () => ((await (await page.request.get("/api/requests")).json()).items as unknown[]).length).toBe(1);
+      expect((await context.cookies()).filter((cookie) => cookie.name === "lh_device")).toHaveLength(1);
+      // 접수 응답이 번호를 저장한 뒤 다시 열어도 카드는 한 장이다(접수 중 카드와 서버 카드가 겹치지 않는다).
+      await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("lh-requests") || "[]")[0]?.requestId ?? "")).not.toBe("");
+      await page.reload();
+      await page.getByRole("button", { name: "저장된 상품 목록" }).click();
+      await expect(page.locator("#requests .card", { hasText: "sony 헤드셋" })).toHaveCount(1);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("서버가 전체 목록(complete)이라고 알리면 서버에 없는 번호의 기록은 지우고 번호 없는 기록은 남긴다. 전체가 아니면 그대로 둔다", async ({ browser }) => {
+    // 이 화면은 /sw.js를 등록하면 page.route가 요청을 가로채지 못한다. 서비스 워커를 막은 새 기기로 시험한다.
+    const context = await browser.newContext({
+      serviceWorkers: "block",
+      extraHTTPHeaders: { "x-forwarded-for": `test-${randomUUID()}` },
+    });
+    const page = await context.newPage();
+    let complete = true;
+    let gets = 0;
+    await page.route("**/api/requests", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      gets += 1;
+      return route.fulfill({ json: { items: [], complete } });
+    });
+    await page.addInitScript(() => {
+      if (localStorage.getItem("lh-requests")) return;
+      localStorage.setItem(
+        "lh-requests",
+        JSON.stringify([
+          { cid: "c-1", requestId: "gone-1", product: "서버에 없는 요청", summary: "x", date: "2026. 11. 18.", status: "waiting" },
+          { cid: "c-2", product: "접수 중인 요청", summary: "x", date: "2026. 11. 18.", status: "waiting" },
+        ]),
+      );
+    });
+    await installFakeSpeech(page);
+    await installFakeSynthesis(page);
+    await page.goto("/");
+    // 전체 목록이 아니면(저장소 폴백 등) 서버가 빈 목록을 줘도 기록을 지키는 쪽이다.
+    complete = false;
+    await page.getByRole("button", { name: "저장된 상품 목록" }).click();
+    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
+    await expect.poll(() => gets).toBeGreaterThanOrEqual(2);
+    await page.waitForTimeout(300);
+    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
+    complete = true;
+    await page.evaluate(() => (window as unknown as { refreshRequests: () => Promise<void> }).refreshRequests());
+    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(0);
+    await expect(page.locator("#requests .card", { hasText: "접수 중인 요청" })).toHaveCount(1);
+    await context.close();
+  });
+
   test("저장된 상품 상세에는 검증 리뷰 한 문단만 있고 후보 목록·구매 링크·가격이 없다", async ({ page }) => {
     await openVoiceHome(page);
     await page.getByRole("button", { name: "저장된 상품 목록" }).click();

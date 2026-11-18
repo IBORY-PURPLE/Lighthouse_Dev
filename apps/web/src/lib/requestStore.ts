@@ -51,6 +51,8 @@ export interface StoredRequest {
 
 /** 기기별 목록에 담는 개수 상한. */
 export const DEVICE_LIST_LIMIT = 20;
+/** device_id 열이 없다는 답(마이그레이션 전)을 받은 뒤 다시 시도하기까지 기다리는 시간. */
+export const DEVICE_RETRY_MS = 60_000;
 
 /** 기기별 목록의 한 건: 단건 조회 모양에 접수 시각(ISO)이 붙는다. */
 export interface DeviceListItem extends StoredRequest {
@@ -817,8 +819,15 @@ export function createSupabaseStore(
   let fellBack = false;
   // 봉사자 쪽만 따로 본다. 마이그레이션이 없어도 접수(register_request)는 Supabase에 남겨야 한다.
   let volunteerFellBack = false;
-  // 기기 구분 열(device_id)이 없다는 답을 받았다(마이그레이션 원격 적용 전). 소유 확인 없이 옛 조회로 간다.
-  let deviceFellBack = false;
+  // 기기 구분 열(device_id)이 없다는 답을 받은 시각(마이그레이션 원격 적용 전). 그 뒤 DEVICE_RETRY_MS 동안만 옛 조회로 간다.
+  // 영구로 두면 마이그레이션을 적용한 뒤에도 이 인스턴스는 기기 ID를 붙이지 않고 소유 확인을 하지 않는다.
+  let deviceFellBackAt: number | null = null;
+  function deviceDegraded(): boolean {
+    if (deviceFellBackAt === null) return false;
+    if (Date.now() - deviceFellBackAt < DEVICE_RETRY_MS) return true;
+    deviceFellBackAt = null;
+    return false;
+  }
   // 읽기에 넓은 조회 모양이 필요하다. supabase-js는 그 모양을 갖고 있다.
   const reader = client as VolunteerClient;
 
@@ -916,13 +925,13 @@ export function createSupabaseStore(
         p_condition_kind: input.conditionKind,
       };
       // 기기 ID는 있을 때만 보낸다. 마이그레이션 전이라 8번째 인자를 모르는 DB면 빼고 다시 보낸다(요청은 기기 없이 접수된다).
-      const withDevice = input.deviceId !== null && !deviceFellBack;
+      const withDevice = input.deviceId !== null && !deviceDegraded();
       if (withDevice) args.p_device_id = input.deviceId;
       let result: DbResult;
       try {
         result = await client.rpc("register_request", args);
         if (withDevice && result.error && isMissingSchema(result.error)) {
-          deviceFellBack = true;
+          deviceFellBackAt = Date.now();
           delete args.p_device_id;
           result = await client.rpc("register_request", args);
         }
@@ -944,7 +953,7 @@ export function createSupabaseStore(
     },
     async getForDevice(requestId, deviceId) {
       if (fellBack) return fallback.getForDevice(requestId, deviceId);
-      if (deviceFellBack) return getLegacy(requestId);
+      if (deviceDegraded()) return getLegacy(requestId);
       let result: DbResult;
       try {
         result = await client
@@ -957,7 +966,7 @@ export function createSupabaseStore(
       }
       if (result.error) {
         if (isMissingSchema(result.error)) {
-          deviceFellBack = true;
+          deviceFellBackAt = Date.now();
           return getLegacy(requestId);
         }
         throw new StoreUnavailableError("requests select failed");
@@ -967,8 +976,11 @@ export function createSupabaseStore(
       return withReview(toStoredRequest(result.data));
     },
     listByDevice(deviceId) {
-      if (fellBack || deviceFellBack) return fallback.listByDevice(deviceId);
+      // 이 인스턴스가 통째로 메모리로 떨어졌으면 접수도 메모리에 있으니 같은 곳에서 읽는다.
+      if (fellBack) return fallback.listByDevice(deviceId);
       return (async () => {
+        // 기기 열이 없는 동안은 접수에도 기기 ID가 붙지 않아 목록이 사실과 다르다. 빈 목록 대신 503을 내서 화면이 기록을 지키게 한다.
+        if (deviceDegraded()) throw new StoreUnavailableError("device column missing");
         let result: DbResult;
         try {
           result = await reader
@@ -982,8 +994,8 @@ export function createSupabaseStore(
         }
         if (result.error) {
           if (isMissingSchema(result.error)) {
-            deviceFellBack = true;
-            return fallback.listByDevice(deviceId);
+            deviceFellBackAt = Date.now();
+            throw new StoreUnavailableError("device column missing");
           }
           throw new StoreUnavailableError("requests select failed");
         }

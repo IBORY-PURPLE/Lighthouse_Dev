@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createMemoryStore,
   createSupabaseStore,
   DEVICE_LIST_LIMIT,
+  DEVICE_RETRY_MS,
   QUEUE_LIMIT,
   StoreUnavailableError,
   type DbError,
@@ -197,6 +198,29 @@ describe("기기 구분(Supabase 저장소, 가짜 클라이언트)", () => {
     expect(calls.map((call) => "p_device_id" in call.args)).toEqual([true, false, false]);
   });
 
+  it("열이 없다는 답을 받은 뒤 60초가 지나면 다시 p_device_id를 보내 스스로 돌아온다(마이그레이션을 적용한 뒤)", async () => {
+    vi.useFakeTimers();
+    try {
+      let migrated = false;
+      const { client, calls } = rpcClient((args) =>
+        "p_device_id" in args && !migrated
+          ? { data: null, error: { code: "PGRST202", message: "no function" } }
+          : { data: [ROW], error: null },
+      );
+      const store = createSupabaseStore(client, createMemoryStore({ now: () => T0 }));
+      await store.register(input("a", { deviceId: "u-abc" }));
+      migrated = true;
+      vi.advanceTimersByTime(DEVICE_RETRY_MS - 1);
+      await store.register(input("b", { deviceId: "u-abc" }));
+      expect("p_device_id" in calls[calls.length - 1].args).toBe(false);
+      vi.advanceTimersByTime(2);
+      await store.register(input("c", { deviceId: "u-abc" }));
+      expect("p_device_id" in calls[calls.length - 1].args).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("listByDevice: device_id로 최신순 20건을 읽는다", async () => {
     const log: string[] = [];
     const createdAt = new Date().toISOString();
@@ -221,9 +245,13 @@ describe("기기 구분(Supabase 저장소, 가짜 클라이언트)", () => {
     ]);
   });
 
-  it("listByDevice: device_id 열이 없으면(마이그레이션 전) 빈 목록, 다른 오류는 저장소 오류", async () => {
+  it("listByDevice: device_id 열이 없으면(마이그레이션 전) 빈 목록 대신 저장소 오류(503)를 내서 화면이 기록을 지키게 한다", async () => {
+    // 이 상태의 접수에는 기기 ID가 붙지 않아 목록이 사실과 다르다. 200 빈 목록이면 휴대폰이 기록을 지운다.
     const missing = queryClient({ data: null, error: { code: "42703", message: "no column" } });
-    expect(await createSupabaseStore(missing).listByDevice("u-abc")).toEqual([]);
+    const store = createSupabaseStore(missing);
+    await expect(store.listByDevice("u-abc")).rejects.toBeInstanceOf(StoreUnavailableError);
+    // 열이 없다고 안 뒤에는 쿼리를 다시 보내지 않고 바로 오류다.
+    await expect(store.listByDevice("u-abc")).rejects.toBeInstanceOf(StoreUnavailableError);
     const broken = queryClient({ data: null, error: { code: "08006", message: "down" } });
     await expect(createSupabaseStore(broken).listByDevice("u-abc")).rejects.toBeInstanceOf(StoreUnavailableError);
   });

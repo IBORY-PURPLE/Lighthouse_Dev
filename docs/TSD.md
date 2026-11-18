@@ -88,7 +88,7 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 리서치 챗 AI 호출 기록(대화 턴·추가 질문·리뷰 문단의 요청·응답 글) | OpenAI 대시보드 Logs(`store: true`, `metadata.feature` = research_turn·research_ask·research_review, `src/lib/openaiLog.ts`) | OpenAI 보관 기간을 따른다. `OPENAI_STORE_LOGS=off`면 남기지 않는다(이용자 요청 2026-11-17). 웹 검색·이용자 음성 대화는 `store: false` 그대로. 이용자 질문·답(`이용자조건`)이 든 리뷰 문단 호출은 `OPENAI_STORE_LOGS`와 상관없이 `store: false`(대화 턴 AI에는 넘기지 않는다) |
 | 이용자 리뷰 도착 알림 구독(웹 푸시 endpoint·p256dh·auth) | Supabase `push_subscriptions`(요청 하나에 하나, 마이그레이션 20261120000000) | 리뷰를 보내 알림을 한 번 보내면 지운다. 요청이 지워지면 같이 지워진다(A13 이용자 결정 2026-11-17). 키 `VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`가 없으면 기능이 꺼진다 |
 | 이용자가 확인한 요약과 질문·답(봉사자 브리핑, 이용자가 말한 그대로. 요약 300자·질문 150자·답 200자·12짝 이하, 전화번호 모양은 "(전화번호 가림)") | Supabase `request_details`(요청 하나에 하나, 마이그레이션 20261122000000. 없으면 메모리) | 맡은 봉사자 1명에게만, 그 요청이 진행 중인 동안만 내보낸다. 요청이 `done`·`expired`가 되면 DB 트리거가 지우고 요청이 지워지면 함께 지워진다. 내려놓기·6시간 반환 때는 남긴다(다음 봉사자가 봐야 한다). 이용자 상태 조회·대기열·로그·봉사자 기기(`sentHistory`)에는 나가지 않는다. 이름·주소 같은 말은 가리지 못한다(이용자가 말한 그대로이므로 시연에서는 개인정보를 말하지 않는다) |
-| 이용자 기기의 요청 기록(대화 id·요청 번호·상태·리뷰) | 이용자 `localStorage` `lh-requests`, 알림 켬 여부 `lh-push` | 최근 20건의 캐시일 뿐이다. 서버가 이 기기(`lh_device`)에 준 목록(`GET /api/requests`)이 기준이고, 목록을 열면 그 응답으로 상태·리뷰를 갱신한다. 번호를 못 받은 기록(접수 중·실패)만 남기고, 서버가 주지 않은 번호의 기록은 지운다 |
+| 이용자 기기의 요청 기록(대화 id·요청 번호·상태·리뷰) | 이용자 `localStorage` `lh-requests`, 알림 켬 여부 `lh-push` | 최근 20건의 캐시일 뿐이다. 서버가 이 기기(`lh_device`)에 준 목록(`GET /api/requests`)이 기준이고, 목록을 열면 그 응답으로 상태·리뷰를 갱신한다. 번호를 못 받은 기록(접수 중·실패)은 남기고, 서버가 주지 않은 번호의 기록은 서버가 전체 목록(`complete:true`, 저장소가 DB일 때)이라고 알릴 때만 지운다(아니면 그대로 둔다). 그래서 끝난 요청은 `done_at` 7일 뒤, 만료는 생성 48시간 뒤 서버에서 지워지면 목록에서도 사라진다(2026-11-18 사람 판정 대기: 리뷰를 계속 보이게 할지). 접수 중에는 목록 병합을 미루고, 화면을 열 때 한 번 조회해 기기 쿠키를 먼저 받은 뒤 접수한다(쿠키 없는 새 기기의 접수와 조회가 겹쳐 서로 다른 쿠키를 받는 경합을 막는다) |
 | 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
 | (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
 | 서버로 보내는 축소 사진(사진 설명용) | 봉사자 탭 메모리 | 새로 고치면 사라짐. 서버는 AI에 넘긴 뒤 버림 |
@@ -317,13 +317,13 @@ waiting --24시간--> expired
 in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count+1)
 ```
 
-**보관**: `waiting`이 24시간을 넘으면 `expired`(시연 요청 `is_demo`는 제외: 시간이 지나도 `waiting`으로 남아 봉사자 대기열에 계속 보인다. 메모리 저장소, Supabase 대기열 조회 `created_at > 24시간 전 or is_demo`, `register_request`의 정리 모두 같다), `expired`는 24시간 뒤 삭제, `done`은 `done_at` 기준 7일 뒤 삭제(기간은 이용자 결정 대기). 정리는 SQL 함수가 호출될 때 함께 한다. `pg_cron`은 무료판 사용 가능 여부가 미확인이라 쓰지 않는다. 플로우 A 초안의 "24시간 뒤 삭제"를 이것으로 바꾼다.
+**보관**: `waiting`이 24시간을 넘으면 `expired`(시연 요청 `is_demo`는 제외: 시간이 지나도 `waiting`으로 남아 봉사자 대기열에 계속 보인다. 메모리 저장소, Supabase 대기열 조회 `created_at > 24시간 전 or is_demo`, `register_request`의 정리, 맡기 `claim_request`의 24시간 조건 `is_demo or created_at > 24시간 전`이 모두 같다), `expired`는 24시간 뒤 삭제, `done`은 `done_at` 기준 7일 뒤 삭제(기간은 이용자 결정 대기). 정리는 SQL 함수가 호출될 때 함께 한다. `pg_cron`은 무료판 사용 가능 여부가 미확인이라 쓰지 않는다. 플로우 A 초안의 "24시간 뒤 삭제"를 이것으로 바꾼다.
 
 **SQL 함수**(서버 키로만 실행. `revoke execute ... from public, anon, authenticated`, `grant ... to service_role`, `security invoker`, `set search_path = ''`)
 
 | 함수 | 하는 일 | 결과(`out_outcome`) |
 |---|---|---|
-| `register_request(..., p_device_id text default null)` | 플로우 A 접수. 같은 `client_request_id`면 기존 행(기기 ID는 덮어쓰지 않음), 아니면 날짜별 다음 번호로 삽입하며 기기 ID를 저장. 마지막 인자가 기본값이라 7개 인자 호출(마이그레이션 전 앱)도 된다. 앱은 마이그레이션 전에 8번째 인자를 모르는 DB를 만나면 빼고 다시 보낸다 | `created` / `existing` |
+| `register_request(..., p_device_id text default null)` | 플로우 A 접수. 같은 `client_request_id`면 기존 행(기기 ID는 덮어쓰지 않음), 아니면 날짜별 다음 번호로 삽입하며 기기 ID를 저장. 마지막 인자가 기본값이라 7개 인자 호출(마이그레이션 전 앱)도 된다. 앱은 마이그레이션 전에 8번째 인자를 모르는 DB를 만나면 빼고 다시 보내고, 60초 뒤 다시 8인자로 시도해 스스로 돌아온다. 같은 마이그레이션이 `claim_request`도 다시 정의한다(시연 요청은 24시간이 지나도 맡을 수 있다). **적용 순서: 원격 마이그레이션 `20261123000000`을 먼저 적용하고 그 뒤에 main에 병합·배포한다.** 앱이 먼저 나가면 그 사이 접수에는 기기 ID가 붙지 않고(목록에 안 나옴), 열이 없는 동안 목록은 503이다 | `created` / `existing` |
 | `claim_request(p_request_id, p_volunteer_id)` | `update ... set status='in_progress' ... where id=$1 and status='waiting' returning ...` 한 문장. 실패하면 현재 상태를 보고 판정 | `claimed` / `already_mine` / `taken` / `done` / `expired` / `not_found` |
 | `release_request(p_request_id, p_volunteer_id)` | 맡은 본인일 때만 `waiting`으로, `volunteer_id`·`claimed_at` null, `release_count+1` | `released` / `not_yours` / `not_in_progress` / `not_found` |
 | `complete_request(p_request_id, p_volunteer_id, 결과 필드)` | 한 트랜잭션에서 `results` 삽입과 `status='done', done_at=now()`. 이미 `done`이고 본인 결과면 기존 행을 돌려줌(재전송해도 같은 결과) | `completed` / `existing` / `not_yours` / `not_in_progress` / `not_found` |
@@ -377,7 +377,7 @@ RLS 켬, 정책 없음, `anon`·`authenticated` 권한 회수, `service_role`만
 | 경로 | 성공 | 실패 |
 |---|---|---|
 | `POST /api/requests` `{clientRequestId, product, budget, condition, details?}` | 201 `{requestId, queueNumber, status:"waiting"}`, 같은 `clientRequestId` 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`, 413 `too_large`(본문 32KB 초과), 401, 429, 503. 품목 사전(헤드셋)에 없는 물건도 받고 `item`은 null로 둔다(2026-11-18 A6, 전에는 422 `need_item`) |
-| `GET /api/requests` | 200 `{items:[{requestId, queueNumber, status, product, createdAt, review?, sentAt?}]}`: 쿠키 `lh_device`의 기기가 접수한 요청만, 최신순 최대 20건. `done`이면 `review`(리뷰 문단)와 `sentAt`을 붙인다. 쿠키가 없거나 틀리면 새로 심고 빈 목록. `Cache-Control: no-store`. 다른 기기의 요청은 담기지 않는다 | 429(분당 60), 503 |
+| `GET /api/requests` | 200 `{items:[{requestId, queueNumber, status, product, createdAt, review?, sentAt?}]}`: 쿠키 `lh_device`의 기기가 접수한 요청만, 최신순 최대 20건. `done`이면 `review`(리뷰 문단)와 `sentAt`을 붙인다. `complete`는 이 목록이 이 기기의 요청 전부일 때(저장소가 DB일 때)만 true. 쿠키가 없거나 틀리면 새로 심고 빈 목록. 서명 비밀이 없으면 503 `not_configured`, 기기 열이 없는 동안(마이그레이션 전)에도 503(화면이 기록을 지키게). `Cache-Control: no-store`. 다른 기기의 요청은 담기지 않는다. `POST`에서 이미 있는 접수 id(`existing`)를 다른 기기가 다시 보내면 409 `conflict` | 429(분당 60), 503 |
 | `GET /api/requests/{id}` | 200 `{requestId, queueNumber, status, product}`. `status="done"`이면 `result:{candidateName, purchaseUrl, guide, summary}`를 덧붙임(플로우 C 경계). 요청에 기기 ID가 있으면 같은 기기 쿠키여야 한다(아니면 없는 요청처럼 404). 기기 ID가 없는 행(옛 요청·시연)은 그대로 조회 | 400, 404 `not_found`, 401, 429, 503 |
 | `POST /api/requests/{id}/push` | 푸시 구독 붙이기. `GET {id}`와 같은 소유 규칙(다른 기기·쿠키 없음은 404) | 400, 404, 409, 429, 503 |
 

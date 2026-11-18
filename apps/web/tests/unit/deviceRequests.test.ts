@@ -125,31 +125,44 @@ describe("기기 쿠키 발급", () => {
     expect((await (await getList(cookie)).json()).items).toHaveLength(2);
   });
 
+  it("같은 접수 id를 다른 기기가 다시 보내면 409이고 번호·상태를 알려 주지 않는다(같은 기기는 200)", async () => {
+    const a = await newDevice();
+    const clientRequestId = randomUUID();
+    const first = await post(a.cookie, { clientRequestId });
+    expect(first.status).toBe(201);
+    const same = await post(a.cookie, { clientRequestId });
+    expect(same.status).toBe(200);
+    const other = await newDevice();
+    const stolen = await post(other.cookie, { clientRequestId });
+    expect(stolen.status).toBe(409);
+    expect(await stolen.json()).toEqual({ ok: false, error: "conflict" });
+  });
+
   it("틀린 쿠키(서명 불일치·봉사자 쿠키)는 새로 심고 그 기기의 목록은 비어 있다", async () => {
     const { cookie } = await newDevice();
     const forged = `${cookie.slice(0, -2)}xx`;
     const response = await getList(forged);
     expect(issued(response)).toBeDefined();
     expect(issued(response)).not.toBe(forged);
-    expect((await response.json()).items).toEqual([]);
+    expect(await response.json()).toMatchObject({ items: [] });
 
     // 봉사자 쿠키 값을 이용자 쿠키 자리에 넣어도 통하지 않는다(서명 비밀이 다르다).
     const volunteerLike = await import("@/lib/volunteerSession").then((m) => m.issueDeviceCookie());
     expect(VOLUNTEER_COOKIE).toBe("lh_vol");
     const swapped = await getList(volunteerLike as string);
     expect(issued(swapped)).toBeDefined();
-    expect((await swapped.json()).items).toEqual([]);
+    expect(await swapped.json()).toMatchObject({ items: [] });
   });
 
-  it("서명 비밀이 없으면 쿠키 없이도 접수되고(기기 없음), 목록은 비어 있다", async () => {
+  it("서명 비밀이 없으면 쿠키 없이도 접수되고(기기 없음), 목록은 빈 목록(200) 대신 503이다(화면이 기록을 지우지 않게)", async () => {
     vi.stubEnv("DEMO_ACCESS_CODE", "");
     const response = await post();
     expect(response.status).toBe(201);
     expect(issued(response)).toBeUndefined();
     const listed = await getList();
-    expect(listed.status).toBe(200);
+    expect(listed.status).toBe(503);
     expect(issued(listed)).toBeUndefined();
-    expect(await listed.json()).toEqual({ items: [] });
+    expect(await listed.json()).toEqual({ ok: false, error: "not_configured" });
   });
 
   it("DEMO_ACCESS_CODE를 바꾸면 이전 기기 쿠키는 무효가 된다", async () => {
@@ -188,8 +201,40 @@ describe("GET /api/requests (이 기기의 목록)", () => {
   it("쿠키가 없으면 빈 목록을 주고 쿠키를 심는다(남의 요청은 보이지 않는다)", async () => {
     await newDevice();
     const response = await getList();
-    expect(await response.json()).toEqual({ items: [] });
+    expect(await response.json()).toMatchObject({ items: [] });
     expect(issued(response)).toBeDefined();
+  });
+
+  it("complete는 저장소가 DB일 때만 true다(메모리 저장소의 빈 목록을 기준으로 삼지 않게)", async () => {
+    const { cookie } = await newDevice();
+    expect((await (await getList(cookie)).json()).complete).toBe(false);
+    const real = requestStore.getRequestStore();
+    const spy = vi.spyOn(requestStore, "getRequestStore").mockReturnValue(
+      new Proxy(real, { get: (target, key) => (key === "persistent" ? true : Reflect.get(target, key)) }),
+    );
+    try {
+      expect((await (await getList(cookie)).json()).complete).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("저장소 오류는 503이다(빈 목록으로 보이지 않는다)", async () => {
+    const { cookie } = await newDevice();
+    const real = requestStore.getRequestStore();
+    const spy = vi.spyOn(requestStore, "getRequestStore").mockReturnValue(
+      new Proxy(real, {
+        get: (target, key) =>
+          key === "listByDevice"
+            ? () => Promise.reject(new requestStore.StoreUnavailableError("down"))
+            : Reflect.get(target, key),
+      }),
+    );
+    try {
+      expect((await getList(cookie)).status).toBe(503);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("최대 20건", async () => {

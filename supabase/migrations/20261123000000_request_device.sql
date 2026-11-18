@@ -94,3 +94,38 @@ revoke execute on function public.register_request(uuid, text, text, text, text,
   from public, anon, authenticated;
 grant execute on function public.register_request(uuid, text, text, text, text, text, text, text)
   to service_role;
+
+-- 시연 요청(is_demo)은 24시간이 지나도 맡을 수 있다. 대기열 조회·register_request 정리와 같은 규칙이다.
+-- 본문은 20261112010000_volunteer_flow.sql의 claim_request에서 24시간 조건 한 줄만 바꾼 것이다.
+-- create or replace라 기존 실행 권한(service_role만)은 그대로 남지만, 같은 줄을 다시 적어 둔다.
+create or replace function public.claim_request(p_request_id uuid, p_volunteer_id text)
+returns text language plpgsql security invoker set search_path = '' as $$
+declare v_mine uuid; v_id uuid;
+begin
+  select r.id into v_mine from public.requests as r
+    where r.status = 'in_progress' and r.volunteer_id = p_volunteer_id;
+  if v_mine is not null then
+    return case when v_mine = p_request_id then 'already_mine' else 'busy' end;
+  end if;
+  begin
+    update public.requests as r
+      set status = 'in_progress', volunteer_id = p_volunteer_id, claimed_at = now(), updated_at = now()
+      where r.id = p_request_id and r.status = 'waiting'
+        and (r.is_demo or r.created_at > now() - interval '24 hours')
+      returning r.id into v_id;
+  exception when unique_violation then
+    return 'busy';
+  end;
+  if v_id is not null then return 'claimed'; end if;
+  -- 같은 봉사자가 다른 탭에서 방금 맡았으면(갱신이 겹친 경우) 이미 내 것이다.
+  if exists (select 1 from public.requests as r
+    where r.id = p_request_id and r.status = 'in_progress' and r.volunteer_id = p_volunteer_id) then
+    return 'already_mine';
+  end if;
+  if exists (select 1 from public.requests as r where r.id = p_request_id) then return 'taken'; end if;
+  return 'not_found';
+end;
+$$;
+
+revoke execute on function public.claim_request(uuid, text) from public, anon, authenticated;
+grant execute on function public.claim_request(uuid, text) to service_role;

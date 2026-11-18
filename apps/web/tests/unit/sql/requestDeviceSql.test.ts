@@ -166,6 +166,30 @@ describe("시연 요청은 24시간 만료에서 빠진다", () => {
   });
 });
 
+describe("claim_request의 24시간 규칙", () => {
+  const claim = async (id: string, volunteer: string) =>
+    (await one<{ r: string }>("select public.claim_request($1, $2) as r", [id, volunteer])).r;
+
+  it("25시간 지난 시연 대기는 맡을 수 있고, 25시간 지난 일반 대기는 taken이다", async () => {
+    const demo = await registerWith(null);
+    const real = await registerWith("u-claim-old");
+    await db.query("update public.requests set is_demo = true where id = $1", [demo.out_request_id]);
+    await db.query("update public.requests set created_at = now() - interval '25 hours' where id = any($1::uuid[])", [
+      [demo.out_request_id, real.out_request_id],
+    ]);
+    expect(await claim(demo.out_request_id, "d-0123456789abcdef")).toBe("claimed");
+    expect(await claim(real.out_request_id, "d-fedcba9876543210")).toBe("taken");
+  });
+
+  it("claim_request도 service_role만 부를 수 있다", async () => {
+    const priv = await one<Record<string, boolean>>(
+      `select has_function_privilege('anon', 'public.claim_request(uuid, text)', 'execute') as anon_exec,
+              has_function_privilege('service_role', 'public.claim_request(uuid, text)', 'execute') as svc_exec`,
+    );
+    expect(priv).toEqual({ anon_exec: false, svc_exec: true });
+  });
+});
+
 describe("되돌리기", () => {
   it("rollback을 돌리면 7개 인자 함수가 돌아오고 열이 없어지며, 다시 적용된다", async () => {
     await db.exec(sql(DOWN));

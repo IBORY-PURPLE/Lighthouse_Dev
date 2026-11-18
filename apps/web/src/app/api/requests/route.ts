@@ -118,6 +118,16 @@ async function handleRegister(request: NextRequest, deviceId: string | null): Pr
       storeMs: Date.now() - startedAt,
     };
   }
+  // 같은 접수 id를 다른 기기가 보내면 그 행의 번호·상태를 알려 주지 않는다(같은 기기의 재전송과 기기 없는 옛 행은 그대로).
+  if (result.outcome === "existing" && deviceId) {
+    try {
+      if (!(await getRequestStore().getForDevice(result.requestId, deviceId))) {
+        return { response: failure(409, "conflict"), storeMs: Date.now() - startedAt };
+      }
+    } catch {
+      return { response: failure(503, "store_unavailable"), storeMs: Date.now() - startedAt };
+    }
+  }
   const storeMs = Date.now() - startedAt;
   // 처음 접수된 대기 요청에만 저장한다. 같은 접수를 다시 보내도 처음 것을 지킨다. 저장하지 못해도 접수는 그대로다.
   let detailsLog = details === undefined ? "none" : details === null ? "ignored" : "none";
@@ -173,19 +183,22 @@ async function handleList(request: NextRequest, deviceId: string | null): Promis
       response: failure(429, "rate_limited", { "Retry-After": String(limit.retryAfterSeconds) }),
     };
   }
-  // 기기를 구분할 수 없으면(서명 비밀 없음) 보여 줄 요청도 없다.
-  if (!deviceId) {
-    return { response: NextResponse.json({ items: [] }, { headers: NO_STORE }) };
-  }
+  // 기기를 구분할 수 없으면(서명 비밀 없음) 목록을 만들 수 없다. 빈 목록(200)을 주면 화면이 기록을 지우므로 503으로 알린다.
+  if (!deviceId) return { response: failure(503, "not_configured") };
   const startedAt = Date.now();
+  const store = getRequestStore();
   let rows: DeviceListItem[];
   try {
-    rows = await getRequestStore().listByDevice(deviceId);
+    rows = await store.listByDevice(deviceId);
   } catch {
     return { response: failure(503, "store_unavailable"), storeMs: Date.now() - startedAt };
   }
   return {
-    response: NextResponse.json({ items: rows.map(toListItem) }, { headers: NO_STORE }),
+    // complete: 이 목록이 이 기기의 요청 전부일 때만 true(저장소가 DB일 때). false면 화면은 서버가 주지 않은 번호의 기록을 지우지 않는다.
+    response: NextResponse.json(
+      { items: rows.map(toListItem), complete: store.persistent },
+      { headers: NO_STORE },
+    ),
     storeMs: Date.now() - startedAt,
   };
 }
