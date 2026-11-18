@@ -26,6 +26,7 @@ async function newRequest(): Promise<string> {
     brand: "Sony",
     item: "헤드셋",
     conditionKind: "new",
+    deviceId: null,
   });
   return result.requestId;
 }

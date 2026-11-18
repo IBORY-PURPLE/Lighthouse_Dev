@@ -22,7 +22,7 @@ v2.1(2026-11-13): 봉사자 ③④⑤를 리서치 챗 한 화면으로 합침. 
 
 1. 이용자가 아이폰에서 VoiceOver를 켜고 이용자 주소(`/`)를 연다.
 2. `/`는 apps/user-voice-ui(동료 작성)의 음성 대화 화면이다(§8.9). "상품 요청"을 누르면 AI가 한 번에 질문 하나씩 구매 조건을 묻고, 이용자는 말로 답한다. AI가 요청을 1~2문장으로 정리해 "이 내용으로 구매 요청을 등록할까요?"라고 물으면 이용자가 동의한다(동의 전에는 등록하지 않는다). 답할 때마다 대화 내용이 AI 서버로 간다. 고정 질문 3개(제품, 예산, 새 제품·중고) 화면은 `/classic`으로 옮겨 남아 있다. 답마다 확인을 거치고, 답하는 동안 기기 밖으로 아무것도 보내지 않는다.
-3. 동의(`done`)하면 요청이 대기열에 들어간다(`POST /api/requests`). `/classic`에서는 요약을 듣고 "봉사자 매칭 요청"을 누르면 들어가고 대기번호를 듣는다(`waiting`). `/`의 음성 대화 화면은 대기번호를 읽어 주지 않고 기기 안 목록에만 카드를 보인다.
+3. 동의(`done`)하면 요청이 대기열에 들어간다(`POST /api/requests`). `/classic`에서는 요약을 듣고 "봉사자 매칭 요청"을 누르면 들어가고 대기번호를 듣는다(`waiting`). `/`의 음성 대화 화면은 대기번호를 읽어 주지 않고 기기 안 목록에만 카드를 보인다. 접수한 기기는 서버가 심은 기기 쿠키(`lh_device`)로 구분되어, 기기마다 자기 요청만 목록에 보인다(§8.4).
 4. 앱을 닫았다 다시 열면 대기번호와 상태를 다시 듣는다.
 
 ### 플로우 B: 봉사자 수행(②~⑥)
@@ -88,7 +88,7 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 리서치 챗 AI 호출 기록(대화 턴·추가 질문·리뷰 문단의 요청·응답 글) | OpenAI 대시보드 Logs(`store: true`, `metadata.feature` = research_turn·research_ask·research_review, `src/lib/openaiLog.ts`) | OpenAI 보관 기간을 따른다. `OPENAI_STORE_LOGS=off`면 남기지 않는다(이용자 요청 2026-11-17). 웹 검색·이용자 음성 대화는 `store: false` 그대로. 이용자 질문·답(`이용자조건`)이 든 리뷰 문단 호출은 `OPENAI_STORE_LOGS`와 상관없이 `store: false`(대화 턴 AI에는 넘기지 않는다) |
 | 이용자 리뷰 도착 알림 구독(웹 푸시 endpoint·p256dh·auth) | Supabase `push_subscriptions`(요청 하나에 하나, 마이그레이션 20261120000000) | 리뷰를 보내 알림을 한 번 보내면 지운다. 요청이 지워지면 같이 지워진다(A13 이용자 결정 2026-11-17). 키 `VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`가 없으면 기능이 꺼진다 |
 | 이용자가 확인한 요약과 질문·답(봉사자 브리핑, 이용자가 말한 그대로. 요약 300자·질문 150자·답 200자·12짝 이하, 전화번호 모양은 "(전화번호 가림)") | Supabase `request_details`(요청 하나에 하나, 마이그레이션 20261122000000. 없으면 메모리) | 맡은 봉사자 1명에게만, 그 요청이 진행 중인 동안만 내보낸다. 요청이 `done`·`expired`가 되면 DB 트리거가 지우고 요청이 지워지면 함께 지워진다. 내려놓기·6시간 반환 때는 남긴다(다음 봉사자가 봐야 한다). 이용자 상태 조회·대기열·로그·봉사자 기기(`sentHistory`)에는 나가지 않는다. 이름·주소 같은 말은 가리지 못한다(이용자가 말한 그대로이므로 시연에서는 개인정보를 말하지 않는다) |
-| 이용자 기기의 요청 기록(대화 id·요청 번호·상태·리뷰) | 이용자 `localStorage` `lh-requests`, 알림 켬 여부 `lh-push` | 최근 20건. 목록을 열면 `GET /api/requests/{id}`로 상태·리뷰를 다시 묻는다 |
+| 이용자 기기의 요청 기록(대화 id·요청 번호·상태·리뷰) | 이용자 `localStorage` `lh-requests`, 알림 켬 여부 `lh-push` | 최근 20건의 캐시일 뿐이다. 서버가 이 기기(`lh_device`)에 준 목록(`GET /api/requests`)이 기준이고, 목록을 열면 그 응답으로 상태·리뷰를 갱신한다. 번호를 못 받은 기록(접수 중·실패)만 남기고, 서버가 주지 않은 번호의 기록은 지운다 |
 | 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
 | (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
 | 서버로 보내는 축소 사진(사진 설명용) | 봉사자 탭 메모리 | 새로 고치면 사라짐. 서버는 AI에 넘긴 뒤 버림 |
@@ -98,6 +98,7 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 - 이미지와 상세페이지 원문을 서버에 남기지 않는 이유: 상세페이지 보관은 멘토가 지적한 법적 위험이다. v2.2의 사진은 구매 인증용(착샷·실제 소유 사진)뿐이고 상세 페이지 캡처는 받지 않는다. 서버는 원본을 저장하지 않고 브라우저가 줄인 작은 JPEG 썸네일(60,000자 이하)만 대화가 살아 있는 동안 둔다. 결과에는 사진이 들어가지 않는다. *(v2.2 초안)*
 - 구매 인증 사진 확인(P2, A12 이용자 결정 2026-11-17): 사진을 올리면 AI가 원본 이미지를 한 번 보고(`checkPurchasePhoto`, `store: true` feature `research_photo`) 사진 종류(photo·screenshot·unclear), 대체 텍스트(200자 이하, 가격·주문번호·얼굴·이름 없음), 인쇄된 기종을 `research_photos`에 남긴다. 착샷이 아니거나 불분명하거나(AI 실패 포함) 기종 칸과 다르면 `pending.shotCheck`·`mismatch`로 구매 인증을 보류하고, 봉사자가 [직접 찍은 사진이 맞아요](`photo.yes`)를 누르거나 사진을 모두 지우면 풀린다. 대체 텍스트는 사진 대체 글·확인 말풍선·리뷰 자료(`사진설명`)에 쓴다.
 - DB는 서버 라우트만 서버 키(secret 또는 service_role)로 SQL 함수(RPC)를 호출해 다룬다. 표는 RLS를 켜고 정책을 두지 않아 브라우저 직접 접근을 막는다. 브라우저에는 Supabase 키를 내보내지 않고 Realtime도 쓰지 않는다.
+- 이용자 기기 식별(2026-11-18): 접수(`POST /api/requests`)와 목록(`GET /api/requests`) 응답에서 쿠키가 없거나 서명이 틀리면 기기 쿠키 `lh_device`를 새로 심는다. 값은 `v1.<무작위 열쇠>.<서명>`이고 봉사자 쿠키와 같은 서명 방식(`volunteerSession.ts`의 `issueSignedKey`·`readSignedKey`)에 비밀만 다르다(`DEMO_ACCESS_CODE`에서 용도별로 만든다. 그래서 `lh_vol` 값을 `lh_device` 자리에 넣어도 통하지 않는다). 속성은 봉사자 쿠키와 같다: `httpOnly`, `sameSite=lax`, `path=/`, Vercel·https에서만 `secure`. 수명은 1년이다. 서버와 DB(`requests.device_id`)에는 열쇠에서 뽑은 기기 ID(`u-`+32자리)만 남고 로그에는 남기지 않는다. 이용자는 코드를 입력하지 않는다. 서명 비밀이 없으면 쿠키 없이 접수만 되고(기기 없음) 목록은 비어 있다. 쿠키를 지우거나 다른 브라우저로 열면 새 기기가 되어 이전 요청은 보이지 않는다(계정이 없는 대가).
 - 봉사자 식별: 입장하면 기기 열쇠 쿠키(`lh_vol`)를 받고, 서버는 그 열쇠에서 뽑은 봉사자 ID를 쓴다(`volunteerSession.ts`). 실제 로그인은 범위 밖이다. QA 기간에는 접근 코드와 입장 코드가 없고 `lh_access` 쿠키도 없다. 링크만 있으면 이용자·봉사자 화면 모두 바로 쓰고, 봉사자 화면은 처음 열 때 스스로 `POST /api/volunteer/enter`를 불러 `lh_vol`을 받는다(쿠키는 비밀이 아니라 기기 번호표다). `DEMO_ACCESS_CODE`는 코드 입력용이 아니라 이 쿠키의 서명 비밀이다. 값을 바꾸면 모든 봉사자 기기의 입장이 풀리고(다시 열면 새로 받는다), 맡은 요청은 새 ID로 바뀌어 이어 보지 못한다. 없으면 입장이 503 `not_configured`다. 되돌리려면 이 변경(PR)을 revert한다.
 
 ## 3. 기술 선택
@@ -136,7 +137,8 @@ apps/web/                                   Vercel Root Directory
   src/app/volunteer/requests/[requestId]/page.tsx   리서치 챗(③④⑤) → ⑥, 완료면 보낸 결과
   src/app/enter/route.ts
   src/app/api/{health,match,chat}/route.ts
-  src/app/api/requests/route.ts, [requestId]/route.ts                 플로우 A
+  src/app/api/requests/route.ts, [requestId]/route.ts                 플로우 A(접수·기기별 목록·소유 조회)
+  src/lib/deviceSession.ts                                              이용자 기기 쿠키 lh_device
   src/app/api/volunteer/queue/route.ts
   src/app/api/volunteer/requests/[requestId]/{route,claim/route,release/route}.ts
   src/app/api/volunteer/requests/[requestId]/research/{route,turn/route,search/route,photos/route,photos/[photoId]/route,review/route,send/route}.ts   대화형 리서치 챗(§8.3). 옛 카드형 research·result 라우트는 지움
@@ -167,7 +169,7 @@ apps/web/                                   Vercel Root Directory
 | `GROQ_API_KEY` | 같음(로컬만) | 로컬 실험 서버(`apps/web/experiments/vision/`) 전용. 제품 코드는 읽지 않는다 |
 | `UPSTAGE_API_KEY` | 같음(사람이 등록, 선택) | v2.1에서 글자 읽기를 없앴다. 코드는 더 이상 이 키를 읽지 않는다(Vercel에 남아 있으면 지워도 된다) |
 | Supabase 연동 변수 | Vercel(Supabase 연동이 넣음) | 코드는 URL `SUPABASE_URL ?? NEXT_PUBLIC_SUPABASE_URL`, 키 `SUPABASE_SECRET_KEY ?? SUPABASE_SERVICE_ROLE_KEY`를 읽는다. 값은 보지 않는다 |
-| `DEMO_ACCESS_CODE` | Vercel, 로컬은 시험 설정 | 코드 입력용이 아니라 봉사자 기기 쿠키(`lh_vol`) 서명 비밀. 값을 바꾸면 모든 봉사자 기기의 입장이 풀린다. 없으면 입장이 503 |
+| `DEMO_ACCESS_CODE` | Vercel, 로컬은 시험 설정 | 코드 입력용이 아니라 봉사자 기기 쿠키(`lh_vol`)와 이용자 기기 쿠키(`lh_device`)의 서명 비밀(용도별로 달리 만든다). 값을 바꾸면 모든 봉사자 기기의 입장이 풀리고 이용자 기기는 새 기기가 되어 이전 요청이 목록에서 사라진다. 없으면 봉사자 입장이 503이고, 이용자 접수는 기기 없이 된다 |
 | `LLM_MODE` | 시험 설정 | `mock`이면 가짜 응답 |
 | `STORE_MODE` | 시험 설정 | `memory`면 서버 메모리 가짜 저장소 |
 | `EXTRACT_MODE` | 시험 설정 | v2에서는 글자 읽기·요약 가짜 응답. v2.1부터는 `/api/health`의 `extractEngine` 값에만 영향. 리서치 AI의 가짜 응답은 `LLM_MODE=mock`이다 |
@@ -284,11 +286,12 @@ recognition.maxAlternatives = 1;
 | `condition_kind` | text null, check in ('new','used','any') | 서버 정규화, 실패하면 null |
 | `status` | text not null default 'waiting', check in ('waiting','in_progress','done','expired') | |
 | `volunteer_id` | text null, check `^v-[0-9]{2}$` | |
+| `device_id` | text null | 접수한 이용자 기기 ID(`u-`+32자리, `lh_device`에서 뽑음). 처음 만들 때만 저장하고 같은 `client_request_id`를 다시 보내도 덮어쓰지 않는다. 옛 요청·시연 요청은 null(번호만 알면 조회되고 어느 기기 목록에도 안 나온다). 마이그레이션 `20261123000000_request_device.sql`, 되돌리기 `supabase/rollback/20261123000000_request_device_down.sql` |
 | `claimed_at`, `done_at` | timestamptz null | 10분 지표 |
 | `release_count` | int default 0 | 반납 기록 |
 | `created_at`, `updated_at` | timestamptz default now() | |
 
-인덱스 (status, created_at). RLS 켬, 정책 없음.
+인덱스 (status, created_at), (device_id, created_at desc) where device_id is not null. RLS 켬, 정책 없음.
 
 **`results`**
 
@@ -314,13 +317,13 @@ waiting --24시간--> expired
 in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count+1)
 ```
 
-**보관**: `waiting`이 24시간을 넘으면 `expired`, `expired`는 24시간 뒤 삭제, `done`은 `done_at` 기준 7일 뒤 삭제(기간은 이용자 결정 대기). 정리는 SQL 함수가 호출될 때 함께 한다. `pg_cron`은 무료판 사용 가능 여부가 미확인이라 쓰지 않는다. 플로우 A 초안의 "24시간 뒤 삭제"를 이것으로 바꾼다.
+**보관**: `waiting`이 24시간을 넘으면 `expired`(시연 요청 `is_demo`는 제외: 시간이 지나도 `waiting`으로 남아 봉사자 대기열에 계속 보인다. 메모리 저장소, Supabase 대기열 조회 `created_at > 24시간 전 or is_demo`, `register_request`의 정리 모두 같다), `expired`는 24시간 뒤 삭제, `done`은 `done_at` 기준 7일 뒤 삭제(기간은 이용자 결정 대기). 정리는 SQL 함수가 호출될 때 함께 한다. `pg_cron`은 무료판 사용 가능 여부가 미확인이라 쓰지 않는다. 플로우 A 초안의 "24시간 뒤 삭제"를 이것으로 바꾼다.
 
 **SQL 함수**(서버 키로만 실행. `revoke execute ... from public, anon, authenticated`, `grant ... to service_role`, `security invoker`, `set search_path = ''`)
 
 | 함수 | 하는 일 | 결과(`out_outcome`) |
 |---|---|---|
-| `register_request(...)` | 플로우 A 접수. 같은 `client_request_id`면 기존 행, 아니면 날짜별 다음 번호로 삽입 | `created` / `existing` |
+| `register_request(..., p_device_id text default null)` | 플로우 A 접수. 같은 `client_request_id`면 기존 행(기기 ID는 덮어쓰지 않음), 아니면 날짜별 다음 번호로 삽입하며 기기 ID를 저장. 마지막 인자가 기본값이라 7개 인자 호출(마이그레이션 전 앱)도 된다. 앱은 마이그레이션 전에 8번째 인자를 모르는 DB를 만나면 빼고 다시 보낸다 | `created` / `existing` |
 | `claim_request(p_request_id, p_volunteer_id)` | `update ... set status='in_progress' ... where id=$1 and status='waiting' returning ...` 한 문장. 실패하면 현재 상태를 보고 판정 | `claimed` / `already_mine` / `taken` / `done` / `expired` / `not_found` |
 | `release_request(p_request_id, p_volunteer_id)` | 맡은 본인일 때만 `waiting`으로, `volunteer_id`·`claimed_at` null, `release_count+1` | `released` / `not_yours` / `not_in_progress` / `not_found` |
 | `complete_request(p_request_id, p_volunteer_id, 결과 필드)` | 한 트랜잭션에서 `results` 삽입과 `status='done', done_at=now()`. 이미 `done`이고 본인 결과면 기존 행을 돌려줌(재전송해도 같은 결과) | `completed` / `existing` / `not_yours` / `not_in_progress` / `not_found` |
@@ -374,7 +377,9 @@ RLS 켬, 정책 없음, `anon`·`authenticated` 권한 회수, `service_role`만
 | 경로 | 성공 | 실패 |
 |---|---|---|
 | `POST /api/requests` `{clientRequestId, product, budget, condition, details?}` | 201 `{requestId, queueNumber, status:"waiting"}`, 같은 `clientRequestId` 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`, 413 `too_large`(본문 32KB 초과), 401, 429, 503. 품목 사전(헤드셋)에 없는 물건도 받고 `item`은 null로 둔다(2026-11-18 A6, 전에는 422 `need_item`) |
-| `GET /api/requests/{id}` | 200 `{requestId, queueNumber, status, product}`. `status="done"`이면 `result:{candidateName, purchaseUrl, guide, summary}`를 덧붙임(플로우 C 경계) | 400, 404 `not_found`, 401, 429, 503 |
+| `GET /api/requests` | 200 `{items:[{requestId, queueNumber, status, product, createdAt, review?, sentAt?}]}`: 쿠키 `lh_device`의 기기가 접수한 요청만, 최신순 최대 20건. `done`이면 `review`(리뷰 문단)와 `sentAt`을 붙인다. 쿠키가 없거나 틀리면 새로 심고 빈 목록. `Cache-Control: no-store`. 다른 기기의 요청은 담기지 않는다 | 429(분당 60), 503 |
+| `GET /api/requests/{id}` | 200 `{requestId, queueNumber, status, product}`. `status="done"`이면 `result:{candidateName, purchaseUrl, guide, summary}`를 덧붙임(플로우 C 경계). 요청에 기기 ID가 있으면 같은 기기 쿠키여야 한다(아니면 없는 요청처럼 404). 기기 ID가 없는 행(옛 요청·시연)은 그대로 조회 | 400, 404 `not_found`, 401, 429, 503 |
+| `POST /api/requests/{id}/push` | 푸시 구독 붙이기. `GET {id}`와 같은 소유 규칙(다른 기기·쿠키 없음은 404) | 400, 404, 409, 429, 503 |
 
 - `details`는 선택이다: `{summary, qa:[{q, a}]}`(이용자 음성 대화가 확정할 때 서버가 `request`에 실어 주고 화면은 그대로 접수로 보낸다). 서버가 길이·개수·제어 문자·전화번호 모양을 거르고, 쓸 수 없는 `details`는 무시한 채 접수는 그대로 된다. 처음 접수된 대기 요청에만 `request_details`에 저장하며, 표가 없거나(마이그레이션 전) 저장이 실패해도 접수는 성공한다. 로그에는 ` details=saved|exists|none|ignored|unavailable|failed`만 남기고 글은 남기지 않는다. 이용자 상태 조회(`GET /api/requests/{id}`)와 대기열에는 `details`를 내보내지 않는다.
 
@@ -428,7 +433,7 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 이용자 화면(`/`)은 동료가 만든 apps/user-voice-ui(PR #40)의 화면이다. 화면(`public/voice/index.html`)과 서버 계약은 원본 그대로 옮겼고, 아래 둘만 바꿨다. apps/user-voice-ui는 그대로 두고 읽기만 한다. 봉사자용 `/api/chat`과 경로가 겹쳐 서버는 `/api/voice/chat`이다.
 
 - 서버는 대화를 저장하지 않는다(무상태). 서버리스는 인스턴스가 바뀌면 메모리 세션이 사라지므로 화면이 대화 기록(`history`)을 한 턴마다 함께 보낸다.
-- 확정(`done`)하면 화면이 `POST /api/requests`를 불러 봉사자 대기열에 올린다. 대화 id(`sessionId`)가 `clientRequestId`라 다시 보내도 번호가 늘지 않는다. 접수가 실패해도 화면 흐름(기기 안 목록)은 그대로다.
+- 확정(`done`)하면 화면이 `POST /api/requests`를 불러 봉사자 대기열에 올린다. 대화 id(`sessionId`)가 `clientRequestId`라 다시 보내도 번호가 늘지 않는다. 접수가 실패해도 화면 흐름(기기 안 목록)은 그대로다. 접수·목록 응답이 `lh_device`를 심으므로(같은 출처 요청이라 쿠키가 자동으로 간다) 화면은 코드를 다루지 않는다.
 
 | 항목 | 값 |
 |---|---|

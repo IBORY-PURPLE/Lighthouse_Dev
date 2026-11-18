@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { currentDeviceId } from "@/lib/deviceSession";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
 import { getRequestStore, type StoredRequest } from "@/lib/requestStore";
 
 // 다시 열기 조회. TSD §8.4, notes-flow-a.md C4.
+// 기기 ID가 붙은 요청은 그 기기의 쿠키(lh_device)로만 조회된다. 다른 기기·쿠키 없음은 없는 요청과 같은 404다.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -47,7 +49,7 @@ async function handleGet(request: NextRequest, requestId: string): Promise<Outco
   const startedAt = Date.now();
   let row: StoredRequest | null;
   try {
-    row = await store.get(requestId.toLowerCase());
+    row = await store.getForDevice(requestId.toLowerCase(), currentDeviceId(request));
   } catch {
     return {
       response: failure(503, { error: "store_unavailable" }),

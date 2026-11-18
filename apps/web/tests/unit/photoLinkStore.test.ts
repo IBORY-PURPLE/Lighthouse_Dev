@@ -29,6 +29,7 @@ async function opened(volunteerId = `d-${randomUUID().replace(/-/g, "").slice(0,
     brand: "Sony",
     item: "헤드셋",
     conditionKind: "new",
+    deviceId: null,
   });
   expect(await requests.claim(reg.requestId, volunteerId)).toBe("claimed");
   const o = await research.open(reg.requestId, volunteerId);

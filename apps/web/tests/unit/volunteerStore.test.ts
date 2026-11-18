@@ -37,6 +37,7 @@ function input(clientRequestId: string, overrides: Partial<RegisterInput> = {}):
     brand: "Sony",
     item: "헤드셋",
     conditionKind: "new",
+    deviceId: null,
     ...overrides,
   };
 }
@@ -303,6 +304,10 @@ function recorder(handlers: {
               void value;
               return builder;
             },
+            or(filter) {
+              filters.push(`or ${filter.replace(/\.gt\.[^,]+/, ".gt.<cutoff>")}`);
+              return builder;
+            },
             order(column, options) {
               filters.push(`order ${column} ${options.ascending ? "asc" : "desc"}`);
               return builder;
@@ -463,7 +468,8 @@ describe("Supabase 저장소: 봉사자 메서드", () => {
       calls.find((call) => call.kind === "select" && call.name.startsWith(name) && call.filters?.includes(pick))?.filters;
     expect(filtersOf("requests", "eq status=waiting")).toEqual([
       "eq status=waiting",
-      "gt created_at",
+      // 24시간 안의 대기와 시연 요청(시간이 지나도 남는다)을 한 번에 건다.
+      "or created_at.gt.<cutoff>,is_demo.eq.true",
       "order created_at asc",
       `limit ${QUEUE_LIMIT}`,
     ]);

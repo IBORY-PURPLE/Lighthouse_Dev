@@ -222,6 +222,7 @@ async function harness(): Promise<Harness> {
     brand: "Sony",
     item: "헤드셋",
     conditionKind: "new",
+    deviceId: null,
   });
   expect(await requests.claim(reg.requestId, volunteerId)).toBe("claimed");
   const opened = await research.open(reg.requestId, volunteerId);

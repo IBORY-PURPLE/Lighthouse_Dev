@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { applyDeviceCookie, resolveDevice } from "@/lib/deviceSession";
 import { parseRequest } from "@/lib/parseRequest";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
 import { readLimitedText } from "@/lib/readLimited";
@@ -10,11 +11,13 @@ import {
 import {
   getRequestStore,
   normalizeCondition,
+  type DeviceListItem,
   type RegisterResult,
 } from "@/lib/requestStore";
 import type { RequestDetailsView } from "@/lib/volunteerView";
 
-// 플로우 A 접수. TSD §8.4, notes-flow-a.md C4(검사 순서).
+// 플로우 A 접수와 이 기기의 요청 목록. TSD §8.4, notes-flow-a.md C4(검사 순서).
+// 기기 쿠키(lh_device)가 없거나 틀리면 접수·목록 응답에서 새로 심는다. 이용자는 코드를 입력하지 않는다.
 // 본문의 details(이용자가 확인한 요약과 질문·답)는 선택이다. 잘못된 details는 무시하고 접수는 그대로 된다.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +27,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const checkRateLimit = createRateLimiter({ limit: 30, windowMs: 60_000 });
+const checkListRateLimit = createRateLimiter({ limit: 60, windowMs: 60_000 });
 
 interface Outcome {
   response: NextResponse;
@@ -76,7 +80,7 @@ async function readAnswers(request: NextRequest): Promise<Answers | "too_large" 
   };
 }
 
-async function handleRegister(request: NextRequest): Promise<Outcome> {
+async function handleRegister(request: NextRequest, deviceId: string | null): Promise<Outcome> {
   const limit = checkRateLimit(clientKey(request.headers));
   if (!limit.allowed) {
     return {
@@ -106,6 +110,7 @@ async function handleRegister(request: NextRequest): Promise<Outcome> {
       brand,
       item,
       conditionKind: normalizeCondition(condition),
+      deviceId,
     });
   } catch {
     return {
@@ -133,7 +138,9 @@ async function handleRegister(request: NextRequest): Promise<Outcome> {
 
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
-  const { response, storeMs, detailsLog } = await handleRegister(request);
+  const device = resolveDevice(request);
+  const { response, storeMs, detailsLog } = await handleRegister(request, device.deviceId);
+  applyDeviceCookie(response, request, device);
   if (storeMs !== undefined) {
     response.headers.set("Server-Timing", `store;dur=${storeMs}`);
   }
@@ -142,6 +149,59 @@ export async function POST(request: NextRequest) {
     `POST /api/requests ${response.status} ${Date.now() - startedAt}ms` +
       (storeMs !== undefined ? ` store=${storeMs}ms` : "") +
       (detailsLog !== undefined ? ` details=${detailsLog}` : ""),
+  );
+  return response;
+}
+
+function toListItem(row: DeviceListItem) {
+  return {
+    requestId: row.requestId,
+    queueNumber: row.queueNumber,
+    status: row.status,
+    product: row.product,
+    createdAt: row.createdAt,
+    // 끝난 요청이면 봉사자가 보낸 리뷰 문단과 보낸 시각(단건 조회와 같은 규칙).
+    ...(row.status === "done" ? { review: row.review ?? null, sentAt: row.sentAt ?? null } : {}),
+  };
+}
+
+// 이 기기가 접수한 요청만 최신순 20건. 다른 기기의 요청은 어떤 경우에도 담기지 않는다.
+async function handleList(request: NextRequest, deviceId: string | null): Promise<Outcome> {
+  const limit = checkListRateLimit(clientKey(request.headers));
+  if (!limit.allowed) {
+    return {
+      response: failure(429, "rate_limited", { "Retry-After": String(limit.retryAfterSeconds) }),
+    };
+  }
+  // 기기를 구분할 수 없으면(서명 비밀 없음) 보여 줄 요청도 없다.
+  if (!deviceId) {
+    return { response: NextResponse.json({ items: [] }, { headers: NO_STORE }) };
+  }
+  const startedAt = Date.now();
+  let rows: DeviceListItem[];
+  try {
+    rows = await getRequestStore().listByDevice(deviceId);
+  } catch {
+    return { response: failure(503, "store_unavailable"), storeMs: Date.now() - startedAt };
+  }
+  return {
+    response: NextResponse.json({ items: rows.map(toListItem) }, { headers: NO_STORE }),
+    storeMs: Date.now() - startedAt,
+  };
+}
+
+export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
+  const device = resolveDevice(request);
+  const { response, storeMs } = await handleList(request, device.deviceId);
+  applyDeviceCookie(response, request, device);
+  if (storeMs !== undefined) {
+    response.headers.set("Server-Timing", `store;dur=${storeMs}`);
+  }
+  // 상품명과 기기 ID는 남기지 않는다. 상태 코드와 소요 시간만.
+  console.info(
+    `GET /api/requests ${response.status} ${Date.now() - startedAt}ms` +
+      (storeMs !== undefined ? ` store=${storeMs}ms` : ""),
   );
   return response;
 }

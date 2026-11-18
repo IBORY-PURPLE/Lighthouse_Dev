@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { currentDeviceId } from "@/lib/deviceSession";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
 import { getRequestStore } from "@/lib/requestStore";
 import { readJsonBody } from "@/lib/researchApi";
 import { parseSubscription, pushPublicKey, savePushSubscription } from "@/lib/webPush";
 
 // 이용자 기기의 웹 푸시 구독을 요청에 붙인다(A13). 리뷰를 보내면 이 구독으로 알림을 한 번 보낸다.
-// 요청 번호(UUID)를 가진 기기만 부를 수 있다. 아직 끝나지 않은(waiting·in_progress) 요청만 받는다.
+// 요청 번호(UUID)를 가진 기기만 부를 수 있다. 기기 ID가 붙은 요청은 그 기기의 쿠키(lh_device)가 있어야 한다(아니면 404). 아직 끝나지 않은(waiting·in_progress) 요청만 받는다.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!subscription) return failure(400, "invalid_subscription");
   const id = requestId.toLowerCase();
   try {
-    const row = await getRequestStore().get(id);
+    const row = await getRequestStore().getForDevice(id, currentDeviceId(request));
     if (!row) return failure(404, "not_found");
     if (row.status !== "waiting" && row.status !== "in_progress") return failure(409, "request_closed");
     await savePushSubscription(id, subscription);

@@ -27,6 +27,8 @@ export interface RegisterInput {
   /** 품목 사전으로 알아본 품목. 사전에 없는 물건이면 null이다(A6). */
   item: string | null;
   conditionKind: ConditionKind | null;
+  /** 접수한 기기 ID(쿠키 lh_device에서 뽑은 것). 기기를 구분하지 못하면 null. 처음 만들 때만 저장하고 다시 보내도 덮어쓰지 않는다. */
+  deviceId: string | null;
 }
 
 export interface RegisterResult {
@@ -45,6 +47,14 @@ export interface StoredRequest {
   review?: string | null;
   /** done일 때 보낸 시각(ISO). */
   sentAt?: string | null;
+}
+
+/** 기기별 목록에 담는 개수 상한. */
+export const DEVICE_LIST_LIMIT = 20;
+
+/** 기기별 목록의 한 건: 단건 조회 모양에 접수 시각(ISO)이 붙는다. */
+export interface DeviceListItem extends StoredRequest {
+  createdAt: string;
 }
 
 /** 보낸 결과에서 리뷰 문단(글이 있는 첫 후보의 guide). volunteerView.sentReviewOf와 같은 규칙. */
@@ -69,6 +79,13 @@ export const QUEUE_LIMIT = 20;
 export interface RequestStore {
   register(input: RegisterInput): Promise<RegisterResult>;
   get(requestId: string): Promise<StoredRequest | null>;
+  /**
+   * 이용자 조회용. 행에 기기 ID가 있고 deviceId와 다르면(또는 deviceId가 null이면) 없는 것처럼 null.
+   * 기기 ID가 없는 행(옛 요청·시연 요청)은 get과 같다.
+   */
+  getForDevice(requestId: string, deviceId: string | null): Promise<StoredRequest | null>;
+  /** 이 기기가 접수한 요청만 최신순으로(DEVICE_LIST_LIMIT개). 끝난 요청에는 리뷰와 보낸 시각이 붙는다. */
+  listByDevice(deviceId: string): Promise<DeviceListItem[]>;
   storeKind(): StoreKind;
   /** 서버를 다시 띄워도 남는지. 메모리면 false라 404가 "지워짐"을 뜻하지 않는다. */
   readonly persistent: boolean;
@@ -127,7 +144,7 @@ export class StoreUnavailableError extends Error {
 }
 
 const HOUR_MS = 60 * 60 * 1000;
-/** waiting이 이 시간을 넘으면 expired. */
+/** waiting이 이 시간을 넘으면 expired. 시연 요청(is_demo)은 제외한다. */
 export const WAITING_TTL_MS = 24 * HOUR_MS;
 /** expired는 생성 뒤 이 시간에 지운다(TSD §8.3 "보관": expired 24시간 뒤 삭제). */
 export const DELETE_AFTER_MS = 48 * HOUR_MS;
@@ -166,6 +183,7 @@ interface MemoryRow {
   doneAt: number | null;
   releaseCount: number;
   isDemo: boolean;
+  deviceId: string | null;
 }
 
 interface MemoryResult {
@@ -232,7 +250,7 @@ export function createMemoryStore(
 
   function sweep(current: number) {
     for (const row of [...state.rows.values()]) {
-      if (row.status === "waiting" && current - row.createdAt >= WAITING_TTL_MS) {
+      if (row.status === "waiting" && !row.isDemo && current - row.createdAt >= WAITING_TTL_MS) {
         row.status = "expired";
       }
       if (row.status === "expired" && current - row.createdAt >= DELETE_AFTER_MS) {
@@ -276,11 +294,25 @@ export function createMemoryStore(
       doneAt: null,
       releaseCount: 0,
       isDemo: false,
+      deviceId: null,
       ...fields,
     };
     state.rows.set(row.id, row);
     state.byClient.set(row.clientRequestId, row.id);
     return row;
+  }
+
+  function storedOf(row: MemoryRow): StoredRequest {
+    const sent = row.status === "done" ? state.results.get(row.id) : undefined;
+    return {
+      requestId: row.id,
+      queueNumber: row.queueNumber,
+      status: row.status,
+      product: row.product,
+      ...(sent
+        ? { review: reviewOfCandidates(sent.candidates), sentAt: new Date(sent.sentAt).toISOString() }
+        : {}),
+    };
   }
 
   function mineOf(volunteerId: string): MemoryRow | undefined {
@@ -316,6 +348,7 @@ export function createMemoryStore(
           brand: input.brand,
           item: input.item,
           conditionKind: input.conditionKind,
+          deviceId: input.deviceId,
         },
         current,
       );
@@ -329,23 +362,30 @@ export function createMemoryStore(
     async get(requestId) {
       sweep(now());
       const row = state.rows.get(requestId);
+      return row ? storedOf(row) : null;
+    },
+    async getForDevice(requestId, deviceId) {
+      sweep(now());
+      const row = state.rows.get(requestId);
       if (!row) return null;
-      const sent = row.status === "done" ? state.results.get(requestId) : undefined;
-      return {
-        requestId: row.id,
-        queueNumber: row.queueNumber,
-        status: row.status,
-        product: row.product,
-        ...(sent
-          ? { review: reviewOfCandidates(sent.candidates), sentAt: new Date(sent.sentAt).toISOString() }
-          : {}),
-      };
+      if (row.deviceId !== null && row.deviceId !== deviceId) return null;
+      return storedOf(row);
+    },
+    async listByDevice(deviceId) {
+      sweep(now());
+      return [...state.rows.values()]
+        .filter((row) => row.deviceId === deviceId)
+        .sort((a, b) => b.createdAt - a.createdAt || b.queueNumber - a.queueNumber)
+        .slice(0, DEVICE_LIST_LIMIT)
+        .map((row) => ({ ...storedOf(row), createdAt: new Date(row.createdAt).toISOString() }));
     },
     async listQueue(volunteerId) {
       const current = now();
       sweep(current);
       const waiting: QueueItem[] = [...state.rows.values()]
-        .filter((row) => row.status === "waiting" && current - row.createdAt < WAITING_TTL_MS)
+        .filter(
+          (row) => row.status === "waiting" && (row.isDemo || current - row.createdAt < WAITING_TTL_MS),
+        )
         .sort((a, b) => a.createdAt - b.createdAt)
         .slice(0, QUEUE_LIMIT)
         .map((row) => ({
@@ -530,6 +570,8 @@ export interface RpcClient {
 export interface QueryBuilder extends PromiseLike<DbResult> {
   eq(column: string, value: string): QueryBuilder;
   gt(column: string, value: string): QueryBuilder;
+  /** PostgREST or 조건 글(예: "a.gt.1,b.eq.true"). */
+  or(filter: string): QueryBuilder;
   order(column: string, options: { ascending: boolean }): QueryBuilder;
   limit(count: number): QueryBuilder;
   maybeSingle(): PromiseLike<DbResult>;
@@ -588,6 +630,12 @@ function toRegisterResult(data: unknown): RegisterResult {
   };
 }
 
+/** 행의 기기 ID 열. 열이 아직 없거나 비었으면 null. */
+function deviceIdOf(data: unknown): string | null {
+  const value = (data as Record<string, unknown> | null)?.device_id;
+  return typeof value === "string" ? value : null;
+}
+
 function toStoredRequest(data: unknown): StoredRequest | null {
   if (data === null || data === undefined) return null;
   const row = data as Record<string, unknown>;
@@ -600,9 +648,10 @@ function toStoredRequest(data: unknown): StoredRequest | null {
     throw new StoreUnavailableError("unexpected requests row");
   }
   let status = row.status;
-  // 정리는 접수 때만 하므로, 조회 때는 24시간 지난 waiting을 expired로 읽는다.
+  // 정리는 접수 때만 하므로, 조회 때는 24시간 지난 waiting을 expired로 읽는다. 시연 요청은 제외한다.
   if (
     status === "waiting" &&
+    row.is_demo !== true &&
     typeof row.created_at === "string" &&
     Date.now() - Date.parse(row.created_at) >= WAITING_TTL_MS
   ) {
@@ -768,6 +817,8 @@ export function createSupabaseStore(
   let fellBack = false;
   // 봉사자 쪽만 따로 본다. 마이그레이션이 없어도 접수(register_request)는 Supabase에 남겨야 한다.
   let volunteerFellBack = false;
+  // 기기 구분 열(device_id)이 없다는 답을 받았다(마이그레이션 원격 적용 전). 소유 확인 없이 옛 조회로 간다.
+  let deviceFellBack = false;
   // 읽기에 넓은 조회 모양이 필요하다. supabase-js는 그 모양을 갖고 있다.
   const reader = client as VolunteerClient;
 
@@ -802,6 +853,49 @@ export function createSupabaseStore(
     return checked(await client.rpc(fn, args), fn);
   }
 
+  /** 끝난 요청이면 보낸 리뷰 문단을 같이 준다. 결과를 못 읽어도 상태는 그대로 돌려준다. */
+  async function withReview(stored: StoredRequest | null): Promise<StoredRequest | null> {
+    if (!stored || stored.status !== "done") return stored;
+    try {
+      const sent = await client
+        .from("results")
+        .select("candidates, sent_at")
+        .eq("request_id", stored.requestId)
+        .maybeSingle();
+      const row = sent.error ? null : (sent.data as Record<string, unknown> | null);
+      if (!row) return stored;
+      return {
+        ...stored,
+        review: reviewOfCandidates(toCandidates(row.candidates)),
+        sentAt: typeof row.sent_at === "string" ? row.sent_at : null,
+      };
+    } catch {
+      return stored;
+    }
+  }
+
+  /** 소유 확인 없는 옛 조회(기기 구분 열이 없을 때와 get). */
+  async function getLegacy(requestId: string): Promise<StoredRequest | null> {
+    let result: DbResult;
+    try {
+      result = await client
+        .from("requests")
+        .select("id, queue_number, status, product, created_at")
+        .eq("id", requestId)
+        .maybeSingle();
+    } catch {
+      throw new StoreUnavailableError("requests select failed");
+    }
+    if (result.error) {
+      if (isMissingSchema(result.error)) {
+        fellBack = true;
+        return fallback.get(requestId);
+      }
+      throw new StoreUnavailableError("requests select failed");
+    }
+    return withReview(toStoredRequest(result.data));
+  }
+
   return {
     get persistent() {
       return !fellBack;
@@ -812,17 +906,26 @@ export function createSupabaseStore(
     storeKind: () => (fellBack ? "memory" : "supabase"),
     async register(input) {
       if (fellBack) return fallback.register(input);
+      const args: Record<string, unknown> = {
+        p_client_request_id: input.clientRequestId,
+        p_product: input.product,
+        p_budget: input.budget,
+        p_condition: input.condition,
+        p_brand: input.brand,
+        p_item: input.item,
+        p_condition_kind: input.conditionKind,
+      };
+      // 기기 ID는 있을 때만 보낸다. 마이그레이션 전이라 8번째 인자를 모르는 DB면 빼고 다시 보낸다(요청은 기기 없이 접수된다).
+      const withDevice = input.deviceId !== null && !deviceFellBack;
+      if (withDevice) args.p_device_id = input.deviceId;
       let result: DbResult;
       try {
-        result = await client.rpc("register_request", {
-          p_client_request_id: input.clientRequestId,
-          p_product: input.product,
-          p_budget: input.budget,
-          p_condition: input.condition,
-          p_brand: input.brand,
-          p_item: input.item,
-          p_condition_kind: input.conditionKind,
-        });
+        result = await client.rpc("register_request", args);
+        if (withDevice && result.error && isMissingSchema(result.error)) {
+          deviceFellBack = true;
+          delete args.p_device_id;
+          result = await client.rpc("register_request", args);
+        }
       } catch {
         throw new StoreUnavailableError("register_request failed");
       }
@@ -837,11 +940,16 @@ export function createSupabaseStore(
     },
     async get(requestId) {
       if (fellBack) return fallback.get(requestId);
+      return getLegacy(requestId);
+    },
+    async getForDevice(requestId, deviceId) {
+      if (fellBack) return fallback.getForDevice(requestId, deviceId);
+      if (deviceFellBack) return getLegacy(requestId);
       let result: DbResult;
       try {
         result = await client
           .from("requests")
-          .select("id, queue_number, status, product, created_at")
+          .select("id, queue_number, status, product, created_at, is_demo, device_id")
           .eq("id", requestId)
           .maybeSingle();
       } catch {
@@ -849,26 +957,45 @@ export function createSupabaseStore(
       }
       if (result.error) {
         if (isMissingSchema(result.error)) {
-          fellBack = true;
-          return fallback.get(requestId);
+          deviceFellBack = true;
+          return getLegacy(requestId);
         }
         throw new StoreUnavailableError("requests select failed");
       }
-      const stored = toStoredRequest(result.data);
-      if (!stored || stored.status !== "done") return stored;
-      // 끝난 요청이면 보낸 리뷰 문단을 같이 준다. 결과를 못 읽어도 상태는 그대로 돌려준다.
-      try {
-        const sent = await client.from("results").select("candidates, sent_at").eq("request_id", requestId).maybeSingle();
-        const row = sent.error ? null : (sent.data as Record<string, unknown> | null);
-        if (!row) return stored;
-        return {
-          ...stored,
-          review: reviewOfCandidates(toCandidates(row.candidates)),
-          sentAt: typeof row.sent_at === "string" ? row.sent_at : null,
-        };
-      } catch {
-        return stored;
-      }
+      const owner = deviceIdOf(result.data);
+      if (owner !== null && owner !== deviceId) return null;
+      return withReview(toStoredRequest(result.data));
+    },
+    listByDevice(deviceId) {
+      if (fellBack || deviceFellBack) return fallback.listByDevice(deviceId);
+      return (async () => {
+        let result: DbResult;
+        try {
+          result = await reader
+            .from("requests")
+            .select("id, queue_number, status, product, created_at")
+            .eq("device_id", deviceId)
+            .order("created_at", { ascending: false })
+            .limit(DEVICE_LIST_LIMIT);
+        } catch {
+          throw new StoreUnavailableError("requests select failed");
+        }
+        if (result.error) {
+          if (isMissingSchema(result.error)) {
+            deviceFellBack = true;
+            return fallback.listByDevice(deviceId);
+          }
+          throw new StoreUnavailableError("requests select failed");
+        }
+        if (!Array.isArray(result.data)) bad("requests rows");
+        return Promise.all(
+          result.data.map(async (row): Promise<DeviceListItem> => {
+            const stored = toStoredRequest(row) as StoredRequest;
+            const createdAt = str((row as Record<string, unknown>).created_at, "requests row");
+            return { ...((await withReview(stored)) as StoredRequest), createdAt };
+          }),
+        );
+      })();
     },
     listQueue(volunteerId) {
       return volunteerCall(
@@ -880,7 +1007,8 @@ export function createSupabaseStore(
               .from("requests")
               .select(QUEUE_COLUMNS)
               .eq("status", "waiting")
-              .gt("created_at", cutoff)
+              // 24시간 안의 대기와 시연 요청(시간이 지나도 계속 보인다).
+              .or(`created_at.gt.${cutoff},is_demo.eq.true`)
               .order("created_at", { ascending: true })
               .limit(QUEUE_LIMIT),
             reader

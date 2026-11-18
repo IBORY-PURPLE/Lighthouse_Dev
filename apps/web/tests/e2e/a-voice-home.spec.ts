@@ -142,6 +142,57 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     await volunteer.screenshot({ path: "test-results/voice-volunteer-queue.png" });
   });
 
+  test("기기 두 대에서 보낸 요청은 기기마다 자기 것만 내 구매 요청 목록에 보인다", async ({ browser }) => {
+    const mark = randomUUID().slice(0, 8);
+    const productA = `기기A 키보드 ${mark}`;
+    const productB = `기기B 마우스 ${mark}`;
+    const open = async () => {
+      const context = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": `test-${randomUUID()}` } });
+      const page = await context.newPage();
+      await installFakeSpeech(page);
+      await installFakeSynthesis(page);
+      return { context, page };
+    };
+    const send = (page: Page, product: string) =>
+      page.request.post("/api/requests", {
+        data: { clientRequestId: randomUUID(), product, budget: BUDGET, condition: "새 제품" },
+      });
+
+    const a = await open();
+    const b = await open();
+    try {
+      expect((await send(a.page, productA)).status()).toBe(201);
+      expect((await send(b.page, productB)).status()).toBe(201);
+      // 쿠키는 기기마다 따로 심긴다.
+      const cookieOf = async (context: typeof a.context) =>
+        (await context.cookies()).find((cookie) => cookie.name === "lh_device");
+      const cookieA = await cookieOf(a.context);
+      const cookieB = await cookieOf(b.context);
+      // SameSite=lax는 단위 시험이 헤더로 확인한다(page.request의 쿠키 해석기는 소문자 lax를 None으로 읽는다).
+      expect(cookieA).toMatchObject({ httpOnly: true, path: "/" });
+      expect(cookieA?.value).not.toBe(cookieB?.value);
+
+      for (const [device, mine, other] of [
+        [a, productA, productB],
+        [b, productB, productA],
+      ] as const) {
+        await device.page.goto("/");
+        await device.page.getByRole("button", { name: "저장된 상품 목록" }).click();
+        await expect(device.page.locator("#list")).toHaveClass(/active/);
+        await expect(device.page.locator("#requests .card", { hasText: mine })).toHaveCount(1);
+        await expect(device.page.locator("#requests .card", { hasText: other })).toHaveCount(0);
+      }
+      // 서버가 이 기기 목록을 기준으로 주므로 다른 기기 요청 번호의 단건 조회도 막힌다.
+      const listA = (await (await a.page.request.get("/api/requests")).json()).items as { requestId: string }[];
+      expect(listA).toHaveLength(1);
+      expect((await b.page.request.get(`/api/requests/${listA[0].requestId}`)).status()).toBe(404);
+      expect((await a.page.request.get(`/api/requests/${listA[0].requestId}`)).status()).toBe(200);
+    } finally {
+      await a.context.close();
+      await b.context.close();
+    }
+  });
+
   test("저장된 상품 상세에는 검증 리뷰 한 문단만 있고 후보 목록·구매 링크·가격이 없다", async ({ page }) => {
     await openVoiceHome(page);
     await page.getByRole("button", { name: "저장된 상품 목록" }).click();
