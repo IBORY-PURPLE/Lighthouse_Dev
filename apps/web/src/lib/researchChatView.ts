@@ -283,9 +283,28 @@ export function tagLabel(message: ChatMessage): { chip: string; note: string } |
       return { chip: "찾는 방법", note: slot ? `웹 검색 · ${SLOT_LABEL[slot]}` : "웹 검색" };
     case "review":
       return { chip: "요약 제안", note: "이용자에게 보낼 리뷰" };
+    case "brief":
+      return { chip: "이용자 요청", note: "기종 질문 전에 확인" };
     default:
       return null;
   }
+}
+
+const isBrief = (message: ChatMessage) => message.role === "ai" && message.tag === "brief";
+
+/** 이용자 요청 확인 표시 메시지(brief)가 대화에 있는가. */
+export function hasBrief(messages: readonly ChatMessage[]): boolean {
+  return messages.some(isBrief);
+}
+
+/**
+ * 봉사자가 이용자 요청 카드를 다 보기 전에는 첫 brief 메시지까지만 보인다(그 뒤 기종 질문 등은 숨긴다).
+ * done이거나 brief가 없으면 그대로. 서버 대화 기록은 바꾸지 않는다(화면이 잠시 숨기는 것이다).
+ */
+export function holdAfterBrief(messages: readonly ChatMessage[], done: boolean): ChatMessage[] {
+  if (done) return [...messages];
+  const index = messages.findIndex(isBrief);
+  return index === -1 ? [...messages] : messages.slice(0, index + 1);
 }
 
 export interface FoldPlan {

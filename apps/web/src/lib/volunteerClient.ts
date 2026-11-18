@@ -2,6 +2,7 @@ import { STATUS } from "./speech";
 import {
   VOLUNTEER_MESSAGES,
   type QueueData,
+  type RequestDetailsView,
   type SentResult,
   type VolunteerRequestView,
 } from "./volunteerView";
@@ -28,6 +29,8 @@ export interface MeResponse {
 export interface DetailResponse {
   request: VolunteerRequestView;
   result: SentResult | null;
+  /** 이용자가 확인한 요약과 질문·답. 맡은(진행 중) 요청에만 오고, 없거나 DB 적용 전이면 null. */
+  details: RequestDetailsView | null;
 }
 
 /** 실패 상태 코드에 맞는 안내 글자. 429는 이용자 화면과 같은 문구. */

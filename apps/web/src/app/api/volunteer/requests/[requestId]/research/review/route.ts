@@ -72,7 +72,7 @@ export async function POST(
         return guardResponse(begun.outcome);
       }
 
-      const source = { view, context: await requestText(id, volunteerId) };
+      const source = { view, context: await requestText(id, volunteerId, true) };
       const material = buildReviewMaterial(source);
       let text: string;
       let label: AiLabel;
@@ -132,7 +132,7 @@ export async function PUT(
       // 필수가 비었거나 확인할 것이 남았으면 API로도 검수를 마칠 수 없다(POST와 같은 조건).
       const blocked = notReady(loaded.view);
       if (blocked) return failWith(409, blocked.error, "missing" in blocked ? { missing: blocked.missing } : {});
-      const source = { view: loaded.view, context: await requestText(id, volunteerId) };
+      const source = { view: loaded.view, context: await requestText(id, volunteerId, true) };
       const trimmed = text.trim();
       const reasons = checkReviewText(trimmed, reviewKnownMaterial(source), "edit");
       if (reasons.length > 0) return failWith(422, "review_blocked", { reasons });

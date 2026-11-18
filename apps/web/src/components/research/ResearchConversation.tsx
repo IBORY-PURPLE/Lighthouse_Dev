@@ -31,6 +31,8 @@ import {
   badgeOf,
   currentSlot,
   failureText,
+  hasBrief,
+  holdAfterBrief,
   holdsRefsQuestion,
   needsBenefitsSearch,
   planFold,
@@ -73,7 +75,7 @@ import {
   saveFlash,
   type DetailResponse,
 } from "@/lib/volunteerClient";
-import { VOLUNTEER_MESSAGES } from "@/lib/volunteerView";
+import { briefSteps, VOLUNTEER_MESSAGES, type RequestDetailsView } from "@/lib/volunteerView";
 
 const PURCHASE_QUICK: QuickReply[] = [
   { id: "purchase.bought", label: "구매했어요", tone: "normal", action: "turn" },
@@ -81,6 +83,16 @@ const PURCHASE_QUICK: QuickReply[] = [
 ];
 
 const PANEL_ID = "vc-panel";
+/** 이용자 요청 카드를 다 봤다는 표시(기기 localStorage, 내용 없음). 끝에 대화(세션) 번호가 붙는다. */
+const BRIEF_DONE_KEY = "lh.vol.brief.v1.";
+
+function briefStored(sessionId: string): boolean {
+  try {
+    return window.localStorage.getItem(BRIEF_DONE_KEY + sessionId) === "done";
+  } catch {
+    return false;
+  }
+}
 const POLL_MS = 2000;
 /** 휴대폰 사진 링크가 열려 있는 동안 새 사진을 읽어 오는 간격. */
 const PHONE_POLL_MS = 2500;
@@ -146,6 +158,12 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [request, setRequest] = useState<DetailResponse["request"] | null>(null);
+  const [details, setDetails] = useState<RequestDetailsView | null>(null);
+  /** 이용자 요청 카드를 다 본 대화(세션) 번호. 저장소가 막힌 브라우저에서도 이 화면 안에서는 이어진다. */
+  const [briefDoneId, setBriefDoneId] = useState<string | null>(null);
+  const briefHold = useRef(false);
+  const briefJump = useRef(false);
+  const briefWasOpen = useRef(false);
   const [view, setView] = useState<ResearchView | null>(null);
   const [draft, setDraft] = useState("");
   const [optimistic, setOptimistic] = useState<OptimisticMessage[]>([]);
@@ -314,6 +332,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         return;
       }
       setRequest(detail.data.request);
+      setDetails(detail.data.details ?? null);
       const result = await fetchResearch(requestId);
       if (cancelled) return;
       if (result.kind === "unauthorized") {
@@ -714,7 +733,7 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
 
   const submitDraft = useCallback(() => {
     const text = draft.trim();
-    if (!text || editing) return;
+    if (!text || editing || briefHold.current) return;
     // "QR", "휴대폰으로 찍을게요" 같은 말은 턴을 보내지 않고 사진 QR 창을 연다(낱말 대조, AI 호출 없음).
     const now = viewRef.current;
     if (now && now.purchase !== "research" && isPhonePhotoCommand(text)) {
@@ -1115,6 +1134,40 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     [view, shown],
   );
 
+  // ----- 이용자 요청 카드: 구매 여부를 고른 뒤 기종 질문 전에 한 장씩 확인한다. 다 보기 전에는 그 뒤 대화를 숨기고 입력을 막는다 -----
+
+  const briefDone = view ? briefDoneId === view.sessionId || briefStored(view.sessionId) : false;
+  const briefOpen = hasBrief(shown) && !briefDone;
+  useEffect(() => {
+    briefHold.current = briefOpen;
+  }, [briefOpen]);
+  const logMessages = useMemo(() => holdAfterBrief(shown, briefDone), [shown, briefDone]);
+
+  const finishBrief = useCallback(() => {
+    const id = viewRef.current?.sessionId;
+    if (!id) return;
+    try {
+      window.localStorage.setItem(BRIEF_DONE_KEY + id, "done");
+    } catch {
+      // 저장소가 막혀도 이 화면에서는 다 본 것으로 이어 간다.
+    }
+    briefJump.current = true;
+    setBriefDoneId(id);
+  }, []);
+
+  const brief = useMemo(
+    () => (request ? { steps: briefSteps(request, details), done: briefDone, onDone: finishBrief } : undefined),
+    [request, details, briefDone, finishBrief],
+  );
+
+  // 카드가 처음 나타나면 첫 장 제목으로 초점을 옮긴다(입력창은 잠겨 있다).
+  useEffect(() => {
+    if (briefOpen && !briefWasOpen.current) {
+      document.querySelector<HTMLElement>('[data-testid="request-brief"] .vc-brief-title')?.focus();
+    }
+    briefWasOpen.current = briefOpen;
+  }, [briefOpen]);
+
   // ----- "모은 정보" 칸 누르기: 그 칸의 마지막 질문 말풍선으로 스크롤하고 초점을 옮긴다(서버 호출 없음) -----
 
   const performJump = useCallback((seq: number) => {
@@ -1126,6 +1179,16 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
     el.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
     el.focus({ preventScroll: true });
   }, []);
+
+  // [다 봤어요]를 누르면 브리핑 뒤 첫 질문으로 초점과 스크롤을 옮긴다.
+  useEffect(() => {
+    if (!briefJump.current || !briefDone) return;
+    const briefAt = shown.findIndex((message) => message.role === "ai" && message.tag === "brief");
+    const question = briefAt === -1 ? undefined : shown.slice(briefAt + 1).find((message) => message.role === "ai" && message.tag === "question");
+    if (!question) return;
+    briefJump.current = false;
+    performJump(question.seq);
+  }, [briefDone, shown, performJump]);
 
   // 접힌 목록을 연 다음 그려지면 옮긴다.
   useEffect(() => {
@@ -1240,10 +1303,15 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
   const idle = !thinking && optimistic.length === 0 && !editing && !reviewShown;
   let quick: QuickReply[] = idle ? lastQuick : [];
   if (idle && view.purchase === "unset" && quick.length === 0) quick = PURCHASE_QUICK;
+  if (briefOpen) quick = [];
+  const briefHint =
+    details && details.qa.length > 0 ? `구매 여부를 고르면 이용자 답 ${details.qa.length}개를 차례로 보여 드려요` : undefined;
   // 이용자가 말한 조건(새 제품·중고 또는 자유 문장)과 브랜드를 빠뜨리지 않는다.
   const reviewReady = reviewShown && view.review.status === "confirmed";
   const photoCount = view.photos.length;
-  const placeholder = hero
+  const placeholder = briefOpen
+    ? "이용자 요청을 먼저 확인해 주세요"
+    : hero
     ? `${subject}${eulReul(subject)} 써 본 경험을 편하게 적어 주세요.${view.purchase === "research" ? "" : " 사진도 올릴 수 있어요."}`
     : editing
       ? "문단을 고치는 중이에요"
@@ -1287,8 +1355,8 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
         <HeroBackdrop variant={hero ? "hero" : "chat"} />
         <SidePane id={SIDE_PANE_ID} open={panels.mineOpen} pane={pane} onClose={pane.close} onOpen={panels.toggleMine} toggleRef={sideToggleRef} currentId={requestId} queueHeadingRef={queueHeadingRef} mineHeadingRef={mineHeadingRef} />
         <main className="vc-main">
-          {hero && <HeroCopy subject={subject} pill={`요청을 맡았어요 · 이용자: “${request.product}”`} />}
-          {!hero && <CurrentQuestionLine slot={slot} required={slot ? requiredSlots(view.purchase).includes(slot) : false} />}
+          {hero && <HeroCopy subject={subject} pill={`요청을 맡았어요 · 이용자: “${request.product}”`} hint={briefHint} />}
+          {!hero && !briefOpen && <CurrentQuestionLine slot={slot} required={slot ? requiredSlots(view.purchase).includes(slot) : false} />}
           <div
             ref={scrollRef}
             className="vc-scroll"
@@ -1300,16 +1368,17 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
           >
             {!hero && (
               <ChatLog
-                messages={shown}
+                messages={logMessages}
                 photos={view.photos}
                 slots={view.slots}
                 fold={fold}
                 foldOpen={foldOpen}
                 onToggleFold={() => setFoldOpen((value) => !value)}
                 optimistic={optimistic}
-                thinking={thinking}
+                thinking={briefOpen ? null : thinking}
                 uploadingThumb={uploadingThumb}
                 actions={actions}
+                brief={brief}
               >
                 {editing ? (
                   <ReviewEditor
@@ -1378,9 +1447,9 @@ export function ResearchConversation({ requestId }: { requestId: string }) {
               variant={hero ? "hero" : "docked"}
               value={draft}
               placeholder={placeholder}
-              attachVisible={view.purchase !== "research"}
+              attachVisible={view.purchase !== "research" && !briefOpen}
               attachOpen={attachOpen}
-              readOnly={editing}
+              readOnly={editing || briefOpen}
               onChange={setDraft}
               onSubmit={submitDraft}
               onToggleAttach={() => setAttachOpen((value) => !value)}

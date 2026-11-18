@@ -437,6 +437,59 @@ describe("질문 순서", () => {
   });
 });
 
+describe("이용자 요청 확인 표시(brief)", () => {
+  const briefsOf = (messages: NextMessage[]) => messages.filter((message) => message.tag === "brief");
+
+  it("빠른 답으로 구매 여부를 정하면 기종 질문 앞에 표시 메시지가 한 번 들어간다(봉사자 말풍선 다음)", async () => {
+    for (const replyId of ["purchase.bought", "purchase.research"] as const) {
+      const h = await harness();
+      const result = await h.step({ type: "quick", replyId });
+      expect(result.messages.map((message) => message.tag ?? null)).toEqual([null, "brief", "question"]);
+      expect(result.messages[1]).toMatchObject({ role: "ai", slot: null, ai: "none", body: { kind: "brief", text: text.BRIEF_NOTE } });
+      expect(result.messages.at(-1)).toMatchObject({ tag: "question", slot: "model" });
+    }
+  });
+
+  it("봉사자 글에서 AI가 구매 여부를 읽은 턴에도 한 번, 칸 채움 말풍선 다음에 들어간다", async () => {
+    const h = await harness();
+    const result = await h.step(say("WH-CH720N 샀어요"), {
+      intent: "reply",
+      fills: [fill("model", "WH-CH720N", "WH-CH720N 샀어요")],
+      purchase: { value: "bought", evidence: "WH-CH720N 샀어요" },
+    });
+    expect(briefsOf(result.messages)).toHaveLength(1);
+    const tags = result.messages.map((message) => message.tag ?? null);
+    expect(tags.indexOf("brief")).toBe(tags.indexOf("fill") + 1);
+    expect(result.messages[tags.indexOf("fill")]).toMatchObject({ slot: "purchase" });
+  });
+
+  it("표시 메시지의 본문에는 이용자가 말한 글이 없다(보낸 대화 기록이 봉사자 기기에 글로 남는다)", async () => {
+    const h = await harness();
+    const result = await h.step({ type: "quick", replyId: "purchase.bought" });
+    const brief = briefsOf(result.messages)[0];
+    expect(brief.body).toEqual({ kind: "brief", text: text.BRIEF_NOTE });
+    expect(JSON.stringify(brief)).not.toMatch(/소니|예산|헤드셋|원/);
+  });
+
+  it("구매 여부가 이미 정해진 뒤의 구매 버튼, 칸 채우기, 글 턴에는 넣지 않는다", async () => {
+    const h = await harness();
+    await h.step({ type: "quick", replyId: "purchase.bought" });
+    const again = await h.step({ type: "quick", replyId: "purchase.research" });
+    expect(briefsOf(again.messages)).toHaveLength(0);
+    expect(again.messages.at(-1)).toMatchObject({ body: { text: text.PURCHASE_FIXED } });
+    const next = await h.step(say("WH-CH720N"), replyAi(fill("model", "WH-CH720N")));
+    expect(briefsOf(next.messages)).toHaveLength(0);
+    const view = await h.view();
+    expect(view.messages.filter((message) => message.tag === "brief")).toHaveLength(1);
+  });
+
+  it("구매 여부를 읽지 못한 글 턴에는 넣지 않는다", async () => {
+    const h = await harness();
+    const result = await h.step(say("안녕하세요"));
+    expect(briefsOf(result.messages)).toHaveLength(0);
+  });
+});
+
 describe("evidence 변형 3개", () => {
   const cases: [string, string, string][] = [
     ["공백이 달라도", "가볍고귀가 덜아파요", "가볍고 귀가 덜 아파요"],

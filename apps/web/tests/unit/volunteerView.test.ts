@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  BRIEF_EMPTY_NOTE,
+  briefSteps,
   formatSentAt,
   newRequestIds,
   quoteOf,
@@ -120,5 +122,64 @@ describe("sentReviewOf·sentModelOf", () => {
     const long = "가".repeat(100);
     expect(sentModelOf(sent([{ name: long, guide: "x" }]))).toBe(long);
     expect(sentModelOf(sent([]))).toBeNull();
+  });
+});
+
+describe("briefSteps(이용자 요청 카드)", () => {
+  const request = {
+    product: "소니 무선 헤드셋",
+    item: "헤드셋",
+    brand: "Sony",
+    budget: "십만 원 정도",
+    conditionKind: "new" as const,
+    condition: "새 제품",
+  };
+  const details = {
+    summary: "소니 무선 헤드셋, 예산 십만 원",
+    qa: [
+      { q: "어떤 상품을 찾으세요?", a: "소니 무선 헤드셋" },
+      { q: "예산은 얼마인가요?", a: "십만 원 정도" },
+    ],
+  };
+
+  it("1장은 이용자가 확인한 요약과 접수 정보, 2장부터 질문 k/n과 이용자 답이다", () => {
+    const steps = briefSteps(request, details);
+    expect(steps).toHaveLength(3);
+    expect(steps[0]).toEqual({
+      key: "summary",
+      title: "이용자가 확인한 요청",
+      lines: [
+        { label: "요약", text: "소니 무선 헤드셋, 예산 십만 원" },
+        { label: "접수 정보", text: structuredLine(request) },
+      ],
+    });
+    expect(steps[1]).toEqual({
+      key: "qa-0",
+      title: "질문 1/2",
+      lines: [
+        { label: "질문", text: "어떤 상품을 찾으세요?" },
+        { label: "이용자 답", text: "소니 무선 헤드셋" },
+      ],
+    });
+    expect(steps[2].title).toBe("질문 2/2");
+    expect(steps[2].lines[1]).toEqual({ label: "이용자 답", text: "십만 원 정도" });
+  });
+
+  it("details가 없으면 1장만, 요약 대신 요청 글과 질문·답 기록이 없다는 안내를 보인다", () => {
+    for (const none of [null, { summary: "", qa: [] }]) {
+      const steps = briefSteps(request, none);
+      expect(steps).toHaveLength(1);
+      expect(steps[0].lines[0]).toEqual({ label: "요청", text: "소니 무선 헤드셋" });
+      expect(steps[0].note).toBe(BRIEF_EMPTY_NOTE);
+      expect(BRIEF_EMPTY_NOTE).toBe("질문·답 기록이 없는 요청이에요");
+    }
+  });
+
+  it("요약만 있고 질문·답이 없어도 안내를 붙인다. 요약이 비고 질문·답이 있으면 요청 글을 쓴다", () => {
+    expect(briefSteps(request, { summary: "요약", qa: [] })[0].note).toBe(BRIEF_EMPTY_NOTE);
+    const steps = briefSteps(request, { summary: "", qa: details.qa });
+    expect(steps[0].lines[0]).toEqual({ label: "요청", text: "소니 무선 헤드셋" });
+    expect(steps[0].note).toBeUndefined();
+    expect(steps).toHaveLength(3);
   });
 });

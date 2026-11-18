@@ -53,6 +53,18 @@ export interface SentResult {
   candidates: SentCandidate[];
 }
 
+/** 이용자 음성 대화의 질문과 답 한 짝. */
+export interface RequestQa {
+  q: string;
+  a: string;
+}
+
+/** 이용자가 확인한 요약과 질문·답(봉사자 브리핑). 요청을 맡은 봉사자에게만 간다. */
+export interface RequestDetailsView {
+  summary: string;
+  qa: RequestQa[];
+}
+
 /** 요청 상세의 후보 카드 한 장(시연용 예시 후보). 가격·재고는 담지 않는다. */
 export interface CandidateView {
   id: string;
@@ -111,6 +123,51 @@ export function structuredLine(request: {
     condition,
   ];
   return parts.join(" · ");
+}
+
+/** 브리핑 카드 한 장. 장마다 제목 한 줄과 "이름: 글" 줄 몇 개, 있으면 안내 한 줄. */
+export interface BriefStep {
+  key: string;
+  title: string;
+  lines: { label: string; text: string }[];
+  note?: string;
+}
+
+/** 질문·답 기록이 없는 요청(/classic, DB 적용 전)의 안내. */
+export const BRIEF_EMPTY_NOTE = "질문·답 기록이 없는 요청이에요";
+
+/**
+ * 봉사자가 구매 여부를 고른 뒤 기종 질문 전에 한 장씩 확인하는 이용자 요청 카드.
+ * 1장은 이용자가 확인한 요약(없으면 요청 글)과 접수 정보, 2장부터 질문과 이용자 답 한 짝씩이다.
+ * details가 없으면 1장만, 질문·답 기록이 없다는 안내와 함께.
+ */
+export function briefSteps(
+  request: Parameters<typeof structuredLine>[0] & { product: string },
+  details: RequestDetailsView | null,
+): BriefStep[] {
+  const facts = structuredLine(request);
+  const summary = details?.summary.trim() ?? "";
+  const first: BriefStep = {
+    key: "summary",
+    title: "이용자가 확인한 요청",
+    lines: [
+      { label: summary ? "요약" : "요청", text: summary || request.product },
+      { label: "접수 정보", text: facts },
+    ],
+    ...(details && details.qa.length > 0 ? {} : { note: BRIEF_EMPTY_NOTE }),
+  };
+  const pairs = details?.qa ?? [];
+  return [
+    first,
+    ...pairs.map((pair, index) => ({
+      key: `qa-${index}`,
+      title: `질문 ${index + 1}/${pairs.length}`,
+      lines: [
+        { label: "질문", text: pair.q },
+        { label: "이용자 답", text: pair.a },
+      ],
+    })),
+  ];
 }
 
 /** 서울 날짜를 "일 수"로. 날짜끼리 빼서 오늘·어제를 가른다. */

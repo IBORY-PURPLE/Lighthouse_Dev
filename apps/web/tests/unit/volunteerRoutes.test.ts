@@ -8,7 +8,8 @@ import { GET as queue } from "@/app/api/volunteer/queue/route";
 import { POST as claim } from "@/app/api/volunteer/requests/[requestId]/claim/route";
 import { POST as release } from "@/app/api/volunteer/requests/[requestId]/release/route";
 import { GET as detail } from "@/app/api/volunteer/requests/[requestId]/route";
-import { resetRequestStoresForTest } from "@/lib/requestStore";
+import { resetRequestDetailsForTest, saveRequestDetails } from "@/lib/requestDetails";
+import { getRequestStore, resetRequestStoresForTest } from "@/lib/requestStore";
 import { readVolunteerId, VOLUNTEER_COOKIE } from "@/lib/volunteerSession";
 
 const ORIGIN = "http://localhost:3000";
@@ -101,6 +102,7 @@ describe("봉사자 서버 함수", () => {
     vi.stubEnv("STORE_MODE", "memory");
     vi.stubEnv("VERCEL", "");
     resetRequestStoresForTest();
+    resetRequestDetailsForTest();
     vi.spyOn(console, "info").mockImplementation(() => {});
   });
   afterEach(() => {
@@ -352,6 +354,48 @@ describe("봉사자 서버 함수", () => {
       expect(others.status).toBe(403);
       expect(await others.json()).toEqual({ ok: false, error: "not_yours" });
       expect((await idRoute(detail, "GET", MISSING_ID, a)).status).toBe(404);
+    });
+
+    it("상세 details(이용자 요청 브리핑): 내 진행 중인 요청에만 오고, 맡기 전·남의 것·보낸 뒤에는 없다", async () => {
+      const a = await signIn();
+      const b = await signIn();
+      const { waiting } = await fillDemo(a);
+      const target = waiting[0].requestId;
+      const details = {
+        summary: "소니 무선 헤드셋, 노이즈 캔슬링",
+        qa: [{ q: "어디에 쓰세요?", a: "출퇴근 지하철에서 써요" }],
+      };
+      expect(await saveRequestDetails(target, details)).toBe("saved");
+
+      // 내 진행 중: details가 온다.
+      await idRoute(claim, "POST", target, a);
+      const mine = await (await idRoute(detail, "GET", target, a)).json();
+      expect(mine.details).toEqual(details);
+
+      // 남의 요청은 403이고 글이 없다.
+      const others = await idRoute(detail, "GET", target, b);
+      expect(others.status).toBe(403);
+      expect(JSON.stringify(await others.json())).not.toContain("출퇴근");
+
+      // 대기열 목록에는 details가 없다(맡기 전에는 안 보인다).
+      expect(JSON.stringify(await (await get(queue, "/api/volunteer/queue", a)).json())).not.toContain("출퇴근");
+
+      // 보낸 뒤에는 null이다(저장소가 지운다).
+      const store = getRequestStore();
+      const volunteerId = readVolunteerId(a.slice(VOLUNTEER_COOKIE.length + 1))!;
+      expect((await store.complete(target, volunteerId, [])).outcome).toBe("completed");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const sentView = await idRoute(detail, "GET", target, a);
+      expect(sentView.status).toBe(200);
+      expect((await sentView.json()).details).toBeNull();
+    });
+
+    it("상세 details: 저장된 글이 없으면(옛 요청·DB 적용 전) null이다", async () => {
+      const a = await signIn();
+      const { waiting } = await fillDemo(a);
+      await idRoute(claim, "POST", waiting[0].requestId, a);
+      const body = await (await idRoute(detail, "GET", waiting[0].requestId, a)).json();
+      expect(body.details).toBeNull();
     });
 
     it("상세: 이 기기에서 보낸 완료 요청은 결과와 함께 보인다. 다른 기기는 403", async () => {

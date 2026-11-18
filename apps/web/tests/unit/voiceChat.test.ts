@@ -12,8 +12,10 @@ import {
   MAX_MESSAGE_LENGTH,
   toQueueRequest,
   VOICE_START_MESSAGE,
+  voiceDetails,
   type VoiceTurn,
 } from "@/lib/voiceChat";
+import { readRequestDetails, resetRequestDetailsForTest } from "@/lib/requestDetails";
 import { VOICE_INSTRUCTIONS } from "@/lib/voiceInstructions";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -146,10 +148,18 @@ describe("POST /api/voice/chat (가짜 AI)", () => {
     const body = await (
       await POST(voiceRequest({ sessionId: sessionId(), message: "네", history: CONFIRMING }))
     ).json();
+    // 접수 본문에 이용자가 확인한 요약과 질문·답(details)이 실린다. 마지막 동의("네")와 확인 질문은 뺀다.
     expect(body.request).toEqual({
       product: PRODUCT,
       budget: BUDGET,
       condition: "정하지 않음",
+      details: {
+        summary: `${PRODUCT}, 예산 ${BUDGET}`,
+        qa: [
+          { q: "어떤 상품을 찾으세요?", a: PRODUCT },
+          { q: "예산은 얼마인가요?", a: BUDGET },
+        ],
+      },
     });
   });
 
@@ -176,6 +186,7 @@ describe("POST /api/voice/chat (가짜 AI)", () => {
   it("done의 request로 접수(POST /api/requests)하면 대기번호가 나온다", async () => {
     vi.stubEnv("STORE_MODE", "memory");
     requestStore.resetRequestStoresForTest();
+    resetRequestDetailsForTest();
     const id = sessionId();
     const done = await (
       await POST(voiceRequest({ sessionId: id, message: "네", history: CONFIRMING }))
@@ -189,7 +200,10 @@ describe("POST /api/voice/chat (가짜 AI)", () => {
       }),
     );
     expect(registered.status).toBe(201);
-    expect(await registered.json()).toMatchObject({ queueNumber: 1, status: "waiting" });
+    const created = await registered.json();
+    expect(created).toMatchObject({ queueNumber: 1, status: "waiting" });
+    // 접수에 실린 details가 저장되어 맡은 봉사자에게 내보낼 수 있다.
+    expect(await readRequestDetails(created.requestId)).toEqual(done.request.details);
   });
 
   it("품목을 알아볼 수 없는 확정은 request 없이 돌려준다(기기 안 목록에만 남는다)", async () => {
@@ -387,6 +401,13 @@ describe("POST /api/voice/chat (OpenAI 호출 값과 실패)", () => {
       product: "소니 무선 헤드셋",
       budget: "30만 원 이하",
       condition: "새 제품",
+      details: {
+        summary: "소니 무선 헤드셋, 새 제품으로 30만 원 이하",
+        qa: [
+          { q: "어떤 상품을 찾으세요?", a: PRODUCT },
+          { q: "예산은 얼마인가요?", a: BUDGET },
+        ],
+      },
     });
   });
 
@@ -457,6 +478,71 @@ describe("POST /api/voice/chat (OpenAI 호출 값과 실패)", () => {
     expect(logged).toMatch(/POST \/api\/voice\/chat 200 \d+ms/);
     expect(logged).not.toContain("비밀스러운 말");
     expect(logged).not.toContain("비밀 답변");
+  });
+});
+
+describe("voiceDetails(대화 기록 → 봉사자 브리핑)", () => {
+  const consent = user("네, 등록해 주세요");
+
+  it("질문과 바로 다음 이용자 답을 한 짝으로 묶고, 시작 문장과 마지막 동의는 뺀다", () => {
+    expect(voiceDetails([...CONFIRMING, consent], "요약 글")).toEqual({
+      summary: "요약 글",
+      qa: [
+        { q: "어떤 상품을 찾으세요?", a: PRODUCT },
+        { q: "예산은 얼마인가요?", a: BUDGET },
+      ],
+    });
+  });
+
+  it("확인 중에 고친 말은 남기고, 마지막 동의만 뺀다", () => {
+    const fixed = [
+      ...CONFIRMING,
+      user("아니요, 예산은 20만 원으로 해 주세요"),
+      ai("20만 원으로 고쳐서 다시 확인합니다. 등록할까요?", { status: "confirming" }),
+      consent,
+    ];
+    const qa = voiceDetails(fixed, "요약")?.qa ?? [];
+    expect(qa).toHaveLength(3);
+    expect(qa[2]).toEqual({
+      q: `${PRODUCT}, 예산 ${BUDGET}. 이 내용으로 구매 요청을 등록할까요?`,
+      a: "아니요, 예산은 20만 원으로 해 주세요",
+    });
+    expect(JSON.stringify(qa)).not.toContain("네, 등록해 주세요");
+  });
+
+  it("깨진 JSON 칸과 status가 done·알 수 없는 칸은 건너뛴다", () => {
+    const turns: VoiceTurn[] = [
+      user(VOICE_START_MESSAGE),
+      { role: "assistant", content: "{깨진" },
+      user("첫 답"),
+      ai("끝난 칸", { status: "done" }),
+      user("둘째 답"),
+      { role: "assistant", content: JSON.stringify({ reply: 3, status: "asking" }) },
+      user("셋째 답"),
+      ai("예산은 얼마인가요?"),
+      user("넷째 답"),
+      consent,
+    ];
+    expect(voiceDetails(turns, "요약")?.qa).toEqual([{ q: "예산은 얼마인가요?", a: "넷째 답" }]);
+  });
+
+  it("시작 문장만 있는 기록은 짝이 없다(요약만 남는다). 요약도 없으면 null", () => {
+    expect(voiceDetails([user(VOICE_START_MESSAGE), consent], "요약")).toEqual({ summary: "요약", qa: [] });
+    expect(voiceDetails([user(VOICE_START_MESSAGE), consent], "")).toBeNull();
+  });
+
+  it("12짝까지만 둔다(대화 상한 36칸이면 최대 17짝이다)", () => {
+    const turns: VoiceTurn[] = [user(VOICE_START_MESSAGE)];
+    for (let index = 0; index < 16; index += 1) turns.push(ai(`질문 ${index}`), user(`답 ${index}`));
+    turns.push(consent);
+    const qa = voiceDetails(turns, "요약")?.qa ?? [];
+    expect(qa).toHaveLength(12);
+    expect(qa[0]).toEqual({ q: "질문 0", a: "답 0" });
+  });
+
+  it("긴 말과 전화번호는 cleanRequestDetails가 다듬는다", () => {
+    const turns = [ai("연락처를 알려 주세요"), user("010-1234-5678이에요"), ai("마지막 질문"), consent];
+    expect(voiceDetails(turns, "요약")?.qa).toEqual([{ q: "연락처를 알려 주세요", a: "(전화번호 가림)이에요" }]);
   });
 });
 

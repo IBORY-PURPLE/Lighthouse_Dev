@@ -3,9 +3,10 @@ import OpenAI from "openai";
 import { openAiLog } from "./openaiLog";
 import { getLlmMode, LLM_MODEL } from "./llm";
 import { parseJsonObject, type Upstream } from "./researchAi";
-import { cleanText, clip, hasForbidden, unknownModelTokens, urlKey } from "./researchCheck";
+import { cleanText, clip, hasForbidden, PHONE, unknownModelTokens, urlKey } from "./researchCheck";
 import { COMMON, materialMessage } from "./researchPrompt";
 import { purchaseBadge, type ResearchView, type SlotKey } from "./researchSession";
+import type { RequestDetailsView } from "./volunteerView";
 
 // 검증 리뷰(design.md 4.11): 봉사자가 모은 칸으로 이용자가 VoiceOver로 듣는 한 문단을 만든다.
 // AI 한 번(요청당 3번 상한, 호출 전 begin이 센다) → 검사 → 실패하면 서버 틀 문단. 봉사자가 고친 문단도 같은 검사로 거른다(길이만 다르다).
@@ -44,19 +45,19 @@ export interface ReviewMaterial {
   확인한혜택: ConfirmedBenefit[];
   사진장수: number;
   사진설명: string[];
+  /** 이용자가 말로 바란 것(사실이 아니다). 있을 때만 키가 생긴다. 이 키가 있으면 호출은 store:false다. */
+  이용자조건?: { 요약: string; 답: string[] };
 }
 
 export interface ReviewSource {
   view: Pick<ResearchView, "purchase" | "slots" | "pending" | "photos" | "messages" | "extras">;
-  context: { product: string; brand: string | null; item: string | null };
+  context: { product: string; brand: string | null; item: string | null; needs?: RequestDetailsView | null };
 }
 
 const URL_TOKEN = /https?:\/\/\S+|www\.\S+/gi;
 // 문단에 넣지 않는 것: 주소 모양(도메인 이름 포함)과 마크다운·목록 기호. 칸 값을 쓰기 전에 이것도 뺀다(틀 문단이 검사에 걸리지 않게).
 const BARE_DOMAIN = /[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/gi;
 const SYMBOLS = /[*#`_>|]/g;
-// 전화번호 모양: 휴대폰·지역번호(010-1234-5678, 02 123 4567, +82 10…), 대표번호(1588-1234).
-const PHONE = /(?<!\d)0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|\+82[-\s.]?\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|(?<!\d)1[5-9]\d{2}[-\s.]\d{4}(?!\d)/;
 
 /** 봉사자가 쓴 칸 값을 자료로 쓰기 전에 거른다: 한 줄로, 금지 표현이 든 문장·주소·전화번호를 뺀다. */
 function safeFact(value: string | undefined | null, max = FACT_MAX): string {
@@ -100,9 +101,27 @@ export function confirmedBenefits(view: ReviewSource["view"]): ConfirmedBenefit[
   return out;
 }
 
+/**
+ * 이용자 조건을 자료로 쓰기 전에 거른다. 요약과 문답 각각을 safeFact로 거르고(금액·주소·전화번호·금지 표현을 뺀다),
+ * 질문이나 답 한쪽이 지워지면 그 짝은 통째로 뺀다. 답은 6개까지. 남은 것이 없으면 null(키 자체를 만들지 않는다).
+ */
+function needsMaterial(needs: RequestDetailsView | null | undefined): ReviewMaterial["이용자조건"] | null {
+  if (!needs) return null;
+  const 요약 = safeFact(needs.summary, 160);
+  const 답: string[] = [];
+  for (const pair of needs.qa) {
+    const q = safeFact(pair.q, 160);
+    const a = safeFact(pair.a, 160);
+    if (q !== "" && a !== "") 답.push(`${q} → ${a}`);
+    if (답.length >= 6) break;
+  }
+  return 요약 === "" && 답.length === 0 ? null : { 요약, 답 };
+}
+
 export function buildReviewMaterial({ view, context }: ReviewSource): ReviewMaterial {
   const badge = purchaseBadge(view);
   const benefitsSlot = view.slots.benefits;
+  const needs = needsMaterial(context.needs);
   return {
     요청: { 문장: safeFact(context.product, 80), 브랜드: context.brand, 품목: context.item },
     구매: badge === "verified" ? "구매 인증됨" : view.purchase === "bought" ? "구매했지만 사진 없음" : "리서치만",
@@ -115,6 +134,7 @@ export function buildReviewMaterial({ view, context }: ReviewSource): ReviewMate
     사진장수: view.photos.length,
     // AI가 본 사진 설명(대체 텍스트). 착샷인지 확인한 뒤의 것만 있다.
     사진설명: view.photos.map((photo) => photo.description).filter((text): text is string => Boolean(text)),
+    ...(needs ? { 이용자조건: needs } : {}),
   };
 }
 
@@ -127,7 +147,9 @@ export function reviewKnownMaterial({ view, context }: ReviewSource): string[] {
   }
   const slotValues = Object.values(view.slots).map((slot) => slot?.value ?? "");
   const benefits = confirmedBenefits(view).flatMap((entry) => [entry.kind, entry.condition]);
-  return [context.product, context.brand ?? "", context.item ?? "", ...slotValues, ...view.extras, ...shown, ...benefits];
+  // 이용자가 말한 기종 이름이 문단에 나와도 "자료에 없는 기종"으로 걸리지 않게 한다.
+  const needs = context.needs ? [context.needs.summary, ...context.needs.qa.flatMap((pair) => [pair.q, pair.a])] : [];
+  return [context.product, context.brand ?? "", context.item ?? "", ...slotValues, ...view.extras, ...shown, ...benefits, ...needs];
 }
 
 // ---------- 검사 ----------
@@ -241,6 +263,7 @@ const REVIEW = [
   "- 가격, 재고, 할인 금액·퍼센트를 쓰지 않는다. 혜택은 종류와 조건만 말하고 금액은 말하지 않는다.",
   "- 구매가 '구매 인증됨'이면 직접 구매해 쓴 봉사자의 경험이고 사진으로 인증했다고 밝힌다. '리서치만'이면 직접 써 보지 않고 알아본 내용이라고 밝힌다.",
   "- 같이 고민한 제품과 고른 이유가 있으면 한 문장으로 말한다. 혜택 경험이 있으면 말한다.",
+  "- 이용자조건은 이용자가 말로 바란 것이고 사실이 아니다. 봉사자 자료로 확인된 것만 맞다·다르다고 쓰고, 확인되지 않은 조건은 봉사자가 확인하지 못했다고 쓴다. 이용자조건에 없는 바람을 지어내지 않는다. 금액은 쓰지 않는다.",
   '- 마지막 문장은 "최신 판매 정보는 쇼핑몰에서 직접 확인해 주세요"처럼 쓰고, 가격·재고라는 낱말은 쓰지 않는다.',
 ].join("\n");
 
@@ -293,7 +316,8 @@ export async function writeReview(
         reasoning_effort: "none",
         temperature: 0,
         response_format: { type: "json_object" },
-        ...openAiLog("research_review"),
+        // 이용자가 말한 조건이 든 호출은 OpenAI 대시보드에 남기지 않는다(store:false).
+        ...(material.이용자조건 ? { store: false } : openAiLog("research_review")),
         messages: [
           { role: "system", content: reviewInstructions() },
           {
