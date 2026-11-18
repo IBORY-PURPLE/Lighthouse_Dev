@@ -164,13 +164,14 @@ const BUDGET_PHRASE =
 const UNDECIDED = "정하지 않음";
 
 /**
- * 확정한 요청(product, summary)을 접수 본문으로 바꾼다. 접수는 품목(헤드셋)을 알아볼 수 있어야 받으므로
- * product나 summary에 품목이 없으면 null이다(이 화면의 기기 안 목록에만 남고 대기열에는 올리지 않는다).
+ * 확정한 요청(product, summary)을 접수 본문으로 바꾼다. 품목 사전에 있는 글(헤드셋)이 있으면 그 글을 쓰고,
+ * 없으면 product(비었으면 summary)를 그대로 쓴다. 사전에 없는 물건도 봉사자 대기열에 올린다(2026-11-18 이용자 결정 A6).
+ * product와 summary가 모두 비었을 때만 null이다(이 화면의 기기 안 목록에만 남는다).
  * 예산·조건은 요약 글에서 찾고 없으면 "정하지 않음"이다(조건은 서버가 모르는 값으로 둔다).
  */
 export function toQueueRequest(product: string, summary: string): QueueRequest | null {
   const named = [product, summary].map((text) => text.trim());
-  const chosen = named.find((text) => text && parseRequest(text).item);
+  const chosen = named.find((text) => text && parseRequest(text).item) ?? named.find((text) => text);
   if (!chosen) return null;
   const text = [product, summary].join(" ");
   const condition = /중고/.test(text)

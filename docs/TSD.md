@@ -373,7 +373,7 @@ RLS 켬, 정책 없음, `anon`·`authenticated` 권한 회수, `service_role`만
 
 | 경로 | 성공 | 실패 |
 |---|---|---|
-| `POST /api/requests` `{clientRequestId, product, budget, condition, details?}` | 201 `{requestId, queueNumber, status:"waiting"}`, 같은 `clientRequestId` 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`, 413 `too_large`(본문 32KB 초과), 422 `need_item`, 401, 429, 503 |
+| `POST /api/requests` `{clientRequestId, product, budget, condition, details?}` | 201 `{requestId, queueNumber, status:"waiting"}`, 같은 `clientRequestId` 재전송은 200 같은 본문 | 400 `invalid_request`/`too_long`, 413 `too_large`(본문 32KB 초과), 401, 429, 503. 품목 사전(헤드셋)에 없는 물건도 받고 `item`은 null로 둔다(2026-11-18 A6, 전에는 422 `need_item`) |
 | `GET /api/requests/{id}` | 200 `{requestId, queueNumber, status, product}`. `status="done"`이면 `result:{candidateName, purchaseUrl, guide, summary}`를 덧붙임(플로우 C 경계) | 400, 404 `not_found`, 401, 429, 503 |
 
 - `details`는 선택이다: `{summary, qa:[{q, a}]}`(이용자 음성 대화가 확정할 때 서버가 `request`에 실어 주고 화면은 그대로 접수로 보낸다). 서버가 길이·개수·제어 문자·전화번호 모양을 거르고, 쓸 수 없는 `details`는 무시한 채 접수는 그대로 된다. 처음 접수된 대기 요청에만 `request_details`에 저장하며, 표가 없거나(마이그레이션 전) 저장이 실패해도 접수는 성공한다. 로그에는 ` details=saved|exists|none|ignored|unavailable|failed`만 남기고 글은 남기지 않는다. 이용자 상태 조회(`GET /api/requests/{id}`)와 대기열에는 `details`를 내보내지 않는다.
@@ -433,14 +433,14 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 | 항목 | 값 |
 |---|---|
 | 요청 | `{sessionId, message, reset, history}`. 원본 `{sessionId, message, reset}`에 `history: [{role, content}]`만 더했다. `reset`이면 history는 무시한다 |
-| 응답 | 200 `{reply, status, summary, product, request?}`. `status`는 `asking`·`confirming`·`done`. `request`는 `done`이고 품목(헤드셋)을 알아볼 수 있을 때만 `{product, budget, condition, details?}`(접수 본문 모양). `details`는 서버가 받은 `history`에서 질문(AI가 묻거나 확인한 `asking`·`confirming` 답)과 바로 다음 이용자 말을 짝지어 만든 `{summary, qa}`이고, 마지막 동의 짝과 시작 문장은 뺀다 |
+| 응답 | 200 `{reply, status, summary, product, request?}`. `status`는 `asking`·`confirming`·`done`. `request`는 `done`이고 `product`나 `summary`에 글이 있을 때 `{product, budget, condition, details?}`(접수 본문 모양). 둘 다 비면 없다(로그 `queue=skipped`). `details`는 서버가 받은 `history`에서 질문(AI가 묻거나 확인한 `asking`·`confirming` 답)과 바로 다음 이용자 말을 짝지어 만든 `{summary, qa}`이고, 마지막 동의 짝과 시작 문장은 뺀다 |
 | 실패 | 원본 메시지 그대로: 400(세션 식별자·메시지 길이·답변 비어 있음·대화가 길어짐), 503(키 없음), 500(AI 실패·시간 초과). 새로 더한 것: 400 `대화 기록 오류`·`요청이 너무 큽니다`, 429(주소당 분당 20회) |
 | 호출 | OpenAI Responses API. 모델 `OPENAI_MODEL`(없으면 `gpt-4.1-mini`), `max_output_tokens: 450`, JSON 모드, `store: false`, 25초 마감. 키는 `OPENAI_API_KEY` |
 | 상한 | 기록 36칸 미만(원본과 같다), 기록 한 칸 2000자, 이용자 문장 1000자, 본문 64KB |
 | 지시문 | `voiceInstructions.ts`. 원본 `instructions` 원문이고 시험이 원본 파일과 글자 단위로 같은지 확인한다 |
 | 가짜 | `LLM_MODE=mock`이면 `voiceChat.ts`의 고정 대화(운영 `VERCEL_ENV=production`에서는 꺼진다) |
 
-- 접수 변환(`toQueueRequest`): `product`나 `summary`에 품목(헤드셋·헤드폰)이 있으면 그 글을 product로 쓴다. 접수가 품목을 알아볼 수 있어야 받기 때문에, 없으면(예: 밥솥) request를 주지 않고 대기열에는 올리지 않는다(기기 안 목록에만 남는다). 예산은 요약에서 금액 표현을 찾고, 조건은 "중고"·"새 제품"을 찾으며, 없으면 "정하지 않음"이다.
+- 접수 변환(`toQueueRequest`): `product`나 `summary`에 품목 사전의 품목(헤드셋·헤드폰)이 있으면 그 글을 product로 쓰고, 없으면(예: 밥솥) `product`(비었으면 `summary`)를 그대로 써서 대기열에 올린다(2026-11-18 이용자 결정 A6, 전에는 기기 안 목록에만 남겼다). 둘 다 비었을 때만 request를 주지 않는다. 예산은 요약에서 금액 표현을 찾고, 조건은 "중고"·"새 제품"을 찾으며, 없으면 "정하지 않음"이다.
 - 이 서버 계약에는 가격·재고·모델명 금지 검사가 없다(원본 지시문에 맡긴다). 봉사자 챗봇의 `answerRules`와 달리 이 화면의 AI 답은 검사하지 않는다.
 - 로그에는 상태 코드와 소요 시간, 오류 종류만 남긴다(이용자 문장·AI 답 제외).
 - 확인하지 못한 것: 실제 `gpt-4.1-mini` 호출 결과, 실기기 음성 인식·읽어 주기·VoiceOver 동작.

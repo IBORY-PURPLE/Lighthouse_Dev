@@ -95,8 +95,8 @@ async function handleRegister(request: NextRequest): Promise<Outcome> {
     return { response: failure(400, "too_long") };
   }
 
+  // 품목 사전(헤드셋)에 없는 물건도 받는다. item은 사전으로 알아본 것만 채우고 나머지는 null이다(2026-11-18 이용자 결정 A6).
   const { brand, item } = parseRequest(product);
-  if (!item) return { response: failure(422, "need_item") };
 
   const startedAt = Date.now();
   let result: RegisterResult;

@@ -111,10 +111,14 @@ describe("POST /api/requests (메모리 저장소)", () => {
     expect(ok.status).toBe(201);
   });
 
-  it("품목이 없으면 422 need_item", async () => {
+  it("품목 사전에 없는 물건도 201로 접수하고 item은 비워 둔다(A6)", async () => {
     const response = await POST(postRequest(answers({ product: "sony껄로 사고싶어" })));
-    expect(response.status).toBe(422);
-    expect(await response.json()).toEqual({ ok: false, error: "need_item" });
+    expect(response.status).toBe(201);
+    const { requestId } = await response.json();
+    const queue = await requestStore.getRequestStore().listQueue("volunteer-test");
+    expect(queue.waiting).toContainEqual(
+      expect.objectContaining({ requestId, product: "sony껄로 사고싶어", item: null }),
+    );
   });
 
   it("저장소 오류는 503 store_unavailable", async () => {
