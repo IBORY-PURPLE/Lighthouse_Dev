@@ -1,0 +1,652 @@
+"use client";
+
+// /live 화면: 마크업, 큰 단추, 길게 누르기 표면, 글자 입력, 뒤로가기 기록(pushState). 설계서 4.1절, 5.3절, 8절, 9절, 14절, 22절.
+// createLiveRunner를 useSyncExternalStore로 구독한다. 화면은 사건을 보내고 상태를 그리기만 한다.
+// 로그와 콘솔에 이용자 말, AI 답, SDP, 기기 ID, 상품명을 남기지 않는다.
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type SyntheticEvent,
+} from "react";
+import { flushSync } from "react-dom";
+import { StatusRegion } from "@/components/StatusRegion";
+import { BUTTONS } from "@/lib/liveCommands";
+import { createEarconPlayer } from "@/lib/liveEarcons";
+import type { EarconPlayer, EngineKind } from "@/lib/liveEngine";
+import { createFallbackEngine } from "@/lib/liveFallbackEngine";
+import { GESTURE_IDLE, HOLD_MS, gestureStep, type GestureOutput, type GestureState } from "@/lib/liveGesture";
+import { createInitialLive, type LiveEvent, type LiveState } from "@/lib/liveMachine";
+import { createRealtimeEngine } from "@/lib/liveRealtimeEngine";
+import {
+  attachPushIfOn,
+  registerLive,
+  startDeviceReady,
+} from "@/lib/liveRequest";
+import { createLiveRunner, type LiveCaption, type LiveRunner } from "@/lib/liveRunner";
+import { errorScriptFor, readVisits, script } from "@/lib/liveScripts";
+import { createLiveSpeaker } from "@/lib/liveSpeaker";
+import { decodeAiTurn } from "@/lib/liveText";
+import { createWakeLock, newConversationId, runStartClick, setAudioSession } from "@/lib/liveUnlock";
+import { getSpeechRecognitionCtor } from "@/lib/speech";
+import styles from "@/app/live/live.module.css";
+
+const WAIT_SOUND_KEY = "lh.live.waitSound.v1";
+const CONTROLS = "button,a,input,textarea,select,label,summary";
+
+// ---------------------------------------------------------------- 상태 저장소(실행기를 화면에 잇는다)
+
+const PLACEHOLDER: LiveState = createInitialLive({ cid: "", visit: "first", tts: false, speechAvailable: false });
+const EMPTY_CAPTION: LiveCaption = { user: "", ai: "" };
+
+/** 실행기는 마운트 뒤에 만들어진다. 그 전에는 서버와 같은 빈 상태를 보인다. */
+function createStore() {
+  let runner: LiveRunner | null = null;
+  let unsub: () => void = () => {};
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const l of [...listeners]) l();
+  };
+  return {
+    subscribe(l: () => void) {
+      listeners.add(l);
+      return () => {
+        listeners.delete(l);
+      };
+    },
+    getState: (): LiveState => (runner ? runner.getState() : PLACEHOLDER),
+    getCaption: (): LiveCaption => (runner ? runner.getCaption() : EMPTY_CAPTION),
+    getServerState: (): LiveState => PLACEHOLDER,
+    getServerCaption: (): LiveCaption => EMPTY_CAPTION,
+    attach(r: LiveRunner) {
+      runner = r;
+      unsub = r.subscribe(notify);
+      notify();
+    },
+    detach() {
+      unsub();
+      unsub = () => {};
+      runner = null;
+      notify();
+    },
+  };
+}
+
+// "기다리는 동안 소리 내기" 체크 상자의 값. 기기 저장소가 막혀도 이 페이지 안에서는 값을 지킨다.
+const waitListeners = new Set<() => void>();
+let waitMemory = true;
+function readWaitSound(): boolean {
+  try {
+    const saved = window.localStorage.getItem(WAIT_SOUND_KEY);
+    if (saved !== null) return saved !== "off";
+  } catch {
+    // 저장소를 못 읽으면 이 페이지의 값을 쓴다.
+  }
+  return waitMemory;
+}
+function writeWaitSound(on: boolean): void {
+  waitMemory = on;
+  try {
+    window.localStorage.setItem(WAIT_SOUND_KEY, on ? "on" : "off");
+  } catch {
+    // 저장이 막혀도 이 페이지에서는 바뀐다.
+  }
+  for (const l of [...waitListeners]) l();
+}
+const subscribeWait = (l: () => void) => {
+  waitListeners.add(l);
+  return () => {
+    waitListeners.delete(l);
+  };
+};
+
+/** 저장소를 못 쓸 때를 위한 메모리 저장소. */
+function memoryStorage(): Storage {
+  const m = new Map<string, string>();
+  return {
+    get length() { return m.size; },
+    clear: () => m.clear(),
+    getItem: (k) => m.get(k) ?? null,
+    key: (i) => [...m.keys()][i] ?? null,
+    removeItem: (k) => { m.delete(k); },
+    setItem: (k, v) => { m.set(k, v); },
+  };
+}
+function pickStorage(win: Window): Storage {
+  try {
+    const s = win.localStorage;
+    s.getItem(WAIT_SOUND_KEY);
+    return s;
+  } catch {
+    return memoryStorage();
+  }
+}
+
+// ---------------------------------------------------------------- 큰 단추와 글
+
+type MainKind = "start" | "main" | "resume" | "retry" | "new" | "continue" | "none";
+interface MainSpec { label: string; kind: MainKind; disabled: boolean }
+
+const ACTIVE: ReadonlySet<string> = new Set(["guiding", "connecting", "listening", "thinking", "speaking", "confirming"]);
+const GESTURE_PHASES: ReadonlySet<string> = new Set([
+  "guiding", "connecting", "listening", "thinking", "speaking", "confirming", "paused",
+]);
+
+/** 5.3절 표의 "큰 단추" 열. 음성 모드는 guiding부터 confirming까지 이름이 '말하기' 하나다. */
+function mainSpec(s: LiveState): MainSpec {
+  switch (s.phase) {
+    case "idle":
+      return { label: BUTTONS.start, kind: "start", disabled: false };
+    case "registering":
+      return { label: BUTTONS.sending, kind: "none", disabled: true };
+    case "done":
+      return { label: BUTTONS.newRequest, kind: "new", disabled: false };
+    case "error":
+      return s.error === "bad_request" || s.error === "register_rejected" || s.error === "register_conflict"
+        ? { label: BUTTONS.newRequest, kind: "new", disabled: false }
+        : { label: BUTTONS.retry, kind: "retry", disabled: false };
+    case "paused":
+      return { label: BUTTONS.resume, kind: "resume", disabled: false };
+    case "ended":
+      if (s.sendPending) return { label: BUTTONS.sending, kind: "none", disabled: true };
+      if (s.requestId !== null) return { label: BUTTONS.newRequest, kind: "new", disabled: false };
+      if (s.history.some((t) => t.role === "user")) return { label: BUTTONS.continueTalk, kind: "continue", disabled: false };
+      return { label: BUTTONS.newRequest, kind: "new", disabled: false };
+    default: {
+      const text = s.inputMode === "text";
+      return {
+        label: text ? BUTTONS.stopTalking : BUTTONS.talk,
+        kind: "main",
+        disabled: text && s.phase === "listening" && s.speaking === null,
+      };
+    }
+  }
+}
+
+/** 큰 글자(상태 글). 5.3절 "화면 큰 글자" 열. 스크린리더 알림이 아니라 화면에 보이는 글이다. */
+function headlineOf(s: LiveState, caption: LiveCaption): string {
+  const text = s.inputMode === "text";
+  switch (s.phase) {
+    case "idle":
+      return "대화를 시작하면 마이크 허용 창이 뜰 수 있어요. '허용'을 눌러 주세요.";
+    case "guiding":
+      return text
+        ? `안내를 읽어 드리고 있어요. 건너뛰려면 '${BUTTONS.stopTalking}' 단추를 누르세요.`
+        : `안내를 들려 드리고 있어요. 바로 말하려면 '${BUTTONS.talk}' 단추를 누르세요.`;
+    case "connecting":
+      return "연결하고 있어요";
+    case "listening":
+      if (text) return `아래 '${BUTTONS.textInput}' 칸에 쓰고 '${BUTTONS.sendText}' 단추를 누르세요.`;
+      if (s.mic === "held") return "단추를 찾는 동안 잠시 듣기를 멈췄어요.";
+      return `말씀하세요. 다 말했으면 '${BUTTONS.talk}' 단추를 눌러도 돼요.`;
+    case "thinking":
+      return "생각하고 있어요";
+    case "speaking":
+      if (s.pendingConfirm && s.draft) return s.draft.summary;
+      return caption.ai || s.lastReply || "말하고 있어요";
+    case "confirming":
+      return text
+        ? `보낼까요? 맞으면 '네'라고 쓰거나 '${BUTTONS.consent}' 단추를 누르세요.`
+        : "보낼까요? 맞으면 '네'라고 말씀해 주세요.";
+    case "registering":
+      return "보내고 있어요";
+    case "done":
+      return `접수 번호 ${s.queueNumber ?? ""}번`;
+    case "error":
+      return s.error ? script(errorScriptFor(s.error, s.aiFailures >= 3)) : "";
+    case "paused":
+      return "멈춰 있어요";
+    case "ended":
+      return "대화를 마쳤어요";
+  }
+}
+
+const RATE_LABEL = { normal: BUTTONS.rateNormal, slow: BUTTONS.rateSlow, fast: BUTTONS.rateFast } as const;
+
+// ---------------------------------------------------------------- 화면
+
+interface Ctx {
+  runner: LiveRunner;
+  earcons: EarconPlayer;
+}
+
+export function LiveConversation() {
+  const [store] = useState(createStore);
+  const state = useSyncExternalStore(store.subscribe, store.getState, store.getServerState);
+  const caption = useSyncExternalStore(store.subscribe, store.getCaption, store.getServerCaption);
+  const waitSound = useSyncExternalStore(subscribeWait, readWaitSound, () => true);
+
+  const [statusText, setStatusText] = useState("");
+  const [alertText, setAlertText] = useState("");
+  const [typed, setTyped] = useState("");
+
+  const mainRef = useRef<HTMLButtonElement>(null);
+  const listLinkRef = useRef<HTMLAnchorElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const ctxRef = useRef<Ctx | null>(null);
+  const pushedRef = useRef(false);            // 브라우저 기록에 우리 항목이 있는가(8.2절)
+  const gestureRef = useRef<GestureState>(GESTURE_IDLE);
+  const holdTimerRef = useRef<number | null>(null);
+
+  const send = useCallback((event: LiveEvent) => {
+    ctxRef.current?.runner.dispatch(event);
+  }, []);
+
+  /** 대화를 시작하거나 다시 시작하는 click 안에서 한다: pushState → 신호음 잠금 해제 → audioSession → 사건(5.4절). */
+  const startLike = useCallback((event: LiveEvent) => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    pushedRef.current = runStartClick({
+      pushed: pushedRef.current,
+      pushState: () => window.history.pushState({ live: true }, ""),
+      earcons: ctx.earcons,
+      setAudioSession,
+      dispatchStart: () => ctx.runner.dispatch(event),
+    });
+  }, []);
+
+  /** 큰 단추를 누른 것과 같은 처리. 단추 click, 전역 Space·Enter, idle의 화면 탭이 모두 이 함수를 부른다(22절). */
+  const activateMain = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const s = ctx.runner.getState();
+    const spec = mainSpec(s);
+    if (spec.disabled) return;
+    switch (spec.kind) {
+      case "start": startLike({ type: "START" }); return;
+      case "resume": startLike({ type: "RESUME" }); return;
+      case "retry": startLike({ type: "RETRY" }); return;
+      case "continue": startLike({ type: "CONTINUE" }); return;
+      case "new": startLike({ type: "NEW_REQUEST", cid: newConversationId() }); return;
+      case "main": ctx.runner.dispatch({ type: "MAIN_BUTTON" }); return;
+      case "none": return;
+    }
+  }, [startLike]);
+
+  /** [끝내기]와 Escape: 기록에 우리 항목이 있으면 뒤로 가서 popstate가 EXIT를 보낸다. */
+  const exitNow = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const phase = ctx.runner.getState().phase;
+    if (phase === "idle" || phase === "ended") return;
+    if (pushedRef.current) window.history.back();
+    else ctx.runner.dispatch({ type: "EXIT" });
+  }, []);
+
+  // 마운트: 실행기를 만들고 문서 전체 사건을 잇는다.
+  useEffect(() => {
+    const win = window;
+    const doc = document;
+    const storage = pickStorage(win);
+    const speaker = createLiveSpeaker(win);
+    const earcons = createEarconPlayer(doc, win);
+    const wakeLock = createWakeLock();
+    const focusLater = (get: () => HTMLElement | null) => {
+      const el = get();
+      if (el) el.focus();
+      else queueMicrotask(() => get()?.focus());
+    };
+
+    const runner = createLiveRunner(
+      {
+        createEngine: (kind: EngineKind) => (kind === "realtime" ? createRealtimeEngine() : createFallbackEngine(win)),
+        speaker,
+        earcons,
+        timers: {
+          set: (fn, ms) => win.setTimeout(fn, ms),
+          clear: (h) => win.clearTimeout(h as number),
+        },
+        registerLive,
+        deviceReady: startDeviceReady(),
+        storage,
+        requestStream: async () => {
+          try {
+            if (!win.navigator.mediaDevices?.getUserMedia) return undefined;
+            return await win.navigator.mediaDevices.getUserMedia({ audio: true });
+          } catch {
+            return undefined;
+          }
+        },
+        setAudioSession: (type) => setAudioSession(type),
+        announce: (channel, text) => {
+          const set = channel === "status" ? setStatusText : setAlertText;
+          // 같은 글을 다시 알릴 때 빈 글을 먼저 그려야 낭독기가 다시 읽는다.
+          if (text === "") flushSync(() => set(""));
+          else set(text);
+        },
+        focus: (target) => {
+          if (target === "main") focusLater(() => mainRef.current);
+          else if (target === "listLink") focusLater(() => listLinkRef.current);
+          else focusLater(() => textRef.current);
+        },
+        wakeLock,
+        waitSoundOn: readWaitSound,
+        attachPush: (id) => { void attachPushIfOn(id, win); },
+      },
+      createInitialLive({
+        cid: newConversationId(),
+        visit: readVisits(storage) > 0 ? "returning" : "first",
+        tts: speaker.available,
+        speechAvailable: getSpeechRecognitionCtor(win) !== null,
+      }),
+    );
+    ctxRef.current = { runner, earcons };
+    store.attach(runner);
+    mainRef.current?.focus(); // 22절 1: 열리면 큰 단추에 초점이 있다.
+
+    let cancelled = false;
+    void fetch("/api/live/config", { cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<{ realtime?: unknown } | null>) : null))
+      .then((data) => {
+        if (!cancelled && data) runner.dispatch({ type: "CONFIG", realtime: data.realtime === true });
+      })
+      .catch(() => {});
+
+    const onPopState = () => {
+      pushedRef.current = false;
+      runner.dispatch({ type: "EXIT" });
+    };
+    const onVisibility = () => {
+      runner.dispatch({ type: doc.visibilityState === "hidden" ? "HIDDEN" : "VISIBLE" });
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        exitNow();
+        return;
+      }
+      if (e.key !== " " && e.key !== "Enter") return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      const target = e.target;
+      // 초점이 입력·단추·링크에 있으면 그 요소의 기본 동작에 맡긴다(큰 단추의 click과 두 번 처리하지 않는다).
+      if (target instanceof Element && target.closest("textarea,input,select,button,a,[contenteditable]")) return;
+      e.preventDefault(); // 스크롤을 막는다.
+      if (e.repeat) return;
+      activateMain();
+    };
+    const onPageHide = () => runner.dispose();
+    const onPageShow = (e: PageTransitionEvent) => {
+      // 뒤로 가기 캐시에서 되살아나면 실행기가 닫힌 상태라 새로 불러온다.
+      if (e.persisted) win.location.reload();
+    };
+
+    win.addEventListener("popstate", onPopState);
+    doc.addEventListener("visibilitychange", onVisibility);
+    doc.addEventListener("keydown", onKeyDown);
+    win.addEventListener("pagehide", onPageHide);
+    win.addEventListener("beforeunload", onPageHide);
+    win.addEventListener("pageshow", onPageShow);
+
+    return () => {
+      cancelled = true;
+      win.removeEventListener("popstate", onPopState);
+      doc.removeEventListener("visibilitychange", onVisibility);
+      doc.removeEventListener("keydown", onKeyDown);
+      win.removeEventListener("pagehide", onPageHide);
+      win.removeEventListener("beforeunload", onPageHide);
+      win.removeEventListener("pageshow", onPageShow);
+      if (holdTimerRef.current !== null) win.clearTimeout(holdTimerRef.current);
+      store.detach();
+      ctxRef.current = null;
+      runner.dispose();
+    };
+  }, [store, activateMain, exitNow]);
+
+  // ---------- 길게 누르기(8.1절) ----------
+
+  const applyGesture = useCallback((out: GestureOutput) => {
+    const ctx = ctxRef.current;
+    if (!ctx || out === "none" || out === "latch") return;
+    if (out === "activate") {
+      // 다시 시작하는 길(멈춤에서 이어 가기)도 소리를 낼 수 있게 신호음과 audioSession을 준비한다.
+      ctx.earcons.unlock();
+      setAudioSession("playback");
+      ctx.runner.dispatch({ type: "HOLD_ACTIVATE" });
+    } else if (out === "submit") ctx.runner.dispatch({ type: "HOLD_SUBMIT" });
+    else ctx.runner.dispatch({ type: "HOLD_CANCEL" });
+  }, []);
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const s = ctx.runner.getState();
+    const target = e.target instanceof Element ? e.target : null;
+    const control = target?.closest(CONTROLS) ?? null;
+    const onMain = control !== null && mainRef.current !== null && mainRef.current.contains(control);
+
+    // 듣는 중 큰 단추가 아닌 단추·링크·입력 칸에 닿으면 마이크를 잠시 닫는다(8.2절 단추 찾기).
+    if (control && !onMain && target?.closest("button,a,input,textarea,select")) send({ type: "CONTROL_TOUCH" });
+
+    if (!GESTURE_PHASES.has(s.phase) || s.inputMode === "text") return; // 글자 모드와 그 밖의 상태에서는 판정기를 돌리지 않는다.
+    const t = performance.now();
+    const primary = e.isPrimary && (e.pointerType !== "mouse" || e.button === 0);
+    const onControl = control !== null && !onMain;
+    const r = gestureStep(gestureRef.current, { type: "down", id: e.pointerId, x: e.clientX, y: e.clientY, t, primary, onControl });
+    gestureRef.current = r.state;
+    if (r.state.phase === "pressing" && holdTimerRef.current === null) {
+      holdTimerRef.current = window.setTimeout(() => {
+        holdTimerRef.current = null;
+        const tick = gestureStep(gestureRef.current, { type: "tick", t: performance.now() });
+        gestureRef.current = tick.state;
+        applyGesture(tick.out);
+      }, HOLD_MS);
+    }
+    applyGesture(r.out);
+  };
+
+  const clearHoldTimer = () => {
+    if (holdTimerRef.current !== null) {
+      window.clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    if (gestureRef.current.phase === "idle") return;
+    const r = gestureStep(gestureRef.current, { type: "move", id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() });
+    gestureRef.current = r.state;
+    if (r.state.phase === "idle") clearHoldTimer();
+    applyGesture(r.out);
+  };
+
+  const onPointerEnd = (e: ReactPointerEvent<HTMLElement>, kind: "up" | "cancel") => {
+    if (gestureRef.current.phase === "idle") return;
+    const r = gestureStep(gestureRef.current, { type: kind, id: e.pointerId, t: performance.now() });
+    gestureRef.current = r.state;
+    clearHoldTimer();
+    applyGesture(r.out);
+  };
+
+  // ---------- 그 밖의 사건 ----------
+
+  const onMainClick = () => {
+    // 길게 눌러 발동한 누름에서 이어 오는 click은 버린다.
+    if (performance.now() < gestureRef.current.suppressClickUntil) return;
+    activateMain();
+  };
+
+  const onSurfaceClick = (e: SyntheticEvent<HTMLElement>) => {
+    // idle에서만 화면 아무 곳이나 짧게 눌러 시작한다. 단추·링크·입력 칸 위의 click은 그 요소의 것이다(22절 3).
+    if (ctxRef.current?.runner.getState().phase !== "idle") return;
+    if (e.target instanceof Element && e.target.closest(CONTROLS)) return;
+    activateMain();
+  };
+
+  const onFocusIn = (e: SyntheticEvent<HTMLElement>) => {
+    const target = e.target instanceof Element ? e.target : null;
+    const control = target?.closest("button,a,input,textarea,select") ?? null;
+    if (!control) return;
+    if (mainRef.current && mainRef.current.contains(control)) return;
+    send({ type: "CONTROL_TOUCH" });
+  };
+
+  const submitText = () => {
+    const ctx = ctxRef.current;
+    const text = typed.trim();
+    if (!ctx || text === "") return;
+    const phase = ctx.runner.getState().phase;
+    if (phase !== "listening" && phase !== "confirming") return; // 받을 수 없는 때는 쓴 글을 그대로 둔다.
+    setTyped("");
+    ctx.runner.dispatch({ type: "TEXT_SUBMIT", text });
+  };
+
+  const onFormSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    submitText();
+  };
+
+  const onTextKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    // 한글 조합 중의 Enter는 글자 확정이다. 조합이 끝난 Enter만 보낸다.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      submitText();
+    }
+  };
+
+  // ---------- 그리기 ----------
+
+  const spec = mainSpec(state);
+  const active = ACTIVE.has(state.phase);
+  const showInput = active && state.inputMode === "text";
+  const showCard = state.phase === "confirming" && state.draft !== null;
+  const endedContinue = state.phase === "ended" && spec.kind === "continue";
+  const homeLink = state.phase === "idle" || state.phase === "ended";
+  const draft = state.draft;
+
+  return (
+    <main
+      className={styles.root}
+      data-live-surface=""
+      data-live-state={state.phase}
+      data-live-engine={state.engine ?? "none"}
+      data-live-input={state.inputMode}
+      data-live-mic={state.mic}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={(e) => onPointerEnd(e, "up")}
+      onPointerCancel={(e) => onPointerEnd(e, "cancel")}
+      onClick={onSurfaceClick}
+      onFocus={onFocusIn}
+      onContextMenu={(e) => {
+        if (!(e.target instanceof Element && e.target.closest("textarea,input"))) e.preventDefault();
+      }}
+    >
+      <h1 className={styles.title}>음성 도우미</h1>
+      <p className={styles.headline}>{headlineOf(state, caption)}</p>
+      {state.phase === "listening" && caption.user !== "" ? <p className={styles.caption}>{caption.user}</p> : null}
+
+      <button
+        ref={mainRef}
+        type="button"
+        className={styles.main}
+        aria-disabled={spec.disabled ? "true" : undefined}
+        onClick={onMainClick}
+      >
+        {spec.label}
+      </button>
+
+      {showInput ? (
+        <form className={styles.form} onSubmit={onFormSubmit}>
+          <label htmlFor="live-text">{BUTTONS.textInput}</label>
+          <textarea
+            id="live-text"
+            ref={textRef}
+            className={styles.input}
+            maxLength={1000}
+            enterKeyHint="send"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={onTextKeyDown}
+          />
+          <button type="submit" className={styles.small}>{BUTTONS.sendText}</button>
+        </form>
+      ) : null}
+
+      {showCard && draft ? (
+        <section className={styles.card} aria-label="요청 요약">
+          <h2>요청 요약</h2>
+          <dl>
+            {draft.product ? (<><dt>제품</dt><dd>{draft.product}</dd></>) : null}
+            {draft.info ? (<><dt>알고 싶은 정보</dt><dd>{draft.info}</dd></>) : null}
+            {draft.options ? (<><dt>옵션</dt><dd>{draft.options}</dd></>) : null}
+            {draft.budget ? (<><dt>예산</dt><dd>{draft.budget}</dd></>) : null}
+          </dl>
+          <div className={styles.row}>
+            <button type="button" className={styles.small} onClick={() => send({ type: "CONSENT_BUTTON" })}>
+              {BUTTONS.consent}
+            </button>
+            <button type="button" className={styles.small} onClick={() => send({ type: "EDIT_BUTTON" })}>
+              {BUTTONS.edit}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {active ? (
+        <div className={styles.row}>
+          <button type="button" className={styles.small} onClick={() => send({ type: "REPEAT" })}>{BUTTONS.repeat}</button>
+          <button type="button" className={styles.small} onClick={() => send({ type: "PAUSE" })}>{BUTTONS.pause}</button>
+          <button type="button" className={styles.small} onClick={() => send({ type: "HELP" })}>{BUTTONS.help}</button>
+          <button type="button" className={styles.small} onClick={() => send({ type: "RATE_BUTTON" })}>
+            {RATE_LABEL[state.rate]}
+          </button>
+        </div>
+      ) : null}
+
+      {state.phase === "done" && state.requestId ? (
+        <div className={styles.row}>
+          <a
+            ref={listLinkRef}
+            className={styles.link}
+            href={`/?request=${encodeURIComponent(state.requestId)}`}
+          >
+            {BUTTONS.list}
+          </a>
+        </div>
+      ) : null}
+
+      {endedContinue ? (
+        <div className={styles.row}>
+          <button
+            type="button"
+            className={styles.small}
+            onClick={() => startLike({ type: "NEW_REQUEST", cid: newConversationId() })}
+          >
+            {BUTTONS.newRequest}
+          </button>
+        </div>
+      ) : null}
+
+      <label className={styles.wait}>
+        <input type="checkbox" checked={waitSound} onChange={(e) => writeWaitSound(e.target.checked)} />
+        {BUTTONS.waitSound}
+      </label>
+
+      <div className={styles.log} role="log" aria-live="off" aria-label="대화 기록">
+        {state.history.map((turn, i) => {
+          if (turn.role === "user") {
+            return <p key={i} className={styles.me}><strong>나</strong>{turn.content}</p>;
+          }
+          const ai = decodeAiTurn(turn.content);
+          return <p key={i}><strong>도우미</strong>{ai ? ai.reply : turn.content}</p>;
+        })}
+      </div>
+
+      {homeLink ? (
+        <a className={styles.link} href="/">{BUTTONS.home}</a>
+      ) : (
+        <button type="button" className={styles.small} onClick={exitNow}>{BUTTONS.exit}</button>
+      )}
+
+      <div className={styles.srOnly}>
+        <StatusRegion quiet message={statusText} />
+        <p role="alert">{alertText}</p>
+      </div>
+    </main>
+  );
+}

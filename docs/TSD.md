@@ -450,6 +450,59 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 - 로그에는 상태 코드와 소요 시간, 오류 종류만 남긴다(이용자 문장·AI 답 제외).
 - 확인하지 못한 것: 실제 `gpt-4.1-mini` 호출 결과, 실기기 음성 인식·읽어 주기·VoiceOver 동작.
 
+### 8.10 실시간 음성 도우미(`/live`)와 `/api/live/*`
+
+설계 기준은 `docs/plans/2026-11-23-voice-live/ai.md`다. 기존 `/`(§8.9)는 그대로 두고, 새 경로 `/live`에 "차례를 소리로 알려 주는" 음성 대화를 더했다. 이용자가 처음 안내를 듣고 원하는 제품·알고 싶은 정보·옵션(·예산)을 여러 번 주고받으며 말하면, 앱이 요약을 읽어 주고 분명한 동의를 받은 뒤 `POST /api/requests`로 대기열에 접수한다.
+
+**엔진 둘, 상태 기계 하나**
+- 상태 기계(`liveMachine.ts`의 `liveStep`)는 순수 함수이고 실행기(`liveRunner.ts`)가 효과(타이머, 엔진, 읽기, 신호음, 접수)를 실행한다. 두 엔진이 같은 상태 기계·신호음·대본·접수 코드를 쓴다.
+- fallback 엔진(`liveFallbackEngine.ts`, 본체): 브라우저 음성 인식과 기기 목소리(`speechSynthesis`) + 글자 LLM 라우트 `POST /api/live/chat`.
+- Realtime 엔진(`liveRealtimeEngine.ts`, 기본 꺼짐): OpenAI Realtime API를 WebRTC로 쓴다. 서버는 SDP만 중계하고(`POST /api/live/call`) 소리는 브라우저와 OpenAI 사이를 직접 오간다. Realtime이 꺼져 있거나 통화를 못 만들면 fallback으로 간다.
+- 차례제다. 앱이나 AI가 말하는 동안 마이크를 닫고, 말로 끼어들기는 끈다(끼어들기는 '말하기' 단추나 길게 누르기). 고정 대본과 확인 문장은 기기 목소리로 읽는다. 확인 문장은 AI가 아니라 앱이 칸(제품, 알고 싶은 정보, 옵션, 예산)으로 만들어서, 이용자가 들은 내용과 접수되는 내용이 같다.
+- 접수 관문은 기기(`canRegister`)와 서버(`/api/requests`의 검사) 두 곳에 있다. 확인 상태, 방금 읽어 준 요약, 그 뒤의 분명한 동의가 모두 있어야 한다. "등록됐어요"는 `POST /api/requests`가 성공한 뒤에만 말한다.
+- 화면은 `session.update`를 보내지 않는다.
+
+**환경 변수 9개** (`liveConfig.ts`. `.env` 파일은 만들지 않는다)
+
+| 환경 변수 | 기본 | 뜻 |
+|---|---|---|
+| `LIVE_ENABLED` | 운영(`VERCEL_ENV=production`)은 끔, 그 밖은 켬 | 운영에서는 `on`일 때만 연다. 그 밖에서는 `off`가 아니면 연다. 꺼져 있으면 페이지는 안내만 보이고 `/api/live/*`는 404 `{ok:false,error:"disabled"}` |
+| `LIVE_REALTIME` | 끔 | `on`이고, mock이 아니고, `OPENAI_API_KEY`가 있을 때만 OpenAI Realtime을 부른다 |
+| `LIVE_REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Realtime 모델 |
+| `LIVE_REALTIME_VAD` | `semantic` | `server`면 `server_vad`로 바꾼다 |
+| `LIVE_REALTIME_REASONING` | `minimal` | `reasoning.effort` 값. `off`면 필드를 뺀다 |
+| `LIVE_MAX_SESSION_SEC` | 270 | 세션 길이 상한. 60~280으로 자른다 |
+| `LIVE_DAILY_SESSION_CAP` | 10 | 하루 Realtime 세션 수. 첫 통화부터 재는 고정 24시간 창, 인스턴스별. 0~200 |
+| `LIVE_TRANSCRIBE_LANG` | `ko` | 전사 언어(ISO-639-1). `""`면 뺀다 |
+| `LIVE_REAL_CALL_BUDGET` | 없음(제한 없음) | 이 서버 프로세스가 OpenAI로 보낼 수 있는 유료 호출 수. 로컬 실호출 점검에서 남은 횟수를 넣는다. 프로세스 메모리라 서버를 다시 띄우면 0부터 센다 |
+
+**라우트 4개** (모두 `runtime = "nodejs"`, `dynamic = "force-dynamic"`, 응답 `Cache-Control: no-store`)
+
+| 라우트 | 제한 | 요청 → 응답 |
+|---|---|---|
+| `GET /api/live/config` | 60회/분(IP) | → 200 `{enabled:true, realtime, reason?: "disabled"\|"mock"\|"no_key", maxSessionSec, warnBeforeSec}`. 돈이 들지 않고 통화 장부나 하루 상한을 보지 않는다. 화면이 열릴 때 한 번 부른다 |
+| `POST /api/live/chat` | 20회/분(IP), 하루 600턴(인스턴스 전체), 본문 64KiB, `maxDuration` 30 | `{sessionId, message, history}` → 200 `{reply, status: "asking"\|"confirming"\|"done"\|"ended", slots}`. `history`에는 이번 말이 없고 서버가 한 번 붙인다. 오류는 `{error, code}`: 404 `disabled`, 429 `rate_limited`·`daily_cap`·`budget`, 413 `too_large`, 400 `bad_request`, 503 `not_configured`, 504 `timeout`, 502 `failed` |
+| `POST /api/live/call` | 3회/10분(IP), 본문 16,384바이트, `maxDuration` 300 | `Content-Type: application/sdp`, 본문 offer SDP(`?rate=slow\|normal\|fast`). 성공 200 `{engine:"realtime", sdp, callId, maxSessionSec, warnBeforeSec, maxTurns}`. 쓸 수 없으면 200 `{engine:"fallback", reason: "rate_limited"\|"disabled"\|"mock"\|"no_key"\|"daily_cap"\|"budget"\|"upstream"}`. 404 `disabled`, 415 `unsupported`, 403 `forbidden`(다른 출처), 413 `too_large`, 400 `invalid_sdp` |
+| `POST /api/live/hangup` | 10회/분(IP), 본문 1,024바이트, `maxDuration` 15 | `{callId, turns?}` → 언제나 204. 모양이 맞는 `callId`를 끊고 쓰지 않은 예산을 돌려준다 |
+
+**서버 계약**
+- 글자 대화(`/api/live/chat`): OpenAI Responses API, 모델 `OPENAI_MODEL`(없으면 `gpt-4.1-mini`), `max_output_tokens` 500, JSON 모드, `store: false`, 25초 마감. 기록 검사는 `/api/voice/chat`의 `readVoiceBody`를 가져다 쓴다(`voiceChat.ts`는 고치지 않았다). 지시문은 `liveInstructions.ts`. `LLM_MODE=mock`이면 `mockLiveText`의 고정 대화다(호출 0회). AI 칸의 기록은 JSON 글(`encodeAiTurn`)로 주고받고, 전화번호는 칸과 답에서 가린다.
+- 서버 관문(`gateLiveResult`): AI가 `done`이라 해도 직전 AI 칸이 `confirming`이 아니거나, 이용자 말에 물음표가 있거나 화면 낭독 메아리이거나 분명한 동의가 아니면 `confirming`(제품이 없으면 `asking`)으로 낮춘다. 로그 꼬리표 `gate=downgraded`.
+- Realtime 통화(`/api/live/call`) 검사 순서: 기능 켜짐 → 콘텐츠 타입 → 출처 → IP 제한 → 본문 크기·모양 → `realtimeGate` → 하루 자리 잡기(OpenAI를 부르기 전, `await` 없이) → 실호출 예산(`1 + maxTurns`) → OpenAI 호출(8초 마감, `POST /v1/realtime/calls`) → `call_id` 확인. `call_id`를 얻지 못하면 answer SDP를 넘기지 않는다. 성공하면 통화 장부에 적고(`rememberCall`) 응답 뒤 `LIVE_MAX_SESSION_SEC + 10`초에 끊는 예약을 건다(`scheduleHangup`).
+- 세션 설정(`buildRealtimeSession`): GA 표기. 음성 `marin`, 출력 `["audio"]`, `create_response:false`·`interrupt_response:false`(응답은 앱이 `response.create`로 시킨다), 도구 `confirm_request`·`register_request`·`end_conversation`, `max_output_tokens` 400, `truncation:"auto"`. 출력 빠르기는 `rate`가 slow면 0.85, normal이면 1.0, fast면 1.2다.
+- 통화를 끊는 길(모두 최선 노력): 화면이 닫을 때 `/api/live/hangup`, 같은 인스턴스의 예약 끊기, `/api/live/call`이 불릴 때의 `sweepCalls`. 통화 장부와 하루 자리는 인스턴스 메모리라서, 인스턴스가 다르면 장부를 못 본다.
+- 실호출 예산: OpenAI로 가는 유료 호출 1번이 1회다. 통화 만들기 때 `1 + maxTurns`를 미리 쓰고, 화면이 hangup에서 알려 준 실제 턴 수만큼만 남기고 돌려준다(`maxTurns`는 `LIVE_MAX_TURNS` 30과 남은 예산 - 1 가운데 작은 쪽).
+- 로그는 `<METHOD> <경로> <상태> <ms>ms` 뒤에 `key=value` 꼬리표(`engine`, `reason`, `cap`, `budget`, `upstream`, `gate`)만 남긴다. 이용자 말, AI 답, SDP, `callId`, 기기 ID, 상품명은 남기지 않는다. 브라우저 콘솔에도 대화를 찍지 않는다.
+
+**돈과 보안**
+- 병합만으로 운영에 열리지 않는다. `LIVE_ENABLED`는 운영에서 `on`일 때만 켜지고, Realtime은 `LIVE_REALTIME=on`이어야 한다. 여는 것은 사람이 정한다.
+- `/api/live/chat`은 `/api/voice/chat`과 제한기가 따로다. 두 경로를 합치면 IP 하나가 분당 40회까지 유료 글자 LLM을 부를 수 있다.
+- 표준 키(`OPENAI_API_KEY`)는 서버에만 있다. 임시 키(`client_secrets`)를 쓰지 않는 이유는 서버가 세션 설정을 고정하고 `call_id`를 쥐어 끊을 수 있게 하려는 것이다.
+- 브라우저는 데이터 채널로 `session.update`를 보내 세션 설정을 바꿀 수 있다. 우리 화면은 보내지 않지만 조작한 화면은 할 수 있어서, 돈은 통화 끊기(270초), 하루 상한(10세션), 통화당 턴 상한(30), OpenAI 쪽 프로젝트 예산 한도로 묶고 접수는 화면 관문과 서버 검사를 거친다. 서버가 실제로 기대할 수 있는 끊기는 "화면 hangup"과 "같은 인스턴스의 예약 끊기" 둘뿐이다.
+- 비용 어림(추정, 1달러 = 1,400원): Realtime mini는 말하는 1분에 약 0.035달러, 한 세션 4.5분에 약 220원이다. 서버 끊기가 동작하지 않는 최악(세션 하나가 OpenAI 상한 60분)이면 세션당 약 2.1달러, 하루 10세션이면 약 2.9만 원이다.
+- 운영에서 Realtime을 켜는 조건: 사람이 켜기로 정했다, OpenAI 프로젝트 예산 한도가 실제로 막는지 확인했다, 서버 끊기가 배포 환경에서 동작함을 확인했다(`maxDuration = 300`과 예약 끊기), 로컬 실호출 점검을 통과했다.
+- 확인하지 못한 것: Realtime 실호출(한국어 인식 품질, `reasoning.effort`·`semantic_vad`를 모델이 받는지, `call_id` 형식, hangup의 응답 코드, 응답 `max_output_tokens`가 잘리는지), 실기기 iOS·VoiceOver 동작, 서버리스에서 예약 끊기가 끝까지 도는지. 로컬 실호출 결과는 `docs/plans/2026-11-23-voice-live/progress.md`에 적는다.
+
 ### 리서치 챗 사진 축소(브라우저)
 
 - 봉사자가 고른 사진을 canvas로 줄여 서버용 JPEG(디코드 후 1.5MB 이하)와 기기 저장용 작은 썸네일을 만든다(`researchPhoto.ts`). 원본은 어디에도 저장하지 않는다.

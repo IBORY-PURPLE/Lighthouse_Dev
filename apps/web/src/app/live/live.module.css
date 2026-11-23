@@ -1,0 +1,284 @@
+/* /live 화면 전용 스타일. 설계서 4.1절, 8.1절 표면 CSS, 8.5절, 22절. globals.css는 고치지 않는다.
+   휴대폰 폭(390px)과 PC 모두에서 큰 단추가 화면 대부분을 차지한다. 글자 18px 이상, 대비 4.5:1 이상. */
+
+.root {
+  --bg: #ffffff;
+  --ink: #111418;
+  --muted: #3d4650;
+  --line: #5b6670;
+  --accent: #0b3d91;
+  --accent-ink: #ffffff;
+  --card: #f1f4f8;
+  --danger: #8a1c1c;
+
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 1rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 1.125rem;
+  line-height: 1.5;
+
+  /* 길게 누르기 표면(8.1절). 글자 선택과 길게 눌렀을 때의 메뉴를 막는다. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+  .root {
+    --bg: #101418;
+    --ink: #f2f4f7;
+    --muted: #c3cad2;
+    --line: #8a95a1;
+    --accent: #8db8ff;
+    --accent-ink: #08162e;
+    --card: #1b222a;
+    --danger: #ffb4ab;
+  }
+}
+
+.title {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.3;
+}
+
+.headline {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.caption {
+  min-height: 1.5em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+/* 큰 단추: 화면 폭 전체, 남는 높이를 모두 차지한다. 96px 이상. */
+.main {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: max(96px, 42vh);
+  min-height: max(96px, 42dvh);
+  padding: 1rem;
+  border: 3px solid var(--accent);
+  border-radius: 1.25rem;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 2.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.main:focus-visible,
+.small:focus-visible,
+.link:focus-visible,
+.input:focus-visible {
+  outline: 4px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.main[aria-disabled="true"] {
+  opacity: 0.75;
+  cursor: default;
+}
+
+/* 듣는 중에는 색뿐 아니라 굵은 테두리와 글자(말씀하세요)로도 알린다. */
+.root[data-live-mic="on"] .main {
+  border-style: double;
+  border-width: 8px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .root[data-live-mic="on"] .main {
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    filter: brightness(1.15);
+  }
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.small {
+  box-sizing: border-box;
+  flex: 1 1 9rem;
+  min-height: 56px;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--accent);
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.link {
+  display: inline-flex;
+  flex: 1 1 9rem;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 56px;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--accent);
+  border-radius: 0.75rem;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.card {
+  margin: 0;
+  padding: 1rem;
+  border: 2px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--card);
+}
+
+.card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+}
+
+.card dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.card dt {
+  font-weight: 700;
+}
+
+.card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form label {
+  font-weight: 700;
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 6rem;
+  padding: 0.75rem;
+  border: 2px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.wait {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+}
+
+.wait input {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.log p {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.log .me {
+  background: var(--card);
+}
+
+.log strong {
+  margin-right: 0.5rem;
+}
+
+/* 화면에는 보이지 않고 낭독기에만 읽히는 알림 영역. 숨기지 않고 잘라 둔다. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.unavailable {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 100dvh;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  font-size: 1.25rem;
+}
+
+.unavailable a {
+  color: inherit;
+  font-weight: 700;
+}
+
+@media (min-width: 900px) {
+  .root {
+    padding: 1.5rem max(1.5rem, calc((100vw - 960px) / 2));
+  }
+}
