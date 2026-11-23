@@ -1020,10 +1020,18 @@ describe("confirming", () => {
     expect(timerSet(r.effects, "relisten")).toBeDefined();
   });
   it("카드 낭독 메아리도 거른다", () => {
+    // 요약 글의 이어진 한 구간을 그대로 읽은 소리만 메아리다(설계서 26절 1번).
     const a = run(atConfirming().state, { type: "LISTEN_STARTED", late: false });
-    const r = run(a.state, { type: "USER_TURN_END", text: "제품은 전기밥솥 옵션은 흰색", transcribed: true });
+    const r = run(a.state, { type: "USER_TURN_END", text: "제품은 전기밥솥 알고 싶은 정보는 할인 혜택", transcribed: true });
     expect(types(r.effects)).not.toContain("ENGINE_RESPOND");
     expect(timerSet(r.effects, "relisten")).toBeDefined();
+  });
+  it("요약의 중간을 건너뛰거나 값을 바꾼 말은 메아리로 버리지 않고 AI로 보낸다", () => {
+    const skipped = run(atConfirming().state, { type: "USER_TURN_END", text: "제품은 전기밥솥 옵션은 흰색", transcribed: true });
+    expect(types(skipped.effects)).toContain("ENGINE_RESPOND");
+    const changed = run(atConfirming().state, { type: "USER_TURN_END", text: "제품은 전기밥솥 알고 싶은 정보는 할인 혜택 옵션은 검정색", transcribed: true });
+    expect(types(changed.effects)).toContain("ENGINE_RESPOND");
+    expect(changed.state.consentText).toBe("제품은 전기밥솥 알고 싶은 정보는 할인 혜택 옵션은 검정색");
   });
   it("고치는 말은 AI로 보내고 consentText에 담는다. thinking에서도 동의 대기가 유지된다", () => {
     const r = run(atConfirming().state, { type: "USER_TURN_END", text: "옵션은 흰색 말고 검정색으로", transcribed: true });

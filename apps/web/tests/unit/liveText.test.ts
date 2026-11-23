@@ -14,6 +14,7 @@ import {
   REPLY_MAX,
   SLOT_MAX,
   SUMMARY_MAX,
+  amountKey,
   summaryOf,
   tidySlots,
   toDraft,
@@ -369,3 +370,39 @@ describe("groundSlots: 되묻는 말투의 물음", () => {
     expect(out.info).toBe("배터리 시간 알려 주세요?");
   });
 });
+
+// Codex 4차 지적 2: 예산 칸과 금액이 다른 "예산은 …" 마디를 정리가 지우면 안 된다.
+describe("tidySlots: 금액이 다른 예산 마디", () => {
+  it("amountKey는 처음 나오는 금액을 숫자와 단위로 돌려준다", () => {
+    expect(amountKey("예산은 10만 원 이하")).toBe("10만");
+    expect(amountKey("10만원")).toBe("10만");
+    expect(amountKey("100,000원")).toBe("100000");
+    expect(amountKey("예산이 십만 원")).toBe("십만");
+    expect(amountKey("1.5만 원")).toBe("1.5만");
+    expect(amountKey("저렴한 것")).toBe("");
+  });
+  it("금액이 같은 예산 마디는 되풀이라 빼고, 예산 칸으로 한 번 읽는다", () => {
+    const draft = toDraft(slots({ product: "TV", options: "벽걸이, 예산은 20만 원 이내", budget: "20만 원 이하" }));
+    expect(draft?.options).toBe("벽걸이");
+    expect(draft?.summary).toBe("제품은 TV. 옵션은 벽걸이. 예산은 20만 원 이하.");
+  });
+  it("금액이 다른 예산 마디는 남겨서 두 금액을 모두 읽는다", () => {
+    const draft = toDraft(slots({ product: "TV", options: "예산은 10만 원", budget: "20만 원" }));
+    expect(draft?.options).toBe("예산은 10만 원");
+    expect(draft?.summary).toBe("제품은 TV. 옵션은 예산은 10만 원. 예산은 20만 원.");
+    const mixed = toDraft(slots({ product: "TV", info: "화질. 예산은 10만 원 이내", options: "벽걸이, 예산 10만 원", budget: "20만 원" }));
+    expect(mixed?.info).toContain("예산은 10만 원 이내");
+    expect(mixed?.options).toBe("벽걸이, 예산 10만 원");
+    expect(mixed?.summary).toContain("예산은 20만 원.");
+  });
+  it("예산 칸에 금액이 없으면 다른 칸의 금액을 지우지 않는다", () => {
+    const draft = toDraft(slots({ product: "TV", options: "예산은 10만 원", budget: "저렴한 것" }));
+    expect(draft?.options).toBe("예산은 10만 원");
+    expect(draft?.summary).toBe("제품은 TV. 옵션은 예산은 10만 원. 예산은 저렴한 것.");
+  });
+  it("금액 없이 '예산'만 말하는 마디는 뺀다", () => {
+    const draft = toDraft(slots({ product: "TV", options: "벽걸이, 예산은", budget: "20만 원" }));
+    expect(draft?.options).toBe("벽걸이");
+  });
+});
+

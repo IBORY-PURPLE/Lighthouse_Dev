@@ -83,7 +83,12 @@ export function toLiveRequest(draft: LiveDraft, cid: string): LiveRequestBody | 
 
 export type RegisterClass = "ok" | "retryable" | "unknown" | "rate_limited" | "rejected" | "conflict";
 
-/** 접수 응답 분류(12.1절 표). 409는 앞 시도가 등록됐다는 뜻이라 접수는 된 것이다. */
+/**
+ * 접수 응답 분류(12.1절 표).
+ * 409는 같은 접수 id의 요청이 이미 있는데 이 기기의 것으로 확인되지 않는다는 뜻이다(서버는 번호와 상태를 알려 주지 않는다).
+ * 우리 흐름에서는 기기 쿠키가 바뀌기 전에 나간 앞 시도가 등록된 경우에 생긴다. 그래서 접수는 된 것으로 보고 다시 보내지 않게 안내하되,
+ * 접수 번호는 말하지 않는다(registerConflict).
+ */
 export function classifyRegister(status: number | "network" | "timeout"): RegisterClass {
   if (status === "network" || status === "timeout") return "unknown";
   if (status === 200 || status === 201) return "ok";

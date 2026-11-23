@@ -166,11 +166,21 @@ describe("isCardEcho", () => {
     expect(isCardEcho("소니 헤드폰 맞아요", sony)).toBe(false); // 답하는 말
     expect(isCardEcho("소니 헤드폰은 무선인가요?", sony)).toBe(false); // 물음
   });
-  it("카드 낱말만 있는 낭독은 참이고, 긴 낭독은 잘못 받아 적은 낱말 하나까지 봐준다", () => {
+  it("요약 글의 이어진 한 구간과 낱말이 모두 같은 낭독만 참이다", () => {
     expect(isCardEcho("제품은 소니 헤드폰", sony)).toBe(true);
     expect(isCardEcho("옵션은 무선 예산은 20만 원", sony)).toBe(true);
-    expect(isCardEcho("제품은 소니 헤드폰 알고 싶은 정보는 노이즈 캔슬린 성능", sony)).toBe(true); // 9낱말 중 1개
-    expect(isCardEcho("제품은 소니 헤드폰 알고 싶은 정보는 노이즈 캔슬린 성농", sony)).toBe(false); // 2개
+    expect(isCardEcho("제품은 소니 헤드폰 알고 싶은 정보는 노이즈 캔슬링 성능 옵션은 무선 예산은 20만 원", sony)).toBe(true);
+    // 낱말 하나라도 다르면 이용자 말로 받는다(잘못 받아 적힌 낭독도 AI로 간다).
+    expect(isCardEcho("제품은 소니 헤드폰 알고 싶은 정보는 노이즈 캔슬린 성능", sony)).toBe(false);
+  });
+  it("요약을 되풀이하며 금액만 바꾼 말은 거짓이다(Codex 4차 지적 1)", () => {
+    expect(isCardEcho("제품은 소니 헤드폰 알고 싶은 정보는 노이즈 캔슬링 성능 옵션은 무선 예산은 30만 원", sony)).toBe(false);
+    expect(isCardEcho("옵션은 무선 예산은 30만 원", sony)).toBe(false);
+    expect(isCardEcho("옵션은 유선 예산은 20만 원", sony)).toBe(false);
+  });
+  it("중간을 건너뛴 말은 거짓이다", () => {
+    expect(isCardEcho("소니 헤드폰 무선", sony)).toBe(false);
+    expect(isCardEcho("제품은 소니 헤드폰 예산은 20만 원", sony)).toBe(false);
   });
   it("카드 화면의 이름표(제품, 옵션, 예산)로 읽혀도 참이다", () => {
     expect(isCardEcho("제품 소니 헤드폰", sony)).toBe(true);

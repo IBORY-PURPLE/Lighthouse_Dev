@@ -153,11 +153,6 @@ export function isScreenReaderEcho(text: string): boolean {
   return SCREEN_TEXTS.has(n) && matchLocalCommand(text) === null;
 }
 
-/** 카드 낭독으로 보려면 낱말의 이 비율 이상이 요약 글에 순서대로 있어야 한다. */
-export const CARD_ECHO_RATIO = 0.8;
-/** 받아 적기 오류로 봐 줄 수 있는 카드 밖 낱말 수. 둘 이상이면 이용자가 새로 한 말로 본다. */
-export const CARD_ECHO_STRAY_MAX = 1;
-
 function cardTokens(text: string): string[] {
   return text.normalize("NFKC").toLowerCase().split(/[\s\p{P}\p{S}]+/u).filter(Boolean);
 }
@@ -168,11 +163,12 @@ const sameCardToken = (said: string, card: string) => said === card || (CARD_LAB
 
 /**
  * 확인 상태에서 카드 글을 쓸어 넘기며 읽는 낭독이 이용자 말로 들어온 것을 거른다. draft가 없으면 거짓.
- * 이용자 말을 버리는 판정이라 좁게 잡는다(Codex 3차 지적 1: "소니 헤드폰 말고 보스 헤드폰"이 60% 기준에 걸려 버려졌다).
+ * 이용자 말을 버리는 판정이라, 말한 낱말이 모두 요약 글의 이어진 한 구간과 차례대로 같을 때만 메아리로 본다.
+ * - 낱말이 하나라도 다르면 이용자가 한 말이다. 다른 제품·다른 금액·고치는 말이 그렇다
+ *   (Codex 3차 지적 1 "소니 헤드폰 말고 보스 헤드폰", 4차 지적 1: 요약을 되풀이하며 "20만 원"만 "30만 원"으로 바꾼 말).
+ * - 중간을 건너뛰거나 순서를 바꾼 말("무선 말고 유선")도 이용자가 한 말이다.
  * - 물음, 동의로 읽히는 말은 메아리가 아니다.
- * - 요약 글의 낱말 순서대로 나온 낱말만 카드 낱말로 센다. 낭독은 카드를 순서대로 읽지만 고치는 말은 순서가 다르다("무선 말고 유선").
- * - 카드 밖 낱말이 둘 이상이거나, 하나라도 고치는 말(말고, 바꿔, 아니…)이거나, 카드 낱말이 80% 미만이면 메아리가 아니다.
- *   새 낱말(다른 제품, 다른 금액)은 고치려는 말일 수 있다.
+ * 잘못 받아 적힌 낭독은 거르지 못하고 AI로 간다. 이용자 말을 버리는 것보다 낫다.
  */
 export function isCardEcho(text: string, draft: LiveDraft | null): boolean {
   if (!draft) return false;
@@ -180,19 +176,8 @@ export function isCardEcho(text: string, draft: LiveDraft | null): boolean {
   if (tokens.length < 2) return false;
   if (hasQuestion(text) || isClearConsent(text) || isPlausibleConsent(text)) return false;
   const card = cardTokens(draft.summary);
-  const stray: string[] = [];
-  let at = 0;
-  let hit = 0;
-  for (const token of tokens) {
-    let found = -1;
-    for (let i = at; i < card.length && found === -1; i++) if (sameCardToken(token, card[i])) found = i;
-    if (found === -1) {
-      stray.push(token);
-    } else {
-      hit += 1;
-      at = found + 1;
-    }
+  for (let start = 0; start + tokens.length <= card.length; start++) {
+    if (tokens.every((token, at) => sameCardToken(token, card[start + at]))) return true;
   }
-  if (stray.length > CARD_ECHO_STRAY_MAX || stray.some((t) => NEGATIVE.test(t))) return false;
-  return hit / tokens.length >= CARD_ECHO_RATIO;
+  return false;
 }

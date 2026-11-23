@@ -146,16 +146,31 @@ const INFO_TAIL = /\s*(?:(?:을|를|이|가|도)\s*)?(?:알고\s*싶(?:음|어�
 const PURE_BUDGET =
   /^(?:그리고\s*)?예산(?:은|이|도|:)?\s*(?:[\d,.]+|[일이삼사오육칠팔구십백천]+)?\s*(?:만|천|백)?\s*원?\s*(?:이내|이하|미만|정도|쯤|까지|안쪽|내외)?(?:로|으로|입니다|이에요|예요)?$/;
 
+const AMOUNT = /(\d+(?:\.\d+)?|[일이삼사오육칠팔구십백천]+)(만|천|백)?(?=원)|(\d+(?:\.\d+)?)(만|천|백)/;
+
+/** 금액을 견주는 열쇠: 글에서 처음 나오는 숫자(또는 한글 수)와 단위. 예: "예산은 10만 원 이하" → "10만". 금액이 없으면 "". */
+export function amountKey(text: string): string {
+  const t = text.normalize("NFKC").replace(/[\s,]+/g, "").replace(/^(?:그리고)?예산(?:은|이|도|:)?/, "");
+  const m = AMOUNT.exec(t);
+  return m ? `${m[1] ?? m[3]}${m[2] ?? m[4] ?? ""}` : "";
+}
+
 /**
  * 읽어 주기 좋게 칸을 정리한다(실호출에서 모델이 예산을 다른 칸에 되풀이하거나 끝말을 붙이는 일이 있었다).
  * - 예산 칸이 있으면 알고 싶은 정보와 옵션에서 "예산만 말하는 마디"를 뺀다. 다른 내용이 섞인 마디는 그대로 둔다(내용을 잃지 않는다).
+ *   금액이 예산 칸과 다른 마디도 그대로 둔다. 이용자가 말한 금액일 수 있어 확인 때 둘 다 들려준다(Codex 4차 지적 2).
  * - 알고 싶은 정보의 끝말("알고 싶음", "궁금합니다")을 뗀다. 떼고 나서 비면 그대로 둔다.
  */
 export function tidySlots(slots: LiveSlots): LiveSlots {
   const dropBudget = (text: string) => {
     if (!slots.budget || !text.includes("예산")) return text;
     const parts = text.split(/\s*,\s*|\.\s+|\.$/).map((part) => part.trim()).filter(Boolean);
-    const kept = parts.filter((part) => !PURE_BUDGET.test(part));
+    const budgetKey = amountKey(slots.budget);
+    const kept = parts.filter((part) => {
+      if (!PURE_BUDGET.test(part)) return true;
+      const key = amountKey(part);
+      return key !== "" && key !== budgetKey; // 금액이 다르면 남긴다. 금액이 없거나 같으면 되풀이라 뺀다
+    });
     return kept.length === parts.length ? text : kept.join(", ");
   };
   let info = dropBudget(slots.info);
