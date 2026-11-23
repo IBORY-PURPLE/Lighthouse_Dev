@@ -54,16 +54,22 @@ export function readSlots(value: unknown): LiveSlots {
   };
 }
 
-// ---------- 칸의 근거 검사 ----------
-// 실호출(2026-11-24, gpt-realtime-2.1-mini)에서 모델이 이용자가 하지 않은 말(지시문의 문장과 보기)을 칸에 섞어 넣는 일이 있었다.
-// 이용자는 요약을 눈으로 확인할 수 없으므로, 앱이 읽어 주기 전에 이용자 말에 근거가 없는 문장을 뺀다.
+// ---------- 칸에서 지시문이 샌 문장 빼기 ----------
+// 실호출(2026-11-24, gpt-realtime-2.1-mini)에서 모델이 이용자가 하지 않은 말(지시문의 문장과 보기, 자기가 할 질문)을 칸에 섞어 넣는 일이 있었다.
+// 원칙: 이용자가 한 말일 수 있는 것은 지우지 않는다. 확인 요약을 읽어 주는 것이 안전장치이므로, 근거가 불확실한 문장은 남겨 이용자가 듣고 고치게 한다.
+// 지우는 것은 "이용자 말에 근거가 없고" 동시에 "지시문 표지가 있거나 물음표로 끝나는" 문장뿐이다(Codex 2차 지적 2·3).
 
 /** 근거로 세지 않는 흔한 낱말의 앞 두 글자(어느 요청에나 나온다). */
 const GROUND_STOP = new Set(["알고", "싶어", "싶은", "궁금", "정보", "제품", "원하", "있는", "같은", "관련", "대한", "확인", "함께", "좋겠", "좋습", "가능", "여부", "조건", "옵션", "예산", "그리", "또는"]);
-/** 지시문에서 온 문장에 흔한 말. 근거 없는 문장에 이 말이 있으면 칸 전체에 근거가 없어도 뺀다. */
+/** 지시문에서 온 문장에 흔한 말. */
 const LEAK_MARK = /봉사자|지시문|비워|없다면|알려\s*주세요|찾아서|확인\s*가능|같은\s*정보|조건은/;
 
 const flat = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[^0-9a-z가-힣]+/g, "");
+
+/** 문장으로 나눈다. 물음표·느낌표 뒤는 붙어 있어도 나누고, 마침표는 뒤에 공백이 있을 때만 나눈다("1.5리터"를 쪼개지 않는다). */
+function sentencesOf(text: string): string[] {
+  return text.split(/(?<=[!?？])\s*|(?<=\.)\s+/).map((part) => part.trim()).filter(Boolean);
+}
 
 /** 문장의 내용 낱말(앞 두 글자) 가운데 이용자 말에 있는 것이 하나라도 있는가. */
 function sentenceGrounded(sentence: string, userFlat: string): boolean {
@@ -75,32 +81,27 @@ function sentenceGrounded(sentence: string, userFlat: string): boolean {
   return false;
 }
 
-function groundText(text: string, userFlat: string): string {
+/** 근거가 없으면서 지시문 표지가 있거나 물음표로 끝나는 문장만 뺀다. 나머지는 그대로 둔다. */
+function dropLeaked(text: string, userFlat: string): string {
   if (!text) return text;
-  const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
-  const judged = sentences.map((s) => ({ s, ok: sentenceGrounded(s, userFlat) }));
-  const anyGrounded = judged.some((j) => j.ok);
-  // 근거 있는 문장이 하나라도 있으면 근거 없는 문장을 모두 뺀다. 하나도 없으면(바꿔 말했을 수 있다) 지시문 표지가 있는 문장만 뺀다.
-  return judged.filter((j) => j.ok || (!anyGrounded && !LEAK_MARK.test(j.s))).map((j) => j.s).join(" ");
+  const sentences = sentencesOf(text);
+  const kept = sentences.filter((s) => sentenceGrounded(s, userFlat) || !(LEAK_MARK.test(s) || /[?？]$/.test(s)));
+  return kept.length === sentences.length ? text : kept.join(" ");
 }
 
 /**
- * 칸에서 이용자 말에 근거가 없는 문장을 뺀다. userTexts는 이용자가 한 말(받아 적은 글)이다.
- * 이용자 말이 너무 짧으면(전사를 못 받은 경우) 판단할 수 없어 그대로 돌려준다. 제품 칸은 표지 문장만 뺀다(이름은 바꿔 적힐 수 있다).
+ * 칸에서 지시문이 샌 문장과 모델의 질문을 뺀다. userTexts는 이용자가 한 말(받아 적은 글)이다.
+ * 이용자 말에 낱말이 하나라도 있는 문장, 표지도 물음표도 없는 문장은 지우지 않는다(바꿔 말한 것일 수 있다).
+ * 이용자 말이 너무 짧으면(전사를 못 받은 경우) 판단할 수 없어 그대로 돌려준다. 제품 칸이 통째로 비게 되면 원래 값을 둔다.
  */
 export function groundSlots(slots: LiveSlots, userTexts: string[]): LiveSlots {
   const userFlat = flat(userTexts.join(" "));
   if (userFlat.length < 4) return slots;
-  const product = slots.product
-    .split(/(?<=[.!?])\s+/)
-    .filter((s) => !LEAK_MARK.test(s) || sentenceGrounded(s, userFlat))
-    .join(" ")
-    .trim();
   return {
-    product: product || slots.product,
-    info: groundText(slots.info, userFlat),
-    options: groundText(slots.options, userFlat),
-    budget: groundText(slots.budget, userFlat),
+    product: dropLeaked(slots.product, userFlat) || slots.product,
+    info: dropLeaked(slots.info, userFlat),
+    options: dropLeaked(slots.options, userFlat),
+    budget: dropLeaked(slots.budget, userFlat),
   };
 }
 
@@ -108,27 +109,27 @@ const stripEnd = (s: string) => s.replace(/[.,!?]+$/, "");
 
 /** "…을 알고 싶음", "…이 궁금합니다" 같은 끝말. 요약이 "알고 싶은 정보는 …"으로 읽히므로 뗀다. */
 const INFO_TAIL = /\s*(?:(?:을|를|이|가|도)\s*)?(?:알고\s*싶(?:음|어요|습니다|다)|궁금(?:함|해요|합니다|하다)?)$/;
+/** 예산만 말하는 마디(예: "예산은 10만 원 이내"). 다른 내용이 섞인 마디는 해당하지 않는다. */
+const PURE_BUDGET =
+  /^(?:그리고\s*)?예산(?:은|이|도|:)?\s*(?:[\d,.]+|[일이삼사오육칠팔구십백천]+)?\s*(?:만|천|백)?\s*원?\s*(?:이내|이하|미만|정도|쯤|까지|안쪽|내외)?(?:로|으로|입니다|이에요|예요)?$/;
 
 /**
  * 읽어 주기 좋게 칸을 정리한다(실호출에서 모델이 예산을 다른 칸에 되풀이하거나 끝말을 붙이는 일이 있었다).
- * - 예산 칸이 있으면 알고 싶은 정보와 옵션에서 "예산"이 든 마디를 뺀다.
+ * - 예산 칸이 있으면 알고 싶은 정보와 옵션에서 "예산만 말하는 마디"를 뺀다. 다른 내용이 섞인 마디는 그대로 둔다(내용을 잃지 않는다).
  * - 알고 싶은 정보의 끝말("알고 싶음", "궁금합니다")을 뗀다. 떼고 나서 비면 그대로 둔다.
- * - 물음표로 끝나는 문장은 뺀다(모델이 자기가 할 질문을 칸에 적은 일이 있었다). 제품 칸은 건드리지 않는다.
  */
 export function tidySlots(slots: LiveSlots): LiveSlots {
-  const dropQuestions = (text: string) =>
-    /[?？]/.test(text)
-      ? text.split(/(?<=[.!?？])\s+/).map((part) => part.trim()).filter((part) => part && !/[?？]$/.test(part)).join(" ")
-      : text;
-  const dropBudget = (raw: string) => {
-    const text = dropQuestions(raw);
+  const dropBudget = (text: string) => {
     if (!slots.budget || !text.includes("예산")) return text;
-    const kept = text.split(/\s*[.,]\s*/).map((part) => part.trim()).filter((part) => part && !part.includes("예산"));
-    return kept.join(", ");
+    const parts = text.split(/\s*,\s*|\.\s+|\.$/).map((part) => part.trim()).filter(Boolean);
+    const kept = parts.filter((part) => !PURE_BUDGET.test(part));
+    return kept.length === parts.length ? text : kept.join(", ");
   };
   let info = dropBudget(slots.info);
-  const trimmed = stripEnd(info).replace(INFO_TAIL, "").trim();
-  if (trimmed) info = trimmed;
+  // 끝말이 실제로 있을 때만 바꾼다. 없으면 문장부호까지 그대로 둔다(이용자가 물은 질문의 물음표를 지우지 않는다).
+  const base = stripEnd(info);
+  const cut = base.replace(INFO_TAIL, "").trim();
+  if (cut && cut !== base) info = cut;
   return { product: slots.product, info, options: dropBudget(slots.options), budget: slots.budget };
 }
 
@@ -143,7 +144,7 @@ export function summaryOf(slots: LiveSlots): string {
   if (info) parts.push(`알고 싶은 정보는 ${info}.`);
   if (options) parts.push(`옵션은 ${options}.`);
   // 예산 글이 옵션 안에 그대로 들어 있으면 같은 말을 두 번 하지 않는다.
-  if (budget && !options.includes(budget)) parts.push(`예산은 ${budget}.`);
+  if (budget && !options.includes(budget) && !options.includes("예산") && !info.includes("예산")) parts.push(`예산은 ${budget}.`);
   return parts.join(" ");
 }
 

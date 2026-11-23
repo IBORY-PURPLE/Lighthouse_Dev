@@ -5,6 +5,7 @@ import {
   hasQuestion,
   isCardEcho,
   isClearConsent,
+  isDecline,
   isPlausibleConsent,
   isScreenReaderEcho,
   matchLocalCommand,
@@ -95,6 +96,25 @@ describe("동의 판정 사례 표", () => {
     ["네 그리고 색은 빨강으로요", false, false],
     ["", false, false],
     ["다시", false, false],
+    // 자연스러운 동의(A11). '괜찮아요'·'됐어요'는 거절로도 쓰이므로 AI도 동의로 본 경우에만 통과한다.
+    ["네, 부탁드립니다", true, true],
+    ["네 부탁 드립니다", true, true],
+    ["네 부탁합니다", true, true],
+    ["네 보내세요", true, true],
+    ["보내세요", true, true],
+    ["네 보내 주십시오", true, true],
+    ["이대로 보내 주십시오", true, true],
+    ["그렇게 해 주십시오", true, true],
+    ["네, 괜찮아요", false, true],
+    ["네 괜찮습니다", false, true],
+    ["네 됐어요", false, true],
+    ["네 할게요", false, true],
+    ["괜찮아요", false, false],
+    ["됐어요", false, false],
+    ["아니요 괜찮아요", false, false],
+    ["네, 괜찮아요?", false, false],
+    ["아니요 보내지 마세요", false, false],
+    ["부탁드립니다", false, false],
   ];
   it.each(rows)("%j → clear=%s plausible=%s", (text, clear, plausible) => {
     expect(isClearConsent(text)).toBe(clear);
@@ -134,6 +154,19 @@ describe("isCardEcho", () => {
   });
   it("draft가 없으면 거짓이다", () => {
     expect(isCardEcho("제품은 무선 이어폰", null)).toBe(false);
+  });
+});
+
+describe("isDecline: '끝낼까요?'에 대한 거절(A36)", () => {
+  it("아니요·계속하겠다는 말이면 참", () => {
+    for (const text of ["아니요", "아니", "아뇨", "아니요.", "계속할게요", "계속해요", "계속", "아니요 계속할게요", "안 끝낼래요", "끝내지 마세요"]) {
+      expect(isDecline(text), text).toBe(true);
+    }
+  });
+  it("다른 말이 섞이거나 물음표가 있으면 거짓", () => {
+    for (const text of ["", "네", "그만", "아니 전기밥솥 찾아 주세요", "계속 전기밥솥 얘기할게요", "아니요?", "전기밥솥"]) {
+      expect(isDecline(text), text).toBe(false);
+    }
   });
 });
 

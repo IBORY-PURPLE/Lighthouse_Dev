@@ -77,6 +77,7 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
   // 차례 열기(OPEN_TURN)의 기다림. 번호가 바뀌면 남은 단계를 하지 않는다.
   let turnSeq = 0;
   let turnTimer: { handle: unknown } | null = null;
+  let turnOpening = false;   // 차례를 여는 중이다(뜸 → 신호음 → 마이크 열기 전). turnTimer는 신호음을 기다리는 사이 null이라 따로 둔다
 
   // 읽기와 대기 펄스, 알림.
   let speakingId: string | null = null;
@@ -195,6 +196,8 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
         current?.engine.hold();
         return;
       case "ENGINE_SUBMIT":
+        // 띵 전의 뜸·신호음 사이에 온 누름·뗌은 버린다. 취소하면 신호음이 사라지고 마이크가 소리 없이 열린다. 곧 띵이 나고 듣기가 열린다.
+        if (turnOpening) return;
         cancelTurn();
         current?.engine.submit();
         return;
@@ -333,6 +336,7 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
 
   function cancelTurn(): void {
     turnSeq += 1;
+    turnOpening = false;
     clearEntry(turnTimer);
     turnTimer = null;
   }
@@ -350,6 +354,7 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
 
   function openTurn(earcon: "turn" | "confirm", settle: boolean, keep: boolean): void {
     cancelTurn();
+    turnOpening = true;
     const mine = turnSeq;
     const alive = () => !disposed && mine === turnSeq;
     void (async () => {
@@ -367,6 +372,7 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
       if (!alive()) return;
       await wait(earconDurationMs(earcon) + EARCON_TO_MIC_MS);
       if (!alive()) return;
+      turnOpening = false;
       deps.setAudioSession("auto");
       current?.engine.listen({ keep });
     })();

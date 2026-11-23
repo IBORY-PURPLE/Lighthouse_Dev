@@ -335,6 +335,60 @@ describe("실행기: 차례 열기 순서(9절)", () => {
     expect(engine.calls).toContain("hold");
   });
 
+  it("띵 전의 뜸 사이에 [말하기]를 다시 눌러도 신호음이 취소되지 않고 띵 뒤에 듣기가 열린다(A14)", async () => {
+    const h = harness();
+    h.runner.dispatch({ type: "START" });
+    h.runner.dispatch({ type: "MAIN_BUTTON" });
+    const engine = h.engines[0];
+    engine.emit({ type: "READY", engine: "fallback", inputMode: "voice" });
+    await h.timers.advance(500);
+    h.runner.dispatch({ type: "MAIN_BUTTON" });   // 뜸 사이의 두 번째 누름(상태 기계는 ENGINE_SUBMIT을 낸다)
+    expect(engine.calls).not.toContain("submit");
+    await h.timers.advance(MIC_SETTLE_MS - 500);
+    expect(h.played).toEqual(["turn"]);
+    await h.timers.advance(earconDurationMs("turn") + EARCON_TO_MIC_MS);
+    expect(engine.listens).toEqual([{ keep: false }]);
+    expect(engine.calls).not.toContain("submit");
+  });
+
+  it("신호음을 재생하는 사이의 누름도 버리고, 듣기가 열린 뒤의 누름은 보낸다(A14)", async () => {
+    const h = harness();
+    const engine = reachListening(h);
+    expect(h.played).toEqual(["turn"]);
+    h.runner.dispatch({ type: "HOLD_SUBMIT" });   // 뜸 없는 차례: 신호음은 이미 시작됐고 마이크는 아직 닫혀 있다
+    expect(engine.calls).not.toContain("submit");
+    await h.timers.advance(earconDurationMs("turn") + EARCON_TO_MIC_MS);
+    expect(engine.listens).toEqual([{ keep: false }]);
+    h.runner.dispatch({ type: "MAIN_BUTTON" });
+    expect(engine.calls).toContain("submit");
+  });
+
+  it("Realtime도 뜸 사이의 누름을 버리고 띵 뒤에 듣기를 연다(A14)", async () => {
+    const h = harness();
+    const { engine } = await reachRealtimeListening(h);
+    await h.timers.advance(500);
+    h.runner.dispatch({ type: "MAIN_BUTTON" });
+    expect(engine.calls).not.toContain("submit");
+    await h.timers.advance(MIC_SETTLE_MS - 500 + earconDurationMs("turn") + EARCON_TO_MIC_MS);
+    expect(h.played.filter((p) => p === "turn")).toHaveLength(1);
+    expect(engine.listens).toEqual([{ keep: false }]);
+    expect(engine.calls).not.toContain("submit");
+  });
+
+  it("차례를 취소(HOLD_CANCEL로 다시 열기)해도 열기 플래그가 남지 않아 다음 보내기가 막히지 않는다(A14)", async () => {
+    const h = harness();
+    const engine = reachListening(h);
+    await h.timers.advance(earconDurationMs("turn") + EARCON_TO_MIC_MS);
+    engine.emit({ type: "LISTEN_STARTED", late: false });
+    h.runner.dispatch({ type: "HOLD_CANCEL" });     // 듣기를 버리고 새 차례를 연다(열기 시작)
+    h.runner.dispatch({ type: "CONTROL_TOUCH" });   // 열기 도중 ENGINE_HOLD가 열기를 끊는다
+    expect(engine.calls).toContain("hold");
+    await h.timers.advance(4_000 + earconDurationMs("turn") + EARCON_TO_MIC_MS);   // controlHold가 keep으로 다시 연다
+    expect(engine.listens).toHaveLength(2);
+    h.runner.dispatch({ type: "MAIN_BUTTON" });
+    expect(engine.calls.filter((c) => c === "submit")).toHaveLength(1);
+  });
+
   it("RELISTEN은 신호음 없이 listen({keep:true})만 한다", async () => {
     const h = harness();
     const engine = reachListening(h);

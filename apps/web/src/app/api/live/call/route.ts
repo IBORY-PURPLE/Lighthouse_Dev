@@ -3,6 +3,7 @@ import {
   isLiveEnabled,
   LIVE_MAX_TURNS,
   LIVE_WARN_BEFORE_SEC,
+  liveCallIpLimit,
   liveMaxSessionSec,
   realCallsLeft,
   realCallTail,
@@ -32,8 +33,8 @@ export const maxDuration = 300;
 const MAX_BODY_BYTES = 16_384;
 const NO_STORE = { "Cache-Control": "no-store" };
 
-// IP당 3회/10분. 메모리 방식이라 인스턴스마다 따로 센다.
-const checkIpLimit = createRateLimiter({ limit: 3, windowMs: 10 * 60_000 });
+// IP당 3회/10분(LIVE_CALL_IP_LIMIT로 바꾼다. 서버가 뜰 때 한 번 읽는다). 메모리 방식이라 인스턴스마다 따로 센다.
+const checkIpLimit = createRateLimiter({ limit: liveCallIpLimit(), windowMs: 10 * 60_000 });
 
 type FallbackReason = "rate_limited" | "disabled" | "mock" | "no_key" | "daily_cap" | "budget" | "upstream";
 

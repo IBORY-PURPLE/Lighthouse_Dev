@@ -11,9 +11,11 @@ import {
   useSyncExternalStore,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from "react";
+import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { StatusRegion } from "@/components/StatusRegion";
 import { BUTTONS } from "@/lib/liveCommands";
@@ -129,7 +131,7 @@ function pickStorage(win: Window): Storage {
 
 // ---------------------------------------------------------------- 큰 단추와 글
 
-type MainKind = "start" | "main" | "resume" | "retry" | "new" | "continue" | "none";
+type MainKind = "start" | "main" | "resume" | "retry" | "new" | "continue" | "home" | "none";
 interface MainSpec { label: string; kind: MainKind; disabled: boolean }
 
 const ACTIVE: ReadonlySet<string> = new Set(["guiding", "connecting", "listening", "thinking", "speaking", "confirming"]);
@@ -137,8 +139,15 @@ const GESTURE_PHASES: ReadonlySet<string> = new Set([
   "guiding", "connecting", "listening", "thinking", "speaking", "confirming", "paused",
 ]);
 
+/** 접수 번호를 읽는 낭독 id. 읽는 동안에는 [새 요청]이 눌리지 않는다(상태 기계도 이 동안의 NEW_REQUEST를 무시한다). */
+const REGISTERED_SPEAKING: ReadonlySet<string> = new Set(["registered", "registeredEnded", "registeredLate"]);
+
 /** 5.3절 표의 "큰 단추" 열. 음성 모드는 guiding부터 confirming까지 이름이 '말하기' 하나다. */
 function mainSpec(s: LiveState): MainSpec {
+  // 접수 번호를 끝까지 듣기 전의 누름은 아무 일도 하지 않는다. 듣고 난 뒤의 Space·Enter가 새 요청이다.
+  if (s.speaking !== null && REGISTERED_SPEAKING.has(s.speaking)) {
+    return { label: BUTTONS.newRequest, kind: "none", disabled: true };
+  }
   switch (s.phase) {
     case "idle":
       return { label: BUTTONS.start, kind: "start", disabled: false };
@@ -147,6 +156,10 @@ function mainSpec(s: LiveState): MainSpec {
     case "done":
       return { label: BUTTONS.newRequest, kind: "new", disabled: false };
     case "error":
+      // 다시 시도해도 같은 결과인 오류(오늘 이용량 소진, 서버 설정 없음)는 대본이 단추를 가리키지 않는다. 처음 화면으로 보낸다.
+      if (s.error === "unavailable_today" || s.error === "not_configured") {
+        return { label: BUTTONS.home, kind: "home", disabled: false };
+      }
       return s.error === "bad_request" || s.error === "register_rejected" || s.error === "register_conflict"
         ? { label: BUTTONS.newRequest, kind: "new", disabled: false }
         : { label: BUTTONS.retry, kind: "retry", disabled: false };
@@ -159,6 +172,8 @@ function mainSpec(s: LiveState): MainSpec {
       return { label: BUTTONS.newRequest, kind: "new", disabled: false };
     default: {
       const text = s.inputMode === "text";
+      // 연결하는 동안에는 큰 단추가 할 일이 없다. 눌리면 받지 못했다는 신호음만 낸다(activateMain).
+      if (s.phase === "connecting") return { label: text ? BUTTONS.stopTalking : BUTTONS.talk, kind: "none", disabled: true };
       return {
         label: text ? BUTTONS.stopTalking : BUTTONS.talk,
         kind: "main",
@@ -183,6 +198,11 @@ function headlineOf(s: LiveState, caption: LiveCaption): string {
     case "listening":
       if (text) return `아래 '${BUTTONS.textInput}' 칸에 쓰고 '${BUTTONS.sendText}' 단추를 누르세요.`;
       if (s.mic === "held") return "단추를 찾는 동안 잠시 듣기를 멈췄어요.";
+      // 마이크가 닫혀 있거나 앱이 말하는 동안에는 '말씀하세요'라고 보이지 않는다. 띵 소리가 나야 듣는다.
+      if (s.speaking !== null) {
+        return s.speaking === "repeat" && s.lastReply !== "" ? s.lastReply : "안내를 들려 드리고 있어요. 띵 소리가 나면 말씀하세요.";
+      }
+      if (s.mic !== "on") return "잠시 뒤 띵 소리가 나면 말씀하세요.";
       return `말씀하세요. 다 말했으면 '${BUTTONS.talk}' 단추를 눌러도 돼요.`;
     case "thinking":
       return "생각하고 있어요";
@@ -190,8 +210,9 @@ function headlineOf(s: LiveState, caption: LiveCaption): string {
       if (s.pendingConfirm && s.draft) return s.draft.summary;
       return caption.ai || s.lastReply || "말하고 있어요";
     case "confirming":
-      return text
-        ? `보낼까요? 맞으면 '네'라고 쓰거나 '${BUTTONS.consent}' 단추를 누르세요.`
+      if (text) return `보낼까요? 맞으면 '네'라고 쓰거나 '${BUTTONS.consent}' 단추를 누르세요.`;
+      return s.speaking !== null || s.mic !== "on"
+        ? "보낼까요? 띵 소리가 나면 '네'라고 말씀해 주세요."
         : "보낼까요? 맞으면 '네'라고 말씀해 주세요.";
     case "registering":
       return "보내고 있어요";
@@ -206,6 +227,11 @@ function headlineOf(s: LiveState, caption: LiveCaption): string {
   }
 }
 
+/** 글을 바로 받을 수 있는 때. 글자 모드에서 AI 말을 읽는 중(요약 확인 제외)은 읽기를 끊고 받는다(상태 기계 TEXT_SUBMIT과 같은 조건). */
+function canSubmitText(s: LiveState): boolean {
+  return s.phase === "listening" || s.phase === "confirming" || (s.phase === "speaking" && s.inputMode === "text" && !s.pendingConfirm);
+}
+
 const RATE_LABEL = { normal: BUTTONS.rateNormal, slow: BUTTONS.rateSlow, fast: BUTTONS.rateFast } as const;
 
 // ---------------------------------------------------------------- 화면
@@ -216,6 +242,7 @@ interface Ctx {
 }
 
 export function LiveConversation() {
+  const router = useRouter();
   const [store] = useState(createStore);
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getServerState);
   const caption = useSyncExternalStore(store.subscribe, store.getCaption, store.getServerCaption);
@@ -232,6 +259,7 @@ export function LiveConversation() {
   const pushedRef = useRef(false);            // 브라우저 기록에 우리 항목이 있는가(8.2절)
   const gestureRef = useRef<GestureState>(GESTURE_IDLE);
   const holdTimerRef = useRef<number | null>(null);
+  const controlPressRef = useRef<{ at: number; mouse: boolean } | null>(null); // 큰 단추 밖 조작 요소를 누른 때(마우스인가, 언제)
 
   const send = useCallback((event: LiveEvent) => {
     ctxRef.current?.runner.dispatch(event);
@@ -256,7 +284,11 @@ export function LiveConversation() {
     if (!ctx) return;
     const s = ctx.runner.getState();
     const spec = mainSpec(s);
-    if (spec.disabled) return;
+    if (spec.disabled) {
+      // 연결하는 동안의 누름은 받지 못했다는 신호음으로 알린다(눈을 감은 이용자가 눌렀는지 알게). 접수 번호를 읽는 중에는 읽는 소리가 이미 난다.
+      if (s.phase === "connecting") void ctx.earcons.play("cancel");
+      return;
+    }
     switch (spec.kind) {
       case "start": startLike({ type: "START" }); return;
       case "resume": startLike({ type: "RESUME" }); return;
@@ -264,9 +296,10 @@ export function LiveConversation() {
       case "continue": startLike({ type: "CONTINUE" }); return;
       case "new": startLike({ type: "NEW_REQUEST", cid: newConversationId() }); return;
       case "main": ctx.runner.dispatch({ type: "MAIN_BUTTON" }); return;
+      case "home": router.push("/"); return;
       case "none": return;
     }
-  }, [startLike]);
+  }, [startLike, router]);
 
   /** [끝내기]와 Escape: 기록에 우리 항목이 있으면 뒤로 가서 popstate가 EXIT를 보낸다. */
   const exitNow = useCallback(() => {
@@ -363,6 +396,12 @@ export function LiveConversation() {
       if (e.key !== " " && e.key !== "Enter") return;
       if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
       const target = e.target;
+      // 접수가 끝난 뒤 초점이 [요청 목록 보기] 링크로 가 있어도 Space는 큰 단추([새 요청])다. Enter는 링크를 연다(그대로).
+      if (e.key === " " && target !== null && target === listLinkRef.current) {
+        e.preventDefault();
+        if (!e.repeat) activateMain();
+        return;
+      }
       // 초점이 입력·단추·링크에 있으면 그 요소의 기본 동작에 맡긴다(큰 단추의 click과 두 번 처리하지 않는다).
       if (target instanceof Element && target.closest("textarea,input,select,button,a,[contenteditable]")) return;
       e.preventDefault(); // 스크롤을 막는다.
@@ -419,6 +458,9 @@ export function LiveConversation() {
     const control = target?.closest(CONTROLS) ?? null;
     const onMain = control !== null && mainRef.current !== null && mainRef.current.contains(control);
 
+    // 큰 단추 밖 조작 요소를 마우스로 눌렀는지 적어 둔다. click에서 초점을 큰 단추로 되돌리고, 길게 누른 click은 버린다(onClickCapture).
+    controlPressRef.current = control && !onMain ? { at: performance.now(), mouse: e.pointerType === "mouse" && e.button === 0 } : null;
+
     // 듣는 중 큰 단추가 아닌 단추·링크·입력 칸에 닿으면 마이크를 잠시 닫는다(8.2절 단추 찾기).
     if (control && !onMain && target?.closest("button,a,input,textarea,select")) send({ type: "CONTROL_TOUCH" });
 
@@ -470,6 +512,38 @@ export function LiveConversation() {
     activateMain();
   };
 
+  /**
+   * 마우스로 작은 단추(·링크·체크 상자)를 누른 뒤에는 초점을 큰 단추로 되돌린다. 안 그러면 이어지는 Space가 그 작은 단추를 다시 누른다.
+   * 600ms 넘게 누른 click은 "화면을 길게 눌러 말하기"를 하려던 것이므로 그 단추를 실행하지 않고 신호음만 낸다.
+   * 터치·키보드·화면 낭독기로 누른 경우는 건드리지 않는다(낭독기가 단추 이름을 읽어 마이크에 들어가는 일을 막으려고 초점을 옮기지 않는다).
+   */
+  const onClickCapture = (e: ReactMouseEvent<HTMLElement>) => {
+    const press = controlPressRef.current;
+    controlPressRef.current = null;
+    const ctx = ctxRef.current;
+    if (!press || !press.mouse || e.detail === 0 || !ctx) return;
+    const s = ctx.runner.getState();
+    if (!GESTURE_PHASES.has(s.phase) || s.inputMode === "text") return;
+    if (performance.now() - press.at >= HOLD_MS) {
+      e.preventDefault(); // label이면 체크 상자도 바뀌지 않는다
+      e.stopPropagation(); // 단추의 onClick까지 가지 않는다
+      void ctx.earcons.play("cancel");
+    }
+    mainRef.current?.focus();
+    // label의 기본 동작(체크 상자에 초점)이 끝난 뒤에 한 번 더 큰 단추로 보낸다.
+    window.setTimeout(() => mainRef.current?.focus(), 0);
+  };
+
+  /** 연결하는 동안은 멈춤만 된다. 나머지 작은 단추의 누름은 받지 못했다는 신호음으로 알린다. */
+  const sendSmall = (event: LiveEvent) => {
+    const ctx = ctxRef.current;
+    if (ctx && ctx.runner.getState().phase === "connecting" && event.type !== "PAUSE") {
+      void ctx.earcons.play("cancel");
+      return;
+    }
+    send(event);
+  };
+
   const onSurfaceClick = (e: SyntheticEvent<HTMLElement>) => {
     // idle에서만 화면 아무 곳이나 짧게 눌러 시작한다. 단추·링크·입력 칸 위의 click은 그 요소의 것이다(22절 3).
     if (ctxRef.current?.runner.getState().phase !== "idle") return;
@@ -489,8 +563,11 @@ export function LiveConversation() {
     const ctx = ctxRef.current;
     const text = typed.trim();
     if (!ctx || text === "") return;
-    const phase = ctx.runner.getState().phase;
-    if (phase !== "listening" && phase !== "confirming") return; // 받을 수 없는 때는 쓴 글을 그대로 둔다.
+    if (!canSubmitText(ctx.runner.getState())) {
+      // 받을 수 없는 때(안내·연결·답 기다림·요약 읽기)는 쓴 글을 칸에 그대로 두고, 상태 기계가 받지 못했다는 신호음을 낸다.
+      ctx.runner.dispatch({ type: "TEXT_SUBMIT", text });
+      return;
+    }
     setTyped("");
     ctx.runner.dispatch({ type: "TEXT_SUBMIT", text });
   };
@@ -512,6 +589,7 @@ export function LiveConversation() {
 
   const spec = mainSpec(state);
   const active = ACTIVE.has(state.phase);
+  const connectingNow = state.phase === "connecting";
   const showInput = active && state.inputMode === "text";
   const showCard = state.phase === "confirming" && state.draft !== null;
   const endedContinue = state.phase === "ended" && spec.kind === "continue";
@@ -530,6 +608,7 @@ export function LiveConversation() {
       onPointerMove={onPointerMove}
       onPointerUp={(e) => onPointerEnd(e, "up")}
       onPointerCancel={(e) => onPointerEnd(e, "cancel")}
+      onClickCapture={onClickCapture}
       onClick={onSurfaceClick}
       onFocus={onFocusIn}
       onContextMenu={(e) => {
@@ -563,7 +642,7 @@ export function LiveConversation() {
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={onTextKeyDown}
           />
-          <button type="submit" className={styles.small}>{BUTTONS.sendText}</button>
+          <button type="submit" className={styles.small} aria-disabled={canSubmitText(state) ? undefined : "true"}>{BUTTONS.sendText}</button>
         </form>
       ) : null}
 
@@ -589,10 +668,10 @@ export function LiveConversation() {
 
       {active ? (
         <div className={styles.row}>
-          <button type="button" className={styles.small} onClick={() => send({ type: "REPEAT" })}>{BUTTONS.repeat}</button>
-          <button type="button" className={styles.small} onClick={() => send({ type: "PAUSE" })}>{BUTTONS.pause}</button>
-          <button type="button" className={styles.small} onClick={() => send({ type: "HELP" })}>{BUTTONS.help}</button>
-          <button type="button" className={styles.small} onClick={() => send({ type: "RATE_BUTTON" })}>
+          <button type="button" className={styles.small} aria-disabled={connectingNow ? "true" : undefined} onClick={() => sendSmall({ type: "REPEAT" })}>{BUTTONS.repeat}</button>
+          <button type="button" className={styles.small} onClick={() => sendSmall({ type: "PAUSE" })}>{BUTTONS.pause}</button>
+          <button type="button" className={styles.small} aria-disabled={connectingNow ? "true" : undefined} onClick={() => sendSmall({ type: "HELP" })}>{BUTTONS.help}</button>
+          <button type="button" className={styles.small} aria-disabled={connectingNow ? "true" : undefined} onClick={() => sendSmall({ type: "RATE_BUTTON" })}>
             {RATE_LABEL[state.rate]}
           </button>
         </div>

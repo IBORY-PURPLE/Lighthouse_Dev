@@ -356,11 +356,12 @@ describe("듣기: LISTEN_STARTED와 침묵", () => {
     expect(r.state.phase).toBe("paused");
     expect(spoken(r.effects)).toEqual(["pausedBySilence"]);
   });
-  it("confirming의 침묵 힌트는 확인 문장을 다시 읽는다", () => {
+  it("confirming의 침묵 힌트는 요약 전체가 아니라 짧은 안내다(A13: 화면 낭독기와 겹치지 않게)", () => {
     const c = atConfirming();
     const a = run(c.state, { type: "LISTEN_STARTED", late: false });
     const r = run(a.state, timer("silence"));
-    expect(ofType(r.effects, "SPEAK")[0].text).toBe(CONFIRM);
+    expect(ofType(r.effects, "SPEAK")[0].text).toBe(script("confirmHint"));
+    expect(ofType(r.effects, "SPEAK")[0].text).not.toContain("전기밥솥");
     expect(r.state.silenceStep).toBe(1);
     const reopen = run(r.state, speakEnd(r.state));
     expect(ofType(reopen.effects, "OPEN_TURN")[0].earcon).toBe("confirm");
@@ -436,6 +437,7 @@ describe("듣기: 단추와 길게 누르기", () => {
       { type: "TIMER_CLEAR", id: "silence" },
       { type: "TIMER_CLEAR", id: "relisten" },
       { type: "TIMER_CLEAR", id: "controlHold" },
+      { type: "TIMER_CLEAR", id: "micSay" },
       { type: "OPEN_TURN", earcon: "turn", settle: false, keep: false },
     ]);
   });
@@ -601,9 +603,15 @@ describe("이용자 말이 끝났을 때", () => {
     }
   });
   it("lastReply가 없을 때 '다시'는 차례를 다시 연다", () => {
-    const r = run(atArmed().state, { type: "USER_TURN_END", text: "다시", transcribed: true });
+    const r = run({ ...atArmed().state, lastReply: "" }, { type: "USER_TURN_END", text: "다시", transcribed: true });
     expect(r.state.phase).toBe("listening");
     expect(types(r.effects)).toContain("OPEN_TURN");
+  });
+  it("첫 AI 답 전에도 '다시'는 처음 안내를 다시 읽는다(A20)", () => {
+    const r = run(atArmed().state, { type: "USER_TURN_END", text: "다시", transcribed: true });
+    expect(r.state.phase).toBe("listening");
+    expect(ofType(r.effects, "SPEAK")[0]).toEqual({ type: "SPEAK", id: "repeat", text: script("guideFirstVoice") });
+    expect(types(r.effects)).not.toContain("OPEN_TURN");
   });
   it("긴 글은 기록과 요청 모두 USER_TURN_MAX로 자른다", () => {
     const long = "가".repeat(1500);
@@ -788,14 +796,41 @@ describe("thinking", () => {
       expect(spoken(r.effects)).toEqual([ids[kind]]);
     }
   });
-  it("MAIN_BUTTON과 HOLD_ACTIVATE는 기다리기를 그만두고 차례를 연다", () => {
+  it("보낸 직후(THINK_GRACE_MS 안)의 MAIN_BUTTON과 HOLD_ACTIVATE는 말을 지우지 않는다. 보냈다는 신호음만 다시 낸다(A24·A31)", () => {
+    const t = atThinking();
+    expect(t.state.thinkFresh).toBe(true);
+    expect(timerSet(t.effects, "thinkGrace")?.ms).toBe(1_500);
     for (const e of [ev({ type: "MAIN_BUTTON" }), ev({ type: "HOLD_ACTIVATE" })]) {
-      const r = run(atThinking().state, e);
+      const r = run(t.state, e);
+      expect(r.state.phase).toBe("thinking");
+      expect(r.effects).toEqual([{ type: "EARCON", name: "sent" }]);
+      expect(r.state.pendingTurn).toEqual(t.state.pendingTurn);
+      expect(r.state.history).toEqual(t.state.history);
+    }
+  });
+  it("보낸 지 THINK_GRACE_MS가 지나면 MAIN_BUTTON과 HOLD_ACTIVATE는 기다리기를 그만두고, 취소음과 안내를 읽은 뒤 차례를 연다", () => {
+    for (const e of [ev({ type: "MAIN_BUTTON" }), ev({ type: "HOLD_ACTIVATE" })]) {
+      const graced = run(atThinking().state, timer("thinkGrace"));
+      expect(graced.state.thinkFresh).toBe(false);
+      const r = run(graced.state, e);
       expect(r.state.phase).toBe("listening");
       expect(r.effects).toContainEqual({ type: "ENGINE_CANCEL_RESPONSE" });
-      expect(ofType(r.effects, "OPEN_TURN")[0].settle).toBe(true);
+      expect(r.effects).toContainEqual({ type: "EARCON", name: "cancel" });
+      expect(spoken(r.effects)).toEqual(["turnCancelled"]);
+      expect(types(r.effects)).not.toContain("OPEN_TURN");   // 안내를 다 읽은 뒤에 연다
       expect(r.state.pendingTurn).toBeNull();
+      expect(r.state.history.some((t) => t.role === "user")).toBe(false);
+      expect(r.state.mic).toBe("off");
+      // 읽기가 끝나면 차례를 연다
+      const open = run(r.state, speakEnd(r.state));
+      expect(ofType(open.effects, "OPEN_TURN")).toHaveLength(1);
+      expect(types(open.effects)).not.toContain("SPEAK");
     }
+  });
+  it("답이 오면 thinkFresh와 thinkGrace를 정리한다", () => {
+    const r = run(atThinking().state, { type: "TURN_RESULT", reply: "어떤 정보가 궁금하세요?", status: "asking", slots: SLOTS });
+    expect(r.state.thinkFresh).toBe(false);
+    expect(timerCleared(r.effects, "thinkGrace")).toBe(true);
   });
   it("글자 모드의 thinking 큰 단추는 말만 멈추고 답을 계속 기다린다", () => {
     const t = atThinking("전기밥솥", { speechAvailable: false });
@@ -1113,7 +1148,16 @@ describe("registering", () => {
     expect(types(r.effects)).not.toContain("SPEAK");
     const v = run(r.state, { type: "VISIBLE" });
     expect(v.state.resultUnspoken).toBe(false);
-    expect(v.effects).toEqual([{ type: "ANNOUNCE", channel: "status", text: "요청이 등록됐어요. 접수 번호 3번." }]);
+    // 돌아오면 기기 목소리로 접수 결과를 읽는다(A4·A29·A34). 화면 낭독기용 ANNOUNCE는 목소리가 없을 때만 낸다.
+    expect(v.effects).toEqual([{ type: "SPEAK", id: "registeredLate", text: script("registered", { n: 3 }) }]);
+    // 목소리를 못 쓰면 같은 글을 ANNOUNCE로 내고 endId를 싣는다
+    const t = run(
+      run(run({ ...atRegistering().state, tts: false }, { type: "HIDDEN" }).state, { type: "REGISTER_OK", requestId: "r1", queueNumber: 3, status: "queued" }).state,
+      { type: "VISIBLE" },
+    );
+    expect(t.effects).toEqual([{ type: "ANNOUNCE", channel: "status", text: script("registered", { n: 3 }), endId: "registeredLate" }]);
+    // 늦게 읽은 번호가 끝나도 초점은 목록 링크로 간다
+    expect(run(v.state, speakEnd(v.state)).effects).toEqual([{ type: "FOCUS", target: "listLink" }]);
   });
   it("REGISTER_FAIL retryable·unknown → confirming, cid와 draft는 그대로. '다시 보내'로 같은 cid 재접수", () => {
     for (const [kind, id] of [["retryable", "registerRetry"], ["unknown", "registerUnknown"]] as const) {
@@ -1167,7 +1211,9 @@ describe("registering", () => {
     expect(ok.effects[0]).toEqual({ type: "SAVE_RECORD" });
     expect(types(ok.effects)).toEqual(expect.arrayContaining(["STOP_SPEAK", "SPEAK", "ATTACH_PUSH"]));
     expect(types(ok.effects)).not.toContain("ANNOUNCE");
-    expect(spoken(ok.effects)).toEqual(["registered"]);
+    // 마친 화면에는 [요청 목록 보기]가 없으므로 목록 단추를 가리키지 않는 대본을 읽는다(A9)
+    expect(spoken(ok.effects)).toEqual(["registeredEnded"]);
+    expect(ofType(ok.effects, "SPEAK")[0].text).not.toContain(BUTTONS.list);
     const fail = run(ex.state, { type: "REGISTER_FAIL", kind: "unknown" });
     expect(spoken(fail.effects)).toEqual(["endedSendFailed"]);
     expect(fail.state.sendPending).toBe(false);
@@ -1194,15 +1240,25 @@ describe("registering", () => {
 // ---------------------------------------------------------------- 끝난 상태와 멈춘 상태
 
 describe("done과 NEW_REQUEST", () => {
+  it("접수 번호를 읽는 중의 NEW_REQUEST는 무시한다. 끝까지 들은 뒤의 NEW_REQUEST만 새 요청이다(A25)", () => {
+    const d = atDone();
+    expect(d.state.speaking).toBe("registered");
+    const early = run(d.state, { type: "NEW_REQUEST", cid: "c2" });
+    expect(early.effects).toEqual([]);
+    expect(early.state).toEqual(d.state);
+    const heard = run(d.state, speakEnd(d.state));
+    expect(run(heard.state, { type: "NEW_REQUEST", cid: "c2" }).state.phase).toBe("guiding");
+  });
   it("done에서 NEW_REQUEST → guiding, 새 cid, 기록 비움, guideNewVoice", () => {
-    const r = run(atDone().state, { type: "NEW_REQUEST", cid: "c2" });
+    const done = atDone();
+    const r = run(run(done.state, speakEnd(done.state)).state, { type: "NEW_REQUEST", cid: "c2" });
     expect(r.state.phase).toBe("guiding");
     expect(r.state.cid).toBe("c2");
     expect(r.state.visit).toBe("returning");
     expect(r.state.requestId).toBeNull();
     expect(r.state.queueNumber).toBeNull();
     expect(r.state.draft).toBeNull();
-    expect(r.state.lastReply).toBe("");
+    expect(r.state.lastReply).toBe(script("guideNewVoice"));   // 안내도 다시 들을 수 있다(A20)
     expect(r.state.history).toHaveLength(1);
     expect(spoken(r.effects)).toEqual(["guideNewVoice"]);
     expect(ofType(r.effects, "SPEAK")[0].text).toBe(script("guideNewVoice"));
@@ -1242,7 +1298,7 @@ describe("error", () => {
         { type: "EARCON", name: "error" },
       ]),
     );
-    expect(ofType(r.effects, "TIMER_CLEAR")).toHaveLength(15);
+    expect(ofType(r.effects, "TIMER_CLEAR")).toHaveLength(17);   // ALL_TIMERS 전부
     const end = run(r.state, speakEnd(r.state));
     expect(end.effects).toEqual([{ type: "FOCUS", target: "main" }]);
   });
@@ -1300,7 +1356,7 @@ describe("paused", () => {
     expect(r.state.resumeTo).toBe("listening");
     expect(r.state.mic).toBe("off");
     const fx = run(atListening().state, { type: "PAUSE" }).effects;
-    expect(ofType(fx, "TIMER_CLEAR")).toHaveLength(15);
+    expect(ofType(fx, "TIMER_CLEAR")).toHaveLength(17);   // ALL_TIMERS 전부
     expect(fx).toEqual(
       expect.arrayContaining([
         { type: "WAIT_PULSE", on: false },
@@ -1386,7 +1442,7 @@ describe("paused", () => {
     expect(r.state.phase).toBe("connecting");
     expect(r.effects).toContainEqual({ type: "ENGINE_START", kind: "realtime" });
   });
-  it("멈춘 채 listening으로 돌아간 상태에서 HIDDEN은 낭독 없이 paused, VISIBLE은 알림만", () => {
+  it("멈춘 채 listening으로 돌아간 상태에서 HIDDEN은 낭독 없이 paused, VISIBLE은 멈춤음과 기기 목소리 안내(A4)", () => {
     const l = atListening();
     const h = run(l.state, { type: "HIDDEN" });
     expect(h.state.phase).toBe("paused");
@@ -1394,8 +1450,14 @@ describe("paused", () => {
     expect(types(h.effects)).not.toContain("SPEAK");
     expect(h.effects).not.toContainEqual({ type: "EARCON", name: "pause" });
     const v = run(h.state, { type: "VISIBLE" });
-    expect(v.effects).toEqual([{ type: "ANNOUNCE", channel: "status", text: `멈춰 있어요. '${BUTTONS.resume}' 단추를 누르면 이어서 해요.` }]);
+    expect(v.effects).toEqual([{ type: "EARCON", name: "pause" }, { type: "SPEAK", id: "pausedReturn", text: script("pausedReturn") }]);
+    expect(script("pausedReturn")).toContain(`'${BUTTONS.resume}'`);
     expect(v.state.phase).toBe("paused");
+    // 목소리를 못 쓰면 ANNOUNCE에 endId를 싣는다(VoiceOver 대비). 두 번 읽히지 않는다
+    const nt = run(run(atListening({ tts: false }).state, { type: "HIDDEN" }).state, { type: "VISIBLE" });
+    expect(nt.effects).toEqual([{ type: "EARCON", name: "pause" }, { type: "ANNOUNCE", channel: "status", text: script("pausedReturn"), endId: "pausedReturn" }]);
+    // 안내가 끝나면 초점을 큰 단추([계속하기])로 옮긴다. 같은 사건에 SPEAK는 없다(불변식 7)
+    expect(run(v.state, speakEnd(v.state)).effects).toEqual([{ type: "FOCUS", target: "main" }]);
   });
   it("그 밖의 상태의 HIDDEN은 hidden만 바꾼다", () => {
     for (const s of [mk(), atDone().state]) {
@@ -1525,7 +1587,7 @@ describe("HELP, REPEAT, RATE, SESSION_WARN", () => {
     const r = run(h1.state, speakEnd(h1.state), { type: "LISTEN_STARTED", late: false }, { type: "USER_TURN_END", text: "전기밥솥", transcribed: true });
     expect(r.state.helpDepth).toBe(0);
     const btn = run(h1.state, { type: "REPEAT" });
-    expect(btn.state.helpDepth).toBe(1);   // lastReply가 없어 아무것도 하지 않는다
+    expect(btn.state.helpDepth).toBe(0);   // 첫 안내를 다시 읽는다(A20)
   });
   it("thinking·speaking의 HELP는 말과 인식을 멈추고 listening으로, 동의 대기를 끈다. confirming은 그대로", () => {
     const sp = atSpeakingConfirm();
@@ -1560,7 +1622,9 @@ describe("HELP, REPEAT, RATE, SESSION_WARN", () => {
     const c = run(atConfirming().state, { type: "REPEAT" });
     expect(c.state.phase).toBe("confirming");
     expect(ofType(c.effects, "SPEAK")[0].text).toBe(CONFIRM);
-    expect(run(atListening().state, { type: "REPEAT" }).effects).toEqual([]);
+    // 첫 AI 답 전에는 처음 안내를 다시 읽는다(A20). 읽을 말이 아예 없으면 아무것도 하지 않는다
+    expect(spoken(run(atListening().state, { type: "REPEAT" }).effects)).toEqual(["repeat"]);
+    expect(run({ ...atListening().state, lastReply: "" }, { type: "REPEAT" }).effects).toEqual([]);
   });
   it("RATE_BUTTON은 보통 → 천천히 → 빠르게 → 보통. 듣는 상태는 읽고, 그 밖은 rate만", () => {
     let s = atArmed().state;
@@ -1639,13 +1703,299 @@ describe("기기 목소리 없음(tts=false)", () => {
   });
 });
 
+// ---------------------------------------------------------------- 접근성 검토 뒤 바뀐 동작(A숫자는 a11y-result.json의 지적 번호)
+
+describe("멈춤과 돌아옴(A3·A4·A17·A29·A34)", () => {
+  it("멈춤 안내(pausedByUser·pausedBySilence)가 끝나면 초점을 큰 단추로 옮긴다. 100초 경고 뒤에는 옮기지 않는다", () => {
+    const p = atPaused();
+    expect(p.state.speaking).toBe("pausedByUser");
+    expect(run(p.state, speakEnd(p.state)).effects).toEqual([{ type: "FOCUS", target: "main" }]);
+    // 침묵 안내 둘, 계속 들을까요?, 멈춤 순서로 간다. 각 읽기가 끝나면 차례가 다시 열리고 듣기가 시작된다.
+    let silent = run(atArmed().state, timer("silence"));
+    for (let i = 0; i < 3; i++) {
+      silent = run(silent.state, speakEnd(silent.state), { type: "LISTEN_STARTED", late: false }, timer("silence"));
+    }
+    expect(silent.state.phase).toBe("paused");
+    expect(silent.state.speaking).toBe("pausedBySilence");
+    expect(run(silent.state, speakEnd(silent.state)).effects).toEqual([{ type: "FOCUS", target: "main" }]);
+    const warn = run(run(p.state, speakEnd(p.state)).state, timer("pausedWarn"));
+    expect(spoken(warn.effects)).toEqual(["pausedWarn"]);
+    expect(run(warn.state, speakEnd(warn.state)).effects).toEqual([]);
+  });
+  it("멈춤 안내를 읽는 중에 이어 가면 낭독을 먼저 멈춘다(뜸·신호음·마이크 위로 겹치지 않게)", () => {
+    const p = atPaused();
+    expect(p.state.speaking).toBe("pausedByUser");
+    for (const e of [ev({ type: "RESUME" }), ev({ type: "HOLD_ACTIVATE" })]) {
+      const r = run(p.state, e);
+      expect(r.effects[0]).toEqual({ type: "STOP_SPEAK" });
+      expect(r.state.speaking).toBeNull();
+    }
+  });
+  it("돌아왔을 때 이미 읽는 중이면 멈춤 안내를 겹쳐 읽지 않는다", () => {
+    const p = atPaused();   // pausedByUser를 읽는 중
+    const h = run(p.state, { type: "HIDDEN" }, { type: "VISIBLE" });
+    expect(types(h.effects)).not.toContain("SPEAK");
+  });
+  it("가려진 동안 접수가 끝났으면 돌아왔을 때 접수 결과를 기기 목소리로 읽는다. 마친 화면이면 목록 단추를 가리키지 않는다(A9)", () => {
+    const ex = run(atRegistering().state, { type: "EXIT" });
+    const hidden = run(ex.state, { type: "HIDDEN" });
+    const ok = run(hidden.state, { type: "REGISTER_OK", requestId: "r1", queueNumber: 5, status: "queued" });
+    expect(ok.state.resultUnspoken).toBe(true);
+    const v = run(ok.state, { type: "VISIBLE" });
+    expect(ofType(v.effects, "SPEAK")[0]).toEqual({ type: "SPEAK", id: "registeredLate", text: script("registeredEnded", { n: 5 }) });
+    expect(ofType(v.effects, "SPEAK")[0].text).not.toContain(BUTTONS.list);
+  });
+  it("접수 번호를 읽는 중(registered·registeredEnded·registeredLate)의 NEW_REQUEST는 모두 무시한다", () => {
+    const d = atDone();
+    for (const id of ["registered", "registeredEnded", "registeredLate"]) {
+      expect(run({ ...d.state, speaking: id }, { type: "NEW_REQUEST", cid: "n" }).effects, id).toEqual([]);
+    }
+  });
+});
+
+describe("마이크 허용을 기다리는 동안의 소리 안내(A12·A21·A35)", () => {
+  it("Realtime: 마이크를 요청하면 대기 펄스와 8초 안내 타이머를 건다. MIC_READY·READY가 지운다", () => {
+    const c = atConnecting({}, true);
+    expect(c.effects).toContainEqual({ type: "WAIT_PULSE", on: true });
+    expect(timerSet(c.effects, "micSay")?.ms).toBe(8_000);
+    expect(timerSet(c.effects, "micWait")?.ms).toBe(60_000);   // 60초 상한은 그대로
+    expect(timerCleared(run(c.state, { type: "MIC_READY" }).effects, "micSay")).toBe(true);
+    expect(timerCleared(run(c.state, { type: "READY", engine: "realtime", inputMode: "voice" }).effects, "micSay")).toBe(true);
+  });
+  it("Realtime: 타이머가 울리면 소리로 안내하고 15초 뒤에 다시 건다. 다른 말을 읽는 중이면 4초 뒤에 다시 본다", () => {
+    const c = atConnecting({}, true);
+    const r = run(c.state, timer("micSay"));
+    expect(spoken(r.effects)).toEqual(["micWaiting"]);
+    expect(ofType(r.effects, "SPEAK")[0].text).toBe(script("micWaiting"));
+    expect(timerSet(r.effects, "micSay")?.ms).toBe(15_000);
+    const busy = run({ ...c.state, speaking: "resumed" }, timer("micSay"));
+    expect(types(busy.effects)).not.toContain("SPEAK");
+    expect(timerSet(busy.effects, "micSay")?.ms).toBe(4_000);
+    // 목소리를 못 쓰면 ANNOUNCE(endId)로 낸다
+    const nt = run(atConnecting({ tts: false }, true).state, timer("micSay"));
+    expect(ofType(nt.effects, "ANNOUNCE")[0]).toMatchObject({ endId: "micWaiting", text: script("micWaiting") });
+  });
+  it("Realtime: 안내를 읽는 중에 READY가 와도 읽기가 끝난 뒤에 이어 간다", () => {
+    const c = atConnecting({}, true);
+    const say = run(c.state, timer("micSay"));
+    const ready = run(say.state, { type: "MIC_READY" }, { type: "READY", engine: "realtime", inputMode: "voice" });
+    expect(types(ready.effects)).not.toContain("OPEN_TURN");
+    expect(types(run(ready.state, speakEnd(ready.state)).effects)).toContain("OPEN_TURN");
+  });
+  it("예비 엔진 첫 듣기: 차례를 열면 8초 안내 타이머. LISTEN_STARTED가 지운다", () => {
+    const l = atListening();
+    expect(timerSet(l.effects, "micSay")?.ms).toBe(8_000);
+    const started = run(l.state, { type: "LISTEN_STARTED", late: false });
+    expect(timerCleared(started.effects, "micSay")).toBe(true);
+    expect(started.state.micOnce).toBe(true);
+    // 한 번 듣기가 시작됐으면 이후 차례에는 걸지 않는다
+    expect(timerSet(run(started.state, { type: "HOLD_CANCEL" }).effects, "micSay")).toBeUndefined();
+  });
+  it("예비 엔진: 허용을 기다리는 사이 타이머가 울리면 인식을 끊고 읽는다. 읽기가 끝나면 차례를 다시 연다", () => {
+    const l = atListening();
+    const r = run(l.state, timer("micSay"));
+    expect(r.effects).toContainEqual({ type: "ENGINE_CANCEL_LISTEN", discard: true });
+    expect(spoken(r.effects)).toEqual(["micWaiting"]);
+    expect(r.state.mic).toBe("off");
+    expect(r.effects.findIndex((f) => f.type === "ENGINE_CANCEL_LISTEN")).toBeLessThan(r.effects.findIndex((f) => f.type === "SPEAK"));
+    const again = run(r.state, speakEnd(r.state));
+    expect(ofType(again.effects, "OPEN_TURN")).toHaveLength(1);
+    expect(timerSet(again.effects, "micSay")?.ms).toBe(15_000);
+  });
+  it("예비 엔진: 이미 듣기가 시작됐거나 마이크가 닫혀 있으면 읽지 않는다. 허용 안내는 MIC_SAY_MAX번(1번) 읽고 그다음에는 포기 안내(micGiveUp)를 읽는다", () => {
+    const started = run(atListening().state, { type: "LISTEN_STARTED", late: false });
+    expect(spoken(run(started.state, timer("micSay")).effects)).toEqual([]);
+    let s = atListening().state;
+    const said: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const t = run(s, timer("micSay"));
+      if (spoken(t.effects).length === 0) break;
+      said.push(...spoken(t.effects));
+      const reopened = run(t.state, speakEnd(t.state));
+      s = reopened.state;
+      if (timerSet(reopened.effects, "micSay") === undefined) break;
+    }
+    // A21: 허용 안내를 읽은 뒤 다음 타이머가 포기 안내를 읽고, 그 읽기가 끝나도 차례를 다시 열지 않는다(소리 없는 120초 꼬리가 없다).
+    // 되풀이를 1번으로 줄인 이유: 허용 창이 떠 있는 동안 인식 요청을 여러 번 취소하면 브라우저가 마이크를 자동으로 막을 수 있다(liveTiming.ts).
+    expect(said).toEqual(["micWaiting", "micGiveUp"]);
+    expect(s.micSays).toBe(2);
+    expect(s.mic).toBe("off");
+  });
+  it("예비 엔진: micGiveUp 읽기가 끝나도 차례가 저절로 열리지 않고 타이머도 없다. '말하기'로 다시 열면 안내를 처음부터 되풀이한다", () => {
+    let s = atListening().state;
+    for (let i = 0; i < 1; i++) {
+      const t = run(s, timer("micSay"));
+      s = run(t.state, speakEnd(t.state)).state;
+    }
+    const giveUp = run(s, timer("micSay"));
+    expect(spoken(giveUp.effects)).toEqual(["micGiveUp"]);
+    expect(ofType(giveUp.effects, "SPEAK")[0].text).toBe(script("micGiveUp"));
+    expect(giveUp.effects).toContainEqual({ type: "ENGINE_CANCEL_LISTEN", discard: true });
+    const end = run(giveUp.state, speakEnd(giveUp.state));
+    expect(types(end.effects)).not.toContain("OPEN_TURN");
+    expect(timerSet(end.effects, "micSay")).toBeUndefined();
+    expect(end.state.mic).toBe("off");
+    // Space·Enter(말하기)로 다시 열면 듣기를 시작하고 안내 되풀이도 처음(8초)부터 다시 건다
+    const again = run(end.state, ev({ type: "MAIN_BUTTON" }));
+    expect(ofType(again.effects, "OPEN_TURN")).toHaveLength(1);
+    expect(again.state.micSays).toBe(0);
+    expect(timerSet(again.effects, "micSay")?.ms).toBe(8_000);
+  });
+  it("예비 엔진: 허용 안내를 끝까지 읽어도 소리 없이 기다리는 구간이 한 번에 15초를 넘지 않는다(차례는 안내마다 끊고 다시 연다)", () => {
+    // 허용이 끝내 안 되는 가상 환경(LISTEN_STARTED가 오지 않는다): 타이머 사이 간격은 8초, 15초뿐이고 마지막은 포기 안내로 끝난다
+    let s = atListening().state;
+    const gaps: number[] = [];
+    const first = timerSet(atListening().effects, "micSay")?.ms ?? -1;
+    gaps.push(first);
+    for (let i = 0; i < 5; i++) {
+      const t = run(s, timer("micSay"));
+      const e = run(t.state, speakEnd(t.state));
+      s = e.state;
+      const next = timerSet(e.effects, "micSay")?.ms;
+      if (next === undefined) break;
+      gaps.push(next);
+    }
+    expect(gaps).toEqual([8_000, 15_000]);
+    expect(gaps.reduce((a, b) => a + b, 0)).toBeLessThan(120_000);
+  });
+});
+
+describe("확인 동의와 끝내기 답(A11·A36·A13)", () => {
+  it("'네, 부탁드립니다'와 '네 보내세요'로 접수한다", () => {
+    for (const text of ["네, 부탁드립니다", "네 보내세요", "네 부탁 드립니다", "네 보내 주십시오"]) {
+      const c = atConfirming();
+      const r = run(c.state, { type: "USER_TURN_END", text, transcribed: true });
+      expect(r.state.phase, text).toBe("registering");
+      expect(types(r.effects), text).toContain("REGISTER");
+    }
+  });
+  it("'네, 괜찮아요'는 분명한 동의는 아니다. AI에게 보내고, AI가 동의로 보면 접수한다", () => {
+    const c = atConfirming();
+    const r = run(c.state, { type: "USER_TURN_END", text: "네, 괜찮아요", transcribed: true });
+    expect(r.state.phase).toBe("thinking");
+    expect(r.state.consentText).toBe("네, 괜찮아요");
+    expect(canRegister(r.state, "model")).toBe(true);
+    const done = run(r.state, { type: "TURN_RESULT", reply: "", status: "done", slots: SLOTS });
+    expect(done.state.phase).toBe("registering");
+  });
+  it("'괜찮아요' 혼자나 '아니요 괜찮아요'는 접수가 아니다", () => {
+    for (const text of ["괜찮아요", "아니요 괜찮아요", "됐어요"]) {
+      const r = run(atConfirming().state, { type: "USER_TURN_END", text, transcribed: true });
+      expect(r.state.phase, text).toBe("thinking");
+      expect(canRegister(r.state, "model"), text).toBe(false);
+    }
+  });
+  it("'끝낼까요?'에 '아니요'·'계속할게요'라고 하면 끝내지 않고 AI에게도 보내지 않는다. 계속할게요와 함께 방금 말을 다시 읽는다", () => {
+    for (const no of ["아니요", "아니", "계속할게요", "아니요 계속할게요"]) {
+      const ask = run(atArmed().state, { type: "USER_TURN_END", text: "그만", transcribed: true });
+      expect(ask.state.ask).toBe("end");
+      expect(spoken(ask.effects)).toEqual(["endAsk"]);
+      const open = run(run(ask.state, speakEnd(ask.state)).state, { type: "LISTEN_STARTED", late: false });
+      const r = run(open.state, { type: "USER_TURN_END", text: no, transcribed: true });
+      expect(r.state.ask, no).toBeNull();
+      expect(r.state.phase, no).toBe("listening");
+      expect(types(r.effects), no).not.toContain("ENGINE_RESPOND");
+      expect(ofType(r.effects, "SPEAK")[0].text, no).toBe(`${script("endCancelled")} ${script("guideFirstVoice")}`);
+      expect(r.state.mic, no).toBe("off");
+      // 읽기가 끝나면 차례를 다시 연다
+      expect(types(run(r.state, speakEnd(r.state)).effects), no).toContain("OPEN_TURN");
+    }
+  });
+  it("'끝낼까요?'에 '네'면 끝낸다. 다른 말이면 묻기를 거두고 AI에게 보낸다", () => {
+    const ask = run(atArmed().state, { type: "USER_TURN_END", text: "그만", transcribed: true });
+    const open = run(run(ask.state, speakEnd(ask.state)).state, { type: "LISTEN_STARTED", late: false });
+    expect(run(open.state, { type: "USER_TURN_END", text: "네", transcribed: true }).state.phase).toBe("ended");
+    const other = run(open.state, { type: "USER_TURN_END", text: "전기밥솥 찾아 주세요", transcribed: true });
+    expect(other.state.phase).toBe("thinking");
+    expect(other.state.ask).toBeNull();
+  });
+  it("확인 상태에서 '끝낼까요?'에 아니요라고 하면 요약을 다시 읽는다", () => {
+    const c = atConfirming();
+    const ask = run(c.state, { type: "USER_TURN_END", text: "그만", transcribed: true });
+    expect(ask.state.phase).toBe("confirming");
+    const open = run(run(ask.state, speakEnd(ask.state)).state, { type: "LISTEN_STARTED", late: false });
+    const r = run(open.state, { type: "USER_TURN_END", text: "아니요", transcribed: true });
+    expect(ofType(r.effects, "SPEAK")[0].text).toBe(`${script("endCancelled")} ${CONFIRM}`);
+    expect(r.state.phase).toBe("confirming");
+    expect(r.state.awaitingConsent).toBe(true);
+  });
+  it("확인 상태의 침묵 힌트는 두 번 모두 짧은 안내(confirmHint)다", () => {
+    const a = run(atConfirming().state, { type: "LISTEN_STARTED", late: false });
+    const first = run(a.state, timer("silence"));
+    const reopened = run(first.state, speakEnd(first.state), { type: "LISTEN_STARTED", late: false });
+    const second = run(reopened.state, timer("silence"));
+    expect(spoken(first.effects)).toEqual(["confirmHint"]);
+    expect(spoken(second.effects)).toEqual(["confirmHint"]);
+  });
+});
+
+describe("글자 모드 끼어들기와 받지 못한 입력(A8·A18)", () => {
+  const textSpeaking = () => {
+    const t = atThinking("전기밥솥", { speechAvailable: false });
+    return run(t.state, { type: "TURN_RESULT", reply: "어떤 정보가 궁금하세요?", status: "asking", slots: { ...SLOTS, info: "" } });
+  };
+  it("AI 말을 읽는 중의 TEXT_SUBMIT은 읽기를 끊고 그 글을 받는다", () => {
+    const sp = textSpeaking();
+    expect(sp.state.phase).toBe("speaking");
+    expect(sp.state.inputMode).toBe("text");
+    const r = run(sp.state, { type: "TEXT_SUBMIT", text: "흰색으로요" });
+    expect(types(r.effects)).toEqual(expect.arrayContaining(["STOP_SPEAK", "ENGINE_CANCEL_RESPONSE"]));
+    expect(r.state.phase).toBe("thinking");
+    expect(ofType(r.effects, "ENGINE_RESPOND")[0].text).toBe("흰색으로요");
+    expect(r.state.lastReply).toBe("어떤 정보가 궁금하세요?");
+  });
+  it("빈 글은 읽던 말을 끊지 않는다", () => {
+    const sp = textSpeaking();
+    const r = run(sp.state, { type: "TEXT_SUBMIT", text: "   " });
+    expect(r.state.phase).toBe("speaking");
+    expect(types(r.effects)).not.toContain("STOP_SPEAK");
+  });
+  it("요약을 읽는 중의 TEXT_SUBMIT '네'는 받지 않는다(동의 관문). 안 받았다는 신호음만 낸다", () => {
+    const t = atThinking("전기밥솥", { speechAvailable: false });
+    const sp = run(t.state, { type: "TURN_RESULT", reply: "", status: "confirming", slots: SLOTS });
+    expect(sp.state.pendingConfirm).toBe(true);
+    const r = run(sp.state, { type: "TEXT_SUBMIT", text: "네" });
+    expect(r.state.phase).toBe("speaking");
+    expect(r.effects).toEqual([{ type: "EARCON", name: "cancel" }]);
+  });
+  it("안내·연결·답 기다리는 중의 TEXT_SUBMIT은 받지 않고 신호음으로 알린다. 상태는 그대로", () => {
+    const states = [
+      run(mk({ speechAvailable: false }), { type: "START" }).state,
+      atConnecting({ speechAvailable: false }).state,
+      atThinking("전기밥솥", { speechAvailable: false }).state,
+    ];
+    for (const s of states) {
+      const r = run(s, { type: "TEXT_SUBMIT", text: "흰색" });
+      expect(r.effects, s.phase).toEqual([{ type: "EARCON", name: "cancel" }]);
+      expect(r.state, s.phase).toEqual(s);
+    }
+    // 듣지 않는 상태(done 등)에서는 조용하다
+    expect(run(atDone().state, { type: "TEXT_SUBMIT", text: "흰색" }).effects).toEqual([]);
+  });
+});
+
+describe("대본 문구가 가리키는 것(A10·A27·A40)", () => {
+  it("이미 한 번 다시 연결했으면 세션 예고는 '잠시 멈춘다'고 알린다. 처음 예고는 그대로", () => {
+    expect(spoken(run(atArmed().state, { type: "SESSION_WARN" }).effects)).toEqual(["sessionWarn"]);
+    const second = { ...atArmed().state, reconnects: 1 };
+    const r = run(second, { type: "SESSION_WARN" });
+    expect(spoken(r.effects)).toEqual(["sessionWarnLast"]);
+    expect(script("sessionWarnLast")).toContain(`'${BUTTONS.continueTalk}'`);
+    // 기다렸다 읽는 예고도 같은 대본이다
+    const th = run({ ...atThinking().state, reconnects: 1 }, { type: "SESSION_WARN" });
+    const ai = run(th.state, { type: "TURN_RESULT", reply: "어떤 정보가 궁금하세요?", status: "asking", slots: SLOTS });
+    const end = run(ai.state, speakEnd(ai.state));
+    expect(spoken(end.effects)).toEqual(["sessionWarnLast"]);
+  });
+});
+
 // ---------------------------------------------------------------- 불변식(5.11절)
 
 type Trace = { prev: LiveState; event: LiveEvent; next: LiveState; effects: LiveEffect[] };
 
 const TIMERS: TimerId[] = [
   "micWait", "connect", "connectSay", "relisten", "silence", "controlHold", "waitSay1", "waitSay2",
-  "think", "retryAfter", "speakGuard", "registerSay", "pausedWarn", "pausedEnd", "idleClose",
+  "think", "retryAfter", "speakGuard", "registerSay", "pausedWarn", "pausedEnd", "idleClose", "thinkGrace", "micSay",
 ];
 
 function alphabet(s: LiveState): LiveEvent[] {
@@ -1703,7 +2053,8 @@ const keyOf = (s: LiveState) =>
     s.phase, s.engine, s.engineReady, s.fallbackOnly, s.inputMode, s.speaking, s.mic, s.hidden, s.draft !== null,
     s.pendingConfirm, s.awaitingConsent, s.consentText !== null, s.pendingTurn !== null, s.ask, s.resumeTo,
     s.sessionWarnPending, s.silenceStep, s.silenceArmed, s.lateReopens, Math.min(s.aiFailures, 2), s.rateRetries,
-    s.reconnects, s.sendPending, s.requestId !== null, s.resultUnspoken, s.settleNext,
+    s.reconnects, s.sendPending, s.requestId !== null, s.resultUnspoken, s.settleNext, s.thinkFresh, s.micOnce,
+    Math.min(s.micSays, 1),
   ]);
 
 /** 시작 상태 몇 가지에서 너비 우선으로 도달 가능한 (상태, 사건) 쌍을 모은다. */

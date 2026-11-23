@@ -16,6 +16,13 @@ export const WAIT_PULSE_MS = 1_500;
 export const WAIT_SAY1_MS = 4_000;
 export const WAIT_SAY2_MS = 12_000;
 export const THINK_TIMEOUT_MS = 30_000;
+export const THINK_GRACE_MS = 1_500;                       // 말을 보낸 직후 이 시간 안의 큰 단추 누름은 '다 말했어요'로 보고 취소하지 않는다
+export const MIC_SAY_FIRST_MS = 8_000;                    // 마이크 허용을 기다리는 동안 첫 소리 안내까지
+export const MIC_SAY_REPEAT_MS = 15_000;                  // 이후 되풀이 간격
+// 예비 엔진 첫 듣기에서 허용 안내를 읽는 횟수. 안내를 읽으려면 인식을 끊었다 다시 시작해야 하는데,
+// 허용 창이 떠 있는 동안 요청을 여러 번 취소하면 브라우저가 "무시한 요청"으로 세어 마이크를 자동으로 막을 수 있다(확인 전, 반박 검토 지적).
+// 그래서 한 번만 읽고, 그다음에는 포기 안내(micGiveUp)를 읽은 뒤 이용자가 '말하기'로 다시 열게 한다.
+export const MIC_SAY_MAX = 1;
 export const CHAT_FETCH_TIMEOUT_MS = 28_000;             // 서버 25초 + 여유
 export const TRANSCRIPT_WAIT_MS = 1_500;                 // Realtime 전사를 기다리는 상한
 export const SPEAK_GUARD_MAX_MS = 30_000;                // Realtime AI 말이 끝났다는 신호를 기다리는 상한

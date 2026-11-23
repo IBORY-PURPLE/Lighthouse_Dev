@@ -19,9 +19,9 @@ const text = (id: ScriptId) => script(id, { n: 3, s: 5, summary: "" });
 
 const NOT_LISTENING: ScriptId[] = [
   "registered", "registerRejected", "registerConflict", "registerRetryText", "registerUnknownText",
-  "pausedBySilence", "pausedByUser", "pausedWarn",
+  "pausedBySilence", "pausedByUser", "pausedWarn", "pausedReturn", "registeredEnded", "sessionWarnLast", "micWaiting",
   "endedRegistered", "endedUnregistered", "endedSending", "endedSendFailed", "endedEmpty",
-  "offline", "notConfigured", "connectFailed", "failedRepeated", "conversationBroken", "dailyCap", "sessionOver", "micRetry",
+  "offline", "notConfigured", "connectFailed", "failedRepeated", "conversationBroken", "dailyCap", "sessionOver", "micRetry", "micGiveUp",
 ];
 const TEXT_MODE: ScriptId[] = [
   "guideFirstText", "guideReturnText", "guideNewText", "helpText", "editPromptText",
@@ -98,6 +98,71 @@ describe("대본 표", () => {
     expect(script("pausedByUser")).toContain(`'${BUTTONS.resume}'`);
     expect(script("registerRejected")).toContain(`'${BUTTONS.newRequest}'`);
     expect(script("endedUnregistered")).toContain(`'${BUTTONS.continueTalk}'`);
+  });
+});
+
+// 접근성 검토(a11y-result.json) 뒤에 바뀐 문구
+describe("문구가 실제 동작과 맞다", () => {
+  it("마이크가 닫혀 있는 동안 '바로 말하라'고 하지 않고 띵 소리 뒤에 말하라고 한다(A27·A40)", () => {
+    for (const id of ["silence1", "helpVoice", "helpMoreVoice"] as ScriptId[]) {
+      expect(text(id).includes("바로 말"), id).toBe(false);
+    }
+    expect(text("silence1")).toContain("띵 소리가 나면 말씀하세요");
+    for (const id of ["sessionRenewed", "engineSwitchedVoice"] as ScriptId[]) {
+      expect(text(id), id).toContain("띵 소리가 나면 이어서 말씀해 주세요");
+      expect(text(id).includes("했어요"), id).toBe(false);   // 아직 연결 전이므로 끝난 일처럼 말하지 않는다
+    }
+    expect(text("guideNewVoice")).toContain("띵 소리가 나면 말씀하세요");
+  });
+
+  it("자세한 도움말은 '화면 아무 곳이나'가 아니라 '말하기' 단추를 가리킨다(A16·A33)", () => {
+    expect(text("helpMoreVoice").includes("아무 곳")).toBe(false);
+    expect(text("helpMoreVoice")).toContain(`'${BUTTONS.talk}' 단추`);
+  });
+
+  it("마이크가 막혔다는 안내는 아이폰과 컴퓨터를 모두 말한다(A28)", () => {
+    const t = text("micDenied");
+    expect(t).toContain("아이폰");
+    expect(t).toContain("컴퓨터");
+    expect(t).toContain(`'${BUTTONS.textInput}' 칸`);
+  });
+
+  it("마친 뒤 접수 안내는 없는 [요청 목록 보기] 단추를 가리키지 않는다(A9·A37)", () => {
+    expect(text("registered")).toContain(BUTTONS.list);
+    expect(text("registeredEnded")).not.toContain(BUTTONS.list);
+    expect(script("registeredEnded", { n: 4 })).toContain("접수 번호는 4번이에요");
+  });
+
+  it("두 번째 세션 예고는 연결을 새로 하고 이어 간다고 하지 않는다(A10)", () => {
+    expect(text("sessionWarn")).toContain("이어 갈게요");
+    expect(text("sessionWarnLast").includes("이어 갈게요")).toBe(false);
+    expect(text("sessionWarnLast")).toContain(`'${BUTTONS.continueTalk}'`);
+  });
+
+  it("'끝낼까요?'는 아니요도 말할 수 있다고 알린다(A36)", () => {
+    expect(text("endAsk")).toContain("아니요");
+    expect(text("endAsk")).toContain("네");
+  });
+
+  it("확인 상태의 침묵 안내는 요약을 되풀이하지 않고 방법을 알린다(A13)", () => {
+    const t = text("confirmHint");
+    expect(t).toContain(`'네'`);
+    expect(t).toContain(`'${BUTTONS.consent}'`);
+    expect(t).toContain(`'${COMMANDS.find((c) => c.command === "repeat")!.words[0]}'`);
+  });
+
+  it("다시 해도 같은 오류(오늘 이용량 소진, 서버 설정 없음)는 Space가 누르는 '처음 화면' 단추를 알린다(A22)", () => {
+    for (const id of ["dailyCap", "notConfigured"] as const) expect(text(id), id).toContain(`'${BUTTONS.home}'`);
+  });
+
+  it("허용 대기 포기 안내는 말하기 단추를 알리고 말하라는 안내는 하지 않는다(A21)", () => {
+    expect(text("micGiveUp")).toContain(`'${BUTTONS.talk}'`);
+    expect(text("micGiveUp")).not.toContain("음성 인식을 쓸 수 없");
+  });
+
+  it("취소 안내는 보내지 않았다고 말하고 다시 말하라고 한다(A24)", () => {
+    expect(text("turnCancelled")).toContain("보내지 않았어요");
+    expect(text("turnCancelled")).toContain("띵 소리가 나면");
   });
 });
 

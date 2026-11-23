@@ -1,10 +1,10 @@
 // /live 상태 기계: 순수 함수 liveStep(상태, 사건 → 상태, 효과)과 접수 관문 canRegister. 설계서 5절, 12.2절.
 // 시계, DOM, 네트워크, 난수를 쓰지 않는다. 시간은 TIMER_SET 효과와 TIMER 사건으로만 다룬다.
 import {
-  BUTTONS,
   hasQuestion,
   isCardEcho,
   isClearConsent,
+  isDecline,
   isPlausibleConsent,
   isScreenReaderEcho,
   matchLocalCommand,
@@ -28,6 +28,9 @@ import {
   MAX_LATE_REOPENS,
   MAX_RATE_RETRIES,
   MAX_RECONNECTS,
+  MIC_SAY_FIRST_MS,
+  MIC_SAY_MAX,
+  MIC_SAY_REPEAT_MS,
   MIC_WAIT_MS,
   PAUSED_END_MS,
   PAUSED_WARN_MS,
@@ -37,6 +40,7 @@ import {
   RETRY_AFTER_CAP_MS,
   SILENCE_STEPS_MS,
   SPEAK_GUARD_MAX_MS,
+  THINK_GRACE_MS,
   THINK_TIMEOUT_MS,
   USER_TURN_MAX,
   WAIT_SAY1_MS,
@@ -88,6 +92,8 @@ export interface LiveState {
   requestId: string | null;
   queueNumber: number | null;
   resultUnspoken: boolean;            // 화면이 숨겨진 동안 접수 결과가 왔다
+  thinkFresh: boolean;                // 말을 보낸 직후 THINK_GRACE_MS 안이다(이때의 큰 단추 누름은 말을 취소하지 않는다)
+  micSays: number;                    // 예비 엔진의 첫 듣기에서 마이크 허용 기다림 안내를 읽은 횟수
 }
 
 export type LiveEvent =
@@ -134,12 +140,12 @@ export type LiveEffect =
 export type TimerId =
   | "micWait" | "connect" | "connectSay" | "relisten" | "silence" | "controlHold"
   | "waitSay1" | "waitSay2" | "think" | "retryAfter" | "speakGuard"
-  | "registerSay" | "pausedWarn" | "pausedEnd" | "idleClose";
+  | "registerSay" | "pausedWarn" | "pausedEnd" | "idleClose" | "thinkGrace" | "micSay";
 
 const ALL_TIMERS: TimerId[] = [
   "micWait", "connect", "connectSay", "relisten", "silence", "controlHold",
   "waitSay1", "waitSay2", "think", "retryAfter", "speakGuard",
-  "registerSay", "pausedWarn", "pausedEnd", "idleClose",
+  "registerSay", "pausedWarn", "pausedEnd", "idleClose", "thinkGrace", "micSay",
 ];
 
 // 설계서가 값을 주지 않은 곳(429에 Retry-After가 없을 때)의 기본 대기. 직접 정했다.
@@ -188,6 +194,8 @@ export function createInitialLive(o: {
     requestId: null,
     queueNumber: null,
     resultUnspoken: false,
+    thinkFresh: false,
+    micSays: 0,
   };
 }
 
@@ -258,7 +266,7 @@ function go(
   const s = c.s;
   if (isListenPhase(s.phase) && s.phase !== to) {
     if (!o.handled) {
-      clearTimers(c, "silence", "relisten", "controlHold");
+      clearTimers(c, "silence", "relisten", "controlHold", "micSay");
       if (!o.engineEnded) c.fx.push({ type: "ENGINE_CANCEL_LISTEN", discard: o.discard ?? false });
     }
     s.mic = "off";
@@ -268,6 +276,7 @@ function go(
     s.mic = "off";
     s.silenceArmed = false;
   }
+  if (to !== "thinking") s.thinkFresh = false;
   s.phase = to;
   if (to === "listening") {
     s.awaitingConsent = false;
@@ -280,9 +289,12 @@ function closeMic(c: Cx): void {
   const s = c.s;
   if (s.mic !== "off") c.fx.push({ type: "ENGINE_CANCEL_LISTEN", discard: false });
   s.mic = "off";
-  clearTimers(c, "silence", "relisten", "controlHold");
+  clearTimers(c, "silence", "relisten", "controlHold", "micSay");
   s.silenceArmed = false;
 }
+
+/** 세션 예고 대본. 이미 한 번 다시 연결했으면 다음 예고는 연결을 새로 하는 것이 아니라 잠시 멈춘다는 말이다. */
+const sessionWarnId = (s: LiveState): ScriptId => (s.reconnects >= MAX_RECONNECTS ? "sessionWarnLast" : "sessionWarn");
 
 /** 차례 열기(listening) 또는 확인 열기(confirming). 글자 모드는 신호음과 입력 칸 초점만 낸다. */
 function openTurn(c: Cx, o: { settle?: boolean; keep?: boolean; noWarn?: boolean } = {}): void {
@@ -291,10 +303,10 @@ function openTurn(c: Cx, o: { settle?: boolean; keep?: boolean; noWarn?: boolean
   if (s.sessionWarnPending && !o.noWarn) {
     s.sessionWarnPending = false;
     closeMic(c);
-    sayScript(c, "sessionWarn");
+    sayScript(c, sessionWarnId(s));
     return;
   }
-  clearTimers(c, "silence", "relisten", "controlHold");
+  clearTimers(c, "silence", "relisten", "controlHold", "micSay");
   const settle = (o.settle ?? false) || s.settleNext;
   s.settleNext = false;
   s.silenceArmed = false;
@@ -307,6 +319,8 @@ function openTurn(c: Cx, o: { settle?: boolean; keep?: boolean; noWarn?: boolean
   }
   s.mic = "on";
   c.fx.push({ type: "OPEN_TURN", earcon: kind, settle, keep: o.keep ?? false });
+  // 이 페이지에서 듣기가 한 번도 시작되지 않았다면 마이크 허용 창을 기다리는 중일 수 있다. 소리 안내를 되풀이한다(onTimer micSay).
+  if (!s.micOnce && s.engine === "fallback" && s.micSays <= MIC_SAY_MAX) setTimer(c, "micSay", s.micSays === 0 ? MIC_SAY_FIRST_MS : MIC_SAY_REPEAT_MS);
 }
 
 /** 답 받기(5.5절). */
@@ -314,7 +328,8 @@ function receiveAnswer(c: Cx, success: boolean): void {
   const s = c.s;
   c.fx.push({ type: "WAIT_PULSE", on: false });
   stopSpeak(c);
-  clearTimers(c, "waitSay1", "waitSay2", "think", "retryAfter");
+  clearTimers(c, "waitSay1", "waitSay2", "think", "retryAfter", "thinkGrace");
+  s.thinkFresh = false;
   s.pendingTurn = null;
   if (success) {
     s.aiFailures = 0;
@@ -355,6 +370,9 @@ function startEngine(c: Cx): void {
   } else {
     c.fx.push({ type: "ENGINE_START", kind: "realtime" });
     setTimer(c, "micWait", MIC_WAIT_MS);
+    // 마이크 허용 창을 기다리는 동안 아무 소리가 없지 않게 한다. 대기 펄스는 앱이 말하는 동안 실행기가 쉰다.
+    c.fx.push({ type: "WAIT_PULSE", on: true });
+    setTimer(c, "micSay", MIC_SAY_FIRST_MS);
   }
 }
 
@@ -363,7 +381,7 @@ function switchToFallback(c: Cx): void {
   const s = c.s;
   s.fallbackOnly = true;
   c.fx.push({ type: "WAIT_PULSE", on: false });
-  clearTimers(c, "micWait", "connect", "connectSay");
+  clearTimers(c, "micWait", "connect", "connectSay", "micSay");
   c.fx.push({ type: "ENGINE_CLOSE" });
   c.fx.push({ type: "RELEASE_MIC" });
   startEngine(c);
@@ -401,6 +419,7 @@ function beginGuide(c: Cx, visit: "first" | "returning" | "new"): void {
   const gid = guideFor(visit, s.inputMode);
   const text = script(gid) + (s.inputMode === "voice" && !s.micOnce ? ` ${script("micHint")}` : "");
   if (s.history.length === 0) s.history = [aiCell(text, "asking", EMPTY_SLOTS)];
+  s.lastReply = script(gid);   // 첫 AI 답이 오기 전에도 [다시 듣기]와 '다시'가 안내를 다시 읽는다
   go(c, "guiding");
   say(c, gid, text);
 }
@@ -506,12 +525,15 @@ function enterThinking(c: Cx, o: { engineEnded: boolean }): void {
   setTimer(c, "waitSay1", WAIT_SAY1_MS);
   setTimer(c, "waitSay2", WAIT_SAY2_MS);
   setTimer(c, "think", THINK_TIMEOUT_MS);
+  // 말 끝을 엔진이 먼저 잡은 직후의 큰 단추는 '다 말했어요'라는 뜻일 수 있다. 잠깐은 취소로 읽지 않는다.
+  c.s.thinkFresh = true;
+  setTimer(c, "thinkGrace", THINK_GRACE_MS);
 }
 
 /** registering으로 들어간다(5.5절 접수 표). callId가 있으면 Realtime 도구 호출을 닫는다. */
 function startRegister(c: Cx, callId?: string): void {
   const s = c.s;
-  clearTimers(c, "waitSay1", "waitSay2", "think", "retryAfter", "speakGuard", "silence", "relisten", "controlHold");
+  clearTimers(c, "waitSay1", "waitSay2", "think", "retryAfter", "speakGuard", "silence", "relisten", "controlHold", "thinkGrace", "micSay");
   go(c, "registering", { handled: true });
   s.sendPending = true;
   s.ask = null;
@@ -720,6 +742,14 @@ function onUtterance(c: Cx, raw: string, source: "voice" | "text", engineEnded: 
       return;
     }
     s.ask = null;
+    if (isDecline(text)) {
+      // 끝내지 않는다. AI에게 보내지 않고 "계속할게요"와 함께 방금 하던 말을 다시 읽는다.
+      s.helpDepth = 0;
+      closeMic(c);
+      const again = s.phase === "confirming" ? confirmText(s, "confirmAgain") : s.lastReply;
+      say(c, "repeat", again === "" ? script("endCancelled") : `${script("endCancelled")} ${again}`);
+      return;
+    }
   }
   // 4. 말 명령
   const cmd = matchLocalCommand(text);
@@ -755,6 +785,8 @@ function onListenStarted(c: Cx, late: boolean): void {
   const s = c.s;
   if (!isListenPhase(s.phase) || s.mic !== "on") return;
   s.micOnce = true;
+  s.micSays = 0;
+  clearTimers(c, "micSay");
   if (late && s.lateReopens < MAX_LATE_REOPENS) {
     s.lateReopens += 1;
     c.fx.push({ type: "ENGINE_CANCEL_LISTEN", discard: true });
@@ -775,7 +807,8 @@ function onSilenceTimer(c: Cx): void {
     const id: ScriptId = s.silenceStep === 0 ? "silence1" : "silence2";
     s.silenceStep = (s.silenceStep + 1) as 1 | 2;
     closeMic(c);
-    if (s.phase === "confirming") sayScript(c, "confirmAgain", { summary: s.draft?.summary ?? "" });
+    // 확인 카드를 화면 낭독기로 읽는 중일 수 있으므로 요약 전체를 다시 읽지 않고 짧은 안내만 한다. 요약은 '다시'나 [다시 듣기]로 듣는다.
+    if (s.phase === "confirming") sayScript(c, "confirmHint");
     else sayScript(c, id);
   } else if (s.silenceStep === 2) {
     s.silenceStep = 3;
@@ -805,6 +838,8 @@ function onMainButton(c: Cx, kind: "main" | "hold"): void {
       }
       if (s.mic === "off") {
         stopSpeak(c);
+        // 허용을 기다리다 안내가 끝난 뒤 이용자가 '말하기'로 다시 열면 안내를 처음부터 다시 되풀이한다.
+        if (!s.micOnce) s.micSays = 0;
         openTurn(c, { settle: true });
       } else if (kind === "main") {
         c.fx.push({ type: "ENGINE_SUBMIT" });
@@ -815,13 +850,20 @@ function onMainButton(c: Cx, kind: "main" | "hold"): void {
         stopSpeak(c);
         return;
       }
+      if (s.thinkFresh) {
+        // 방금 보낸 말이다. 지우지 않고, 이미 보냈다는 신호음을 한 번 더 들려 준다.
+        c.fx.push({ type: "EARCON", name: "sent" });
+        return;
+      }
       dropPending(c);
       receiveAnswer(c, false);
       c.fx.push({ type: "ENGINE_CANCEL_RESPONSE" });
       s.awaitingConsent = false;
       s.consentText = null;
       go(c, "listening");
-      openTurn(c, { settle: true });
+      // 말이 취소됐다는 것을 소리로 알린다. 읽기가 끝나면 onSpeakEnd가 차례를 연다.
+      c.fx.push({ type: "EARCON", name: "cancel" });
+      sayScript(c, "turnCancelled");
       return;
     case "speaking":
       c.fx.push({ type: "ENGINE_CANCEL_RESPONSE" });
@@ -838,6 +880,32 @@ function onMainButton(c: Cx, kind: "main" | "hold"): void {
   }
 }
 
+/** 마이크 허용을 기다리는 동안의 소리 안내. 마이크가 닫혀 있을 때만 읽는다(자기 목소리가 인식에 섞이지 않게). */
+function onMicSayTimer(c: Cx): void {
+  const s = c.s;
+  if (s.phase === "connecting" && startedKind(s) === "realtime" && !s.engineReady) {
+    // Realtime: 마이크를 받기 전에는 인식이 돌지 않는다. 앞 말이 아직 끝나지 않았으면 조금 뒤에 다시 본다.
+    if (s.speaking === null) {
+      sayScript(c, "micWaiting");
+      setTimer(c, "micSay", MIC_SAY_REPEAT_MS);
+    } else {
+      setTimer(c, "micSay", 4_000);
+    }
+    return;
+  }
+  if (isListenPhase(s.phase) && s.mic === "on" && !s.micOnce && s.engine === "fallback") {
+    // 예비 엔진: 인식을 끊고(허용 전이라 이용자 말이 없다) 읽은 뒤, 읽기가 끝나면 차례를 다시 연다.
+    s.micSays += 1;
+    c.fx.push({ type: "ENGINE_CANCEL_LISTEN", discard: true });
+    s.mic = "off";
+    clearTimers(c, "silence", "relisten", "controlHold");
+    s.silenceArmed = false;
+    // 안내를 MIC_SAY_MAX번 읽고도 허용이 안 됐으면 더 되풀이하지 않는다. 차례를 다시 열지 않고(onSpeakEnd) '말하기'로 이용자가 다시 열게 한다.
+    // 다시 열어 두면 첫 시작 감시(60초×2)가 소리 없이 이어져 마지막에 틀린 이유("음성 인식을 쓸 수 없어요")를 읽게 된다.
+    sayScript(c, s.micSays > MIC_SAY_MAX ? "micGiveUp" : "micWaiting");
+  }
+}
+
 function onTimer(c: Cx, id: TimerId): void {
   const s = c.s;
   switch (id) {
@@ -848,6 +916,12 @@ function onTimer(c: Cx, id: TimerId): void {
       if (s.phase !== "connecting" || s.engineReady) return;
       if (startedKind(s) === "realtime") switchToFallback(c);
       else enterError(c, "connect_failed");
+      return;
+    case "thinkGrace":
+      s.thinkFresh = false;
+      return;
+    case "micSay":
+      onMicSayTimer(c);
       return;
     case "connectSay":
       if (s.phase === "connecting" && s.speaking === null) {
@@ -1142,7 +1216,7 @@ function onSpeakEnd(c: Cx, id: string): void {
       return;
     case "listening":
     case "confirming":
-      if (id !== "micRetry" && s.mic === "off") openTurn(c);
+      if (id !== "micRetry" && id !== "micGiveUp" && s.mic === "off") openTurn(c);
       return;
     case "speaking":
       if (id === "confirm") {
@@ -1163,7 +1237,11 @@ function onSpeakEnd(c: Cx, id: string): void {
       }
       return;
     case "done":
-      if (id === "registered") c.fx.push({ type: "FOCUS", target: "listLink" });
+      if (id === "registered" || id === "registeredLate") c.fx.push({ type: "FOCUS", target: "listLink" });
+      return;
+    case "paused":
+      // 멈춤 안내가 끝나면 초점을 큰 단추([계속하기])로 옮긴다. 100초 경고(pausedWarn)는 이용자가 둔 읽기 위치를 빼앗지 않으려고 제외한다.
+      if (id === "pausedByUser" || id === "pausedBySilence" || id === "pausedReturn") c.fx.push({ type: "FOCUS", target: "main" });
       return;
     case "error":
     case "ended":
@@ -1177,6 +1255,8 @@ function onSpeakEnd(c: Cx, id: string): void {
 function onResume(c: Cx): void {
   const s = c.s;
   if (s.phase !== "paused") return;
+  // 멈춤 안내를 읽는 중에 이어 가면 그 낭독이 뜸·신호음·마이크 위로 겹치지 않게 먼저 멈춘다.
+  if (s.speaking !== null) stopSpeak(c);
   clearTimers(c, "pausedWarn", "pausedEnd", "idleClose");
   s.silenceStep = 0;
   s.relistens = 0;
@@ -1304,7 +1384,8 @@ function onRegisterOk(c: Cx, e: Extract<LiveEvent, { type: "REGISTER_OK" }>): vo
     c.fx.push({ type: "ATTACH_PUSH" });
     if (!s.hidden) {
       stopSpeak(c);
-      sayScript(c, "registered", { n: e.queueNumber });
+      // 마친 화면에는 [요청 목록 보기]가 없으므로 목록 단추를 가리키지 않는 대본을 읽는다.
+      sayScript(c, "registeredEnded", { n: e.queueNumber });
     } else {
       s.resultUnspoken = true;
     }
@@ -1326,7 +1407,7 @@ function step(c: Cx, e: LiveEvent): void {
       if (s.phase !== "connecting") return;
       s.engine = e.engine;
       s.engineReady = true;
-      clearTimers(c, "micWait", "connect", "connectSay");
+      clearTimers(c, "micWait", "connect", "connectSay", "micSay");
       c.fx.push({ type: "WAIT_PULSE", on: false });
       if (e.inputMode === "text" && s.inputMode === "voice") {
         s.inputMode = "text";
@@ -1338,7 +1419,7 @@ function step(c: Cx, e: LiveEvent): void {
 
     case "MIC_READY":
       if (s.phase === "connecting" && startedKind(s) === "realtime" && !s.engineReady) {
-        clearTimers(c, "micWait");
+        clearTimers(c, "micWait", "micSay");
         setTimer(c, "connect", CONNECT_TIMEOUT_MS);
         setTimer(c, "connectSay", CONNECT_SAY_MS);
         c.fx.push({ type: "WAIT_PULSE", on: true });
@@ -1382,7 +1463,17 @@ function step(c: Cx, e: LiveEvent): void {
     }
 
     case "TEXT_SUBMIT":
+      if (s.phase === "speaking" && s.inputMode === "text" && !s.pendingConfirm && e.text.trim() !== "") {
+        // 글자 모드 끼어들기: 읽던 AI 말을 끊고 이 글을 받는다. 요약 확인(pendingConfirm)은 동의 관문 때문에 제외한다.
+        c.fx.push({ type: "ENGINE_CANCEL_RESPONSE" });
+        stopSpeak(c);
+        clearTimers(c, "speakGuard");
+        s.awaitingConsent = false;
+        s.consentText = null;
+        go(c, "listening");
+      }
       if (isListenPhase(s.phase)) onUtterance(c, e.text, "text", false);
+      else if (isActive(s.phase)) c.fx.push({ type: "EARCON", name: "cancel" });   // 받지 못했다는 것을 소리로 알린다. 글은 화면이 칸에 남긴다.
       return;
 
     case "USER_TRANSCRIPT": {
@@ -1425,7 +1516,7 @@ function step(c: Cx, e: LiveEvent): void {
     case "SESSION_WARN":
       if (isListenPhase(s.phase)) {
         closeMic(c);
-        sayScript(c, "sessionWarn");
+        sayScript(c, sessionWarnId(s));
       } else if (s.phase === "guiding" || s.phase === "connecting" || s.phase === "thinking" || s.phase === "speaking") {
         s.sessionWarnPending = true;
       }
@@ -1541,6 +1632,8 @@ function step(c: Cx, e: LiveEvent): void {
       return;
 
     case "NEW_REQUEST":
+      // 접수 번호를 읽는 중의 누름은 새 요청이 아니다. 끝까지 들은 뒤의 누름만 새 요청을 시작한다.
+      if (s.speaking === "registered" || s.speaking === "registeredEnded" || s.speaking === "registeredLate") return;
       if (s.phase === "done" || s.phase === "error" || (s.phase === "ended" && !s.sendPending)) {
         resetForNewRequest(c, e.cid);
         beginGuide(c, "new");
@@ -1573,20 +1666,15 @@ function step(c: Cx, e: LiveEvent): void {
 
     case "VISIBLE":
       s.hidden = false;
-      if (s.phase === "paused") {
-        c.fx.push({
-          type: "ANNOUNCE",
-          channel: "status",
-          text: `멈춰 있어요. '${BUTTONS.resume}' 단추를 누르면 이어서 해요.`,
-        });
-      }
+      // 돌아오면 기기 목소리로 알린다(화면 낭독기 없이 쓰는 이용자도 듣도록). say()는 목소리를 못 쓸 때만 ANNOUNCE를 내므로 낭독기와 겹치지 않는다.
       if (s.resultUnspoken) {
         s.resultUnspoken = false;
-        c.fx.push({
-          type: "ANNOUNCE",
-          channel: "status",
-          text: `요청이 등록됐어요. 접수 번호 ${s.queueNumber ?? ""}번.`,
-        });
+        if (s.speaking !== null) stopSpeak(c);
+        const id: ScriptId = s.phase === "ended" ? "registeredEnded" : "registered";
+        say(c, "registeredLate", script(id, { n: s.queueNumber ?? undefined }));
+      } else if (s.phase === "paused" && s.speaking === null) {
+        c.fx.push({ type: "EARCON", name: "pause" });
+        sayScript(c, "pausedReturn");
       }
       return;
 

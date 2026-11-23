@@ -183,12 +183,12 @@ describe("encodeAiTurn / decodeAiTurn", () => {
   });
 });
 
-describe("groundSlots: 이용자 말에 근거가 없는 문장을 칸에서 뺀다", () => {
+describe("groundSlots: 지시문이 샌 문장과 모델의 질문만 뺀다", () => {
   const slots = (o: Partial<Record<"product" | "info" | "options" | "budget", string>>) => ({
     product: "", info: "", options: "", budget: "", ...o,
   });
 
-  it("실호출 사례 1: 알고 싶은 정보에 섞인 지시문 문장과 덧붙인 보기를 뺀다", () => {
+  it("실호출 사례 1: 알고 싶은 정보에 섞인 지시문 문장을 뺀다", () => {
     const user = ["무선 이어폰을 찾고 있어요.", "노이즈 캔슬링이 잘 되는지, 그리고 배터리가 얼마나 가는지 알고 싶어요."];
     const out = groundSlots(
       slots({
@@ -201,7 +201,7 @@ describe("groundSlots: 이용자 말에 근거가 없는 문장을 칸에서 뺀
     expect(out.info).toBe("노이즈 캔슬링 성능과 배터리 사용 시간을 알고 싶어요.");
   });
 
-  it("실호출 사례 2: 이용자가 말하지 않은 칸 전체가 지시문에서 왔으면 비운다", () => {
+  it("실호출 사례 2: 칸 전체가 지시문에서 왔으면 비우고, 표지가 없는 문장은 남긴다", () => {
     const user = ["전화를 찾고 있어요.", "검은색이면 좋겠고 예산은 10만 원 이하예요."];
     const out = groundSlots(
       slots({
@@ -213,14 +213,36 @@ describe("groundSlots: 이용자 말에 근거가 없는 문장을 칸에서 뺀
       user,
     );
     expect(out.info).toBe("");
-    expect(out.options).toBe("색상 블랙 또는 검은색.");
+    // "새 제품."은 근거가 없지만 표지도 없어 남긴다. 이용자가 요약을 듣고 고친다.
+    expect(out.options).toBe("색상 블랙 또는 검은색. 새 제품.");
     expect(out.budget).toBe("10만 원 이내");
-    expect(out.product).toBe("보드게임"); // 제품 이름은 바꿔 적힐 수 있어 그대로 둔다
+    expect(out.product).toBe("보드게임");
   });
 
-  it("바꿔 말한 칸은 지시문 표지가 없으면 그대로 둔다", () => {
-    const out = groundSlots(slots({ product: "이어폰", info: "차음 성능" }), ["이어폰이요. 소리가 밖으로 안 새는지 알려 주면 좋겠어요."]);
-    expect(out.info).toBe("차음 성능");
+  it("바꿔 말한 문장은 지우지 않는다. 다른 문장에 근거가 있어도 마찬가지다(Codex 2차 지적 2)", () => {
+    expect(groundSlots(slots({ product: "이어폰", info: "차음 성능" }), ["이어폰이요. 소리가 밖으로 안 새는지 알려 주면 좋겠어요."]).info).toBe("차음 성능");
+    const out = groundSlots(slots({ product: "이어폰", info: "차음 성능. 배터리 수명." }), ["소리가 밖으로 안 새는지와 배터리가 오래 가는지 궁금해요"]);
+    expect(out.info).toBe("차음 성능. 배터리 수명.");
+  });
+
+  it("근거가 불확실하지만 표지가 없는 문장은 남긴다. 확인 요약에서 이용자가 듣고 고친다", () => {
+    const out = groundSlots(slots({ product: "소니 헤드폰", info: "배송지는 서울입니다." }), ["소니 헤드폰"]);
+    expect(out.info).toBe("배송지는 서울입니다.");
+  });
+
+  it("이용자가 물은 질문은 남기고, 모델이 적은 자기 질문은 뺀다", () => {
+    const asked = "지금 가격이 얼마예요? 재고는 있나요?";
+    expect(groundSlots(slots({ product: "이어폰", info: asked }), ["이어폰이요.", asked]).info).toBe(asked);
+    expect(groundSlots(slots({ product: "전기밥솥", info: "어떤 점이 궁금하세요?" }), ["전기밥솥을 찾아요"]).info).toBe("");
+    expect(
+      groundSlots(slots({ product: "전기밥솥", info: "어떤 색을 원하세요? 내솥이 스테인리스인지" }), ["전기밥솥이요. 내솥이 스테인리스인지 알고 싶어요"]).info,
+    ).toBe("내솥이 스테인리스인지");
+  });
+
+  it("물음표 뒤에 공백이 없어도 문장을 나누고, 소수점은 나누지 않는다(Codex 2차 지적 3)", () => {
+    expect(groundSlots(slots({ product: "전기밥솥", info: "무게는?할인은" }), ["전기밥솥을 찾아요"]).info).toBe("할인은");
+    const out = groundSlots(slots({ product: "전기밥솥", options: "1.5리터 용량. 어떤 색을 원하세요?" }), ["1.5리터 전기밥솥이요"]);
+    expect(out.options).toBe("1.5리터 용량.");
   });
 
   it("숫자를 한글로 받아 적어도 예산 칸이 남는다", () => {
@@ -241,12 +263,12 @@ describe("groundSlots: 이용자 말에 근거가 없는 문장을 칸에서 뺀
   });
 });
 
-describe("tidySlots: 읽어 주기 좋게 칸을 정리한다", () => {
+describe("tidySlots: 읽어 주기 좋게 칸을 정리한다(내용은 잃지 않는다)", () => {
   const slots = (o: Partial<Record<"product" | "info" | "options" | "budget", string>>) => ({
     product: "무선 이어폰", info: "", options: "", budget: "", ...o,
   });
 
-  it("실호출 사례: 예산을 다른 칸에 되풀이하면 그 마디를 빼고, 끝말을 뗀다", () => {
+  it("실호출 사례: 예산만 말하는 마디를 다른 칸에서 빼고, 끝말을 뗀다", () => {
     const out = tidySlots(
       slots({
         info: "노이즈 캔슬링 성능과 배터리 사용 시간을 알고 싶음. 예산은 10만 원 이내",
@@ -259,6 +281,14 @@ describe("tidySlots: 읽어 주기 좋게 칸을 정리한다", () => {
     expect(out.budget).toBe("10만 원 이하");
   });
 
+  it("예산과 다른 내용이 한 마디에 섞여 있으면 지우지 않는다(Codex 2차 지적 3)", () => {
+    const given = slots({ options: "검은색이고 예산 10만 원", budget: "10만 원" });
+    expect(tidySlots(given).options).toBe("검은색이고 예산 10만 원");
+    // 요약은 예산을 두 번 말하지 않는다.
+    expect(toDraft(given)?.summary).toBe("제품은 무선 이어폰. 옵션은 검은색이고 예산 10만 원.");
+    expect(tidySlots(slots({ options: "예산 10만 원에 맞는 검은색", budget: "10만 원" })).options).toBe("예산 10만 원에 맞는 검은색");
+  });
+
   it("끝말 떼기: 궁금, 궁금함, 궁금합니다, 알고 싶어요", () => {
     expect(tidySlots(slots({ info: "노이즈 캔슬링 성능이 궁금" })).info).toBe("노이즈 캔슬링 성능");
     expect(tidySlots(slots({ info: "가격과 재고가 궁금함" })).info).toBe("가격과 재고");
@@ -266,31 +296,14 @@ describe("tidySlots: 읽어 주기 좋게 칸을 정리한다", () => {
     expect(tidySlots(slots({ info: "배터리가 얼마나 가는지 알고 싶어요" })).info).toBe("배터리가 얼마나 가는지");
   });
 
-  it("끝말만 있는 칸은 비우지 않고, 예산 칸이 없으면 예산 마디를 그대로 둔다", () => {
+  it("끝말만 있는 칸은 비우지 않고, 예산 칸이 없으면 예산 마디를 그대로 둔다. 질문은 건드리지 않는다", () => {
     expect(tidySlots(slots({ info: "궁금합니다" })).info).toBe("궁금합니다");
     expect(tidySlots(slots({ options: "검은색, 예산 10만 원 이내" })).options).toBe("검은색, 예산 10만 원 이내");
+    expect(tidySlots(slots({ info: "지금 가격이 얼마예요? 재고는 있나요?" })).info).toBe("지금 가격이 얼마예요? 재고는 있나요?");
   });
 
   it("toDraft는 정리한 칸으로 요약을 만든다", () => {
     const draft = toDraft(slots({ info: "노이즈 캔슬링 성능이 궁금", options: "검은색, 예산 10만 원 이내", budget: "10만 원 이하" }));
     expect(draft?.summary).toBe("제품은 무선 이어폰. 알고 싶은 정보는 노이즈 캔슬링 성능. 옵션은 검은색. 예산은 10만 원 이하.");
-  });
-});
-
-describe("tidySlots: 질문 문장은 칸에 둘 수 없다(실호출 2026-11-24)", () => {
-  it("모델이 자기 질문을 칸에 적으면 그 문장을 뺀다", () => {
-    const out = tidySlots({
-      product: "헤드폰",
-      info: "어떤 점이 궁금하세요? 재질(스테인리스)는 필요 없어요? 내솥이 스테인리스인지 알고 싶음",
-      options: "작은 크기. 다른 조건이 있나요?",
-      budget: "",
-    });
-    expect(out.info).toBe("내솥이 스테인리스인지");
-    expect(out.options).toBe("작은 크기.");
-    expect(out.product).toBe("헤드폰");
-  });
-
-  it("질문만 있는 칸은 빈다", () => {
-    expect(tidySlots({ product: "헤드폰", info: "어떤 점이 궁금하세요?", options: "", budget: "" }).info).toBe("");
   });
 });

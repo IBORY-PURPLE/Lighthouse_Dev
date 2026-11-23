@@ -41,6 +41,14 @@ export function liveMaxSessionSec(): number {
   return intEnv("LIVE_MAX_SESSION_SEC", 270, 60, 280);
 }
 
+/**
+ * LIVE_CALL_IP_LIMIT: 주소 하나가 10분 동안 만들 수 있는 Realtime 통화 수. 기본 3, 1~60.
+ * 로컬에서 되풀이해 시험할 때만 올린다(로컬은 모든 요청의 주소가 같아 세 번째 대화 뒤로 예비 엔진으로 떨어진다).
+ */
+export function liveCallIpLimit(): number {
+  return intEnv("LIVE_CALL_IP_LIMIT", 3, 1, 60);
+}
+
 /** LIVE_DAILY_SESSION_CAP, 기본 10, 0~200. */
 export function liveDailySessionCap(): number {
   return intEnv("LIVE_DAILY_SESSION_CAP", 10, 0, 200);

@@ -92,6 +92,7 @@ beforeEach(async () => {
     "LIVE_REALTIME_VAD",
     "LIVE_REALTIME_REASONING",
     "LIVE_TRANSCRIBE_LANG",
+    "LIVE_CALL_IP_LIMIT",
   ]) {
     vi.stubEnv(name, undefined);
   }
@@ -832,5 +833,30 @@ describe("Codex 1차 지적과 거절 사유 꼬리표", () => {
       status: 400,
       detail: " param=session.audiooutputvoicex code=invalidrequest",
     });
+  });
+});
+
+describe("LIVE_CALL_IP_LIMIT(로컬 되풀이 시험용)", () => {
+  it("기본은 3이고 1~60으로 자른다. 숫자가 아니면 기본값", () => {
+    expect(config.liveCallIpLimit()).toBe(3);
+    vi.stubEnv("LIVE_CALL_IP_LIMIT", "20");
+    expect(config.liveCallIpLimit()).toBe(20);
+    vi.stubEnv("LIVE_CALL_IP_LIMIT", "0");
+    expect(config.liveCallIpLimit()).toBe(1);
+    vi.stubEnv("LIVE_CALL_IP_LIMIT", "999");
+    expect(config.liveCallIpLimit()).toBe(60);
+    vi.stubEnv("LIVE_CALL_IP_LIMIT", "many");
+    expect(config.liveCallIpLimit()).toBe(3);
+  });
+
+  it("5로 올리고 라우트를 새로 불러오면 같은 주소에서 5번까지 통화가 만들어지고 6번째가 rate_limited다", async () => {
+    vi.stubEnv("LIVE_CALL_IP_LIMIT", "5");
+    vi.resetModules();
+    const route = await import("@/app/api/live/call/route");
+    const client = freshClient();
+    for (let i = 0; i < 5; i += 1) {
+      expect((await json(await route.POST(callRequest({ client })))).engine).toBe("realtime");
+    }
+    expect(await json(await route.POST(callRequest({ client })))).toEqual({ engine: "fallback", reason: "rate_limited" });
   });
 });

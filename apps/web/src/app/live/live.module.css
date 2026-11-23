@@ -104,10 +104,14 @@
   cursor: default;
 }
 
-/* 듣는 중에는 색뿐 아니라 굵은 테두리와 글자(말씀하세요)로도 알린다. */
+/* 듣는 중에는 색뿐 아니라 굵은 테두리와 글자(말씀하세요)로도 알린다.
+   단추 색을 뒤집어(바탕색 단추에 강조색 글자와 굵은 강조색 테두리) 테두리가 배경에 묻히지 않게 한다.
+   대비: 밝은 모드 #0b3d91 대 #ffffff 10.04:1, 어두운 모드 #8db8ff 대 #101418 9.19:1. */
 .root[data-live-mic="on"] .main {
-  border-style: double;
+  border-style: solid;
   border-width: 8px;
+  background: var(--bg);
+  color: var(--accent);
 }
 
 @media (prefers-reduced-motion: no-preference) {

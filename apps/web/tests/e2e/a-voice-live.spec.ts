@@ -674,8 +674,10 @@ test.describe("/live 음성 도우미 화면", () => {
     expect(await requestsStored(page)).toHaveLength(1);
 
     // 마친 뒤 [새 요청]으로 시작하고 뒤로 가도 주소는 그대로이고 ended다.
+    // 가짜 읽기는 바로 끝날 수 있어 안내(guiding)를 지나 듣는 상태(listening)에 가 있어도 "새 대화가 시작됐다"로 본다.
+    // (2026-11-24 기록에서 guiding만 기다리다 한 번 실패했다. 시험의 뜻은 그대로다: 새로 시작한 뒤 뒤로 가면 ended.)
     await bigButton(page).click();
-    await expectState(page, "guiding");
+    await expect(surface(page)).toHaveAttribute("data-live-state", /^(guiding|listening)$/);
     await page.goBack();
     await expectState(page, "ended");
     expect(new URL(page.url()).pathname).toBe("/live");
@@ -1067,6 +1069,287 @@ test.describe("/live 음성 도우미 화면", () => {
     await expectState(page, "listening");
     await expect(surface(page)).toHaveAttribute("data-live-input", "text");
     await expectNoAxe(page, "글자 모드 listening");
+  });
+  // ---- 접근성 검토 뒤 화면 수정(A1, A3, A5, A6, A7, A8, A18, A22, A24, A26, A37) ----
+
+  const listLink = (page: Page) => page.getByRole("link", { name: BUTTONS.list, exact: true });
+  const headlineOf = (page: Page) => surface(page).locator("h1 + p");
+
+  /** 접수를 마치고 done에서 접수 번호 읽기를 붙든 채로 둔다. */
+  async function reachDoneReading(page: Page): Promise<void> {
+    await reachConfirm(page);
+    await holdTts(page);
+    await sayLive(page, "네");
+    await expectState(page, "done");
+    await heard(page, DONE_RE);
+  }
+
+  test("A1 접수 안내를 다 들은 뒤 초점이 링크에 있어도 Space는 새 요청이고 Enter는 링크다", async ({ page }) => {
+    await openLive(page);
+    await reachConfirm(page);
+    await sayLive(page, "네");
+    await expectState(page, "done");
+    await heard(page, DONE_RE);
+    await expect(listLink(page)).toBeFocused(); // 읽기가 끝나면 초점이 목록 링크로 간다(VoiceOver 설계)
+    await expect(bigButton(page)).toHaveAccessibleName(BUTTONS.newRequest);
+    await expect(bigButton(page)).not.toHaveAttribute("aria-disabled", "true");
+
+    await page.keyboard.press("Space");
+    await expect(surface(page)).toHaveAttribute("data-live-state", /^(guiding|listening)$/);
+    expect(new URL(page.url()).pathname).toBe("/live");
+    await heard(page, script("guideNewVoice"));
+  });
+
+  test("A1 접수 안내를 읽는 중 Space는 새 요청을 시작하지 않고 안내가 끝까지 읽힌다", async ({ page }) => {
+    await openLive(page);
+    await reachDoneReading(page);
+    // 읽는 동안 큰 단추는 눌리지 않는 단추다.
+    await expect(bigButton(page)).toHaveAttribute("aria-disabled", "true");
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("Space");
+    await bigButton(page).dispatchEvent("click"); // 마우스·VoiceOver의 누름도 같다
+    await page.waitForTimeout(500);
+    await expectState(page, "done");
+    expect(await heardCount(page, script("guideNewVoice"))).toBe(0);
+    expect(await heardCount(page, DONE_RE)).toBe(1);
+
+    await releaseTts(page); // 끝까지 읽었다
+    await expect(listLink(page)).toBeFocused();
+    await expect(bigButton(page)).not.toHaveAttribute("aria-disabled", "true");
+    await page.keyboard.press("Space");
+    await expect(surface(page)).toHaveAttribute("data-live-state", /^(guiding|listening)$/);
+    await heard(page, script("guideNewVoice"));
+  });
+
+  test("A24 thinking에서 Space는 방금 보낸 말을 지우지 않고 답이 온다", async ({ page }) => {
+    const live = await openLive(page);
+    let release: () => void = () => {};
+    live.chatPlan.push(
+      (route) =>
+        new Promise<void>((resolve) => {
+          release = () => void route.continue().then(() => resolve());
+        }),
+    );
+    await startAndListen(page);
+    await sayLive(page, ANSWERS[0]);
+    await expectState(page, "thinking");
+    const sentBefore = (await earconsOf(page)).filter((n) => n === "sent").length;
+    await page.keyboard.press("Space"); // 보낸 직후 1.5초 안의 누름
+    await expect.poll(async () => (await earconsOf(page)).filter((n) => n === "sent").length, POLL).toBe(sentBefore + 1); // 눌렀다는 것이 소리로 전해진다
+    await expectState(page, "thinking");
+    expect(await heardCount(page, script("turnCancelled"))).toBe(0);
+
+    release();
+    await heard(page, /^어떤 점이 궁금하세요/);
+    expect(live.chat).toHaveLength(1);
+    expect(live.chat[0].message).toBe(ANSWERS[0]);
+    expect(await earconsOf(page)).not.toContain("cancel");
+  });
+
+  test("A24 보낸 지 1.5초가 지난 thinking에서 Space는 말을 취소하고 turnCancelled를 읽는다", async ({ page }) => {
+    const live = await openLive(page);
+    let release: () => void = () => {};
+    live.chatPlan.push(
+      (route) =>
+        new Promise<void>((resolve) => {
+          release = () => void route.continue().then(() => resolve());
+        }),
+    );
+    await startAndListen(page);
+    await sayLive(page, ANSWERS[0]);
+    await expectState(page, "thinking");
+    await page.waitForTimeout(1800);
+    await page.keyboard.press("Space");
+    await heard(page, script("turnCancelled"));
+    await expect.poll(() => earconsOf(page), POLL).toContain("cancel");
+    await expectState(page, "listening");
+    release(); // 늦게 온 답은 버려진다
+    await page.waitForTimeout(500);
+    expect(await heardCount(page, /^어떤 점이 궁금하세요/)).toBe(0);
+  });
+
+  /** 탭이 가려지거나 돌아온 것처럼 visibilitychange를 낸다. */
+  const setVisibility = (page: Page, state: "hidden" | "visible") =>
+    page.evaluate((value) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => value });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, state);
+
+  test("A4 탭이 가려졌다 돌아오면 멈춤 신호음과 기기 목소리 안내가 나오고, 다 읽으면 초점이 큰 단추다", async ({ page }) => {
+    await openLive(page);
+    await startAndListen(page);
+    await setVisibility(page, "hidden");
+    await expectState(page, "paused");
+    expect(await heardCount(page, script("pausedReturn"))).toBe(0); // 가려진 동안은 조용하다
+    await setVisibility(page, "visible");
+    await heard(page, script("pausedReturn"));
+    await expect.poll(() => earconsOf(page), POLL).toContain("pause");
+    expect(await announcedOf(page)).not.toContain(script("pausedReturn")); // 기기 목소리가 읽으니 role=status로 겹쳐 내지 않는다
+    await expect(bigButton(page)).toHaveAccessibleName(BUTTONS.resume);
+    await expect(bigButton(page)).toBeFocused();
+  });
+
+  test("A26 마우스로 작은 단추를 누른 뒤에는 큰 단추에 초점이 있고 Space가 그 작은 단추를 다시 누르지 않는다", async ({ page }) => {
+    await openLive(page);
+    await startAndListen(page);
+    const help = page.getByRole("button", { name: BUTTONS.help, exact: true });
+    await help.click(); // 마우스 click
+    await heard(page, script("helpVoice"));
+    await expect(bigButton(page)).toBeFocused();
+    expect(await page.evaluate(() => document.activeElement === document.querySelector("[data-live-surface] button"))).toBe(true);
+
+    await page.keyboard.press("Space"); // 큰 단추를 누른 것이다
+    await page.waitForTimeout(400);
+    expect(await heardCount(page, script("helpVoice"))).toBe(1);
+    expect(await heardCount(page, script("helpMoreVoice"))).toBe(0);
+  });
+
+  test("A26 키보드로 작은 단추를 누르면 초점을 옮기지 않는다", async ({ page }) => {
+    await openLive(page);
+    await startAndListen(page);
+    const help = page.getByRole("button", { name: BUTTONS.help, exact: true });
+    await help.focus();
+    await page.keyboard.press("Enter");
+    await heard(page, script("helpVoice"));
+    await expect(help).toBeFocused();
+  });
+
+  test("A26 작은 단추 위에서 마우스를 길게 누르면 그 단추는 실행되지 않고 취소음이 나며 큰 단추에 초점이 간다", async ({ page }) => {
+    await openLive(page);
+    await startAndListen(page);
+    const help = page.getByRole("button", { name: BUTTONS.help, exact: true });
+    await help.scrollIntoViewIfNeeded();
+    const at = await centerOf(help);
+    await press(page, at, 700);
+    await page.waitForTimeout(300);
+    expect(await heardCount(page, script("helpVoice"))).toBe(0);
+    expect(await earconsOf(page)).toContain("cancel");
+    await expect(bigButton(page)).toBeFocused();
+  });
+
+  test("A6 앱이 말하는 동안에는 큰 글자가 '말씀하세요'로 시작하지 않고, 마이크가 열리면 바뀐다", async ({ page }) => {
+    await openLive(page);
+    await startAndListen(page);
+    await holdTts(page);
+    await page.getByRole("button", { name: BUTTONS.help, exact: true }).click();
+    await heard(page, script("helpVoice"));
+    await expect(headlineOf(page)).not.toHaveText(/^말씀하세요/);
+    await expect(headlineOf(page)).toHaveText(/띵 소리가 나면/);
+    await releaseTts(page);
+    await whenListening(page);
+    await expect(headlineOf(page)).toHaveText(/^말씀하세요/);
+  });
+
+  test("A7 듣는 중 큰 단추의 테두리 색은 단추 배경과 다르다", async ({ page }) => {
+    await openLive(page);
+    await startAndListen(page);
+    await expect(surface(page)).toHaveAttribute("data-live-mic", "on");
+    const colors = await bigButton(page).evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, border: cs.borderTopColor, width: cs.borderTopWidth, style: cs.borderTopStyle };
+    });
+    expect(colors.border).not.toBe(colors.bg);
+    expect(colors.style).toBe("solid");
+    expect(Number.parseFloat(colors.width)).toBeGreaterThanOrEqual(8);
+  });
+
+  test("A5 연결하는 동안 큰 단추는 눌러도 받지 못했다는 취소음이 나고 상태는 그대로다", async ({ page }) => {
+    await openLive(page, { realtime: true, clock: true });
+    await startConversation(page);
+    await expect.poll(() => page.evaluate(() => window.__fakeLive.rtc.channels), POLL).toBe(1); // 데이터 채널이 아직 안 열렸다
+    await expectState(page, "connecting");
+    await page.clock.pauseAt((await fakeNow(page)) + 100); // 시계를 세워 연결이 시간 초과로 넘어가지 않게 한다
+    await expect(bigButton(page)).toHaveAttribute("aria-disabled", "true");
+    expect(await earconsOf(page)).not.toContain("cancel");
+    await page.keyboard.press("Space");
+    await expect.poll(() => earconsOf(page), POLL).toContain("cancel");
+    await expectState(page, "connecting");
+    // 작은 단추([도움말])도 같다. 연결이 끝나기 전에는 안내를 읽지 않는다.
+    const cancelsBefore = (await earconsOf(page)).filter((n) => n === "cancel").length;
+    await expect(page.getByRole("button", { name: BUTTONS.help, exact: true })).toHaveAttribute("aria-disabled", "true");
+    await page.getByRole("button", { name: BUTTONS.help, exact: true }).click({ force: true }); // aria-disabled여도 눌린다(실제 누름과 같다)
+    await expect.poll(async () => (await earconsOf(page)).filter((n) => n === "cancel").length, POLL).toBe(cancelsBefore + 1);
+    expect(await heardCount(page, script("helpVoice"))).toBe(0);
+  });
+
+  test("A18 글자 모드에서 AI 말을 읽는 중 [입력 보내기]와 Enter는 읽기를 끊고 그 글을 보낸다", async ({ page }) => {
+    const live = await openLive(page, { speech: false });
+    await startConversation(page);
+    await expectState(page, "listening");
+    const input = page.getByLabel(BUTTONS.textInput, { exact: true });
+    await holdTts(page);
+    await input.fill(ANSWERS[0]);
+    await input.press("Enter");
+    await expect.poll(() => live.chat.length, POLL).toBe(1);
+    await expectState(page, "speaking");
+    await heard(page, /^어떤 점이 궁금하세요/);
+    await expect(page.getByRole("button", { name: BUTTONS.sendText, exact: true })).not.toHaveAttribute("aria-disabled", "true");
+
+    const cancelsBefore = await cancels(page);
+    await input.fill(ANSWERS[1]);
+    await page.getByRole("button", { name: BUTTONS.sendText, exact: true }).click(); // 읽는 중에 보낸다
+    await expect.poll(() => live.chat.length, POLL).toBe(2);
+    expect(live.chat[1].message).toBe(ANSWERS[1]);
+    expect(await cancels(page)).toBeGreaterThan(cancelsBefore);
+    await expect(input).toHaveValue("");
+    await releaseTts(page);
+  });
+
+  test("A8 글자 모드에서 요약을 읽는 중에는 글이 칸에 남고 취소음이 나며, 접수되지 않는다", async ({ page }) => {
+    const live = await openLive(page, { speech: false });
+    await startConversation(page);
+    await expectState(page, "listening");
+    const input = page.getByLabel(BUTTONS.textInput, { exact: true });
+    for (const answer of ANSWERS.slice(0, 2)) {
+      await input.fill(answer);
+      await input.press("Enter");
+      await expect.poll(() => live.chat.length, POLL).toBe(ANSWERS.indexOf(answer) + 1);
+      await expectState(page, "listening");
+    }
+    await holdTts(page);
+    await input.fill(ANSWERS[2]);
+    await input.press("Enter");
+    await heard(page, CONFIRM_RE);
+    await expectState(page, "speaking"); // 요약을 읽는 중이다
+    const cancelsBefore = (await earconsOf(page)).filter((n) => n === "cancel").length;
+    await expect(page.getByRole("button", { name: BUTTONS.sendText, exact: true })).toHaveAttribute("aria-disabled", "true");
+    await input.fill("네");
+    await input.press("Enter");
+    await expect.poll(async () => (await earconsOf(page)).filter((n) => n === "cancel").length, POLL).toBe(cancelsBefore + 1);
+    await expect(input).toHaveValue("네"); // 글은 그대로
+    expect(live.register).toHaveLength(0);
+    await expectState(page, "speaking");
+
+    await releaseTts(page); // 요약을 끝까지 들으면 확인 상태가 되고, 그때 낸 '네'로 접수된다
+    await expectState(page, "confirming");
+    await input.press("Enter");
+    await expectState(page, "done");
+    expect(live.register).toHaveLength(1);
+  });
+
+  test("A22 접수가 안 됐을 때 안내는 닿을 수 없는 단추를 부르지 않고 띵 소리 뒤 말하라고 한다", async ({ page }) => {
+    const live = await openLive(page);
+    live.registerPlan.push(failWith(503, "unavailable"), failWith(503, "unavailable"), failWith(503, "unavailable"));
+    await reachConfirm(page);
+    await sayLive(page, "네");
+    await heard(page, script("registerRetry"));
+    expect(script("registerRetry")).not.toContain(BUTTONS.consent);
+    expect(script("registerUnknown")).not.toContain(BUTTONS.consent);
+    expect(script("registerRetry")).toContain("띵 소리가 난 뒤");
+    await whenListening(page); // 읽기가 끝나면 마이크가 열린다
+  });
+
+  test("A37 오늘 이용량이 다 찬 오류의 큰 단추는 [처음 화면]이고 Space로 처음 화면에 간다", async ({ page }) => {
+    const live = await openLive(page);
+    live.chatPlan.push(failWith(429, "daily_cap"));
+    await startAndListen(page);
+    await sayLive(page, ANSWERS[0]);
+    await heard(page, script("dailyCap"));
+    await expectState(page, "error");
+    await expect(bigButton(page)).toHaveAccessibleName(BUTTONS.home);
+    await expect(bigButton(page)).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect.poll(() => new URL(page.url()).pathname, POLL).toBe("/");
   });
   // __APPEND__
 });

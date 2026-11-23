@@ -64,24 +64,26 @@ export function hasQuestion(text: string): boolean {
 }
 
 const YES = new Set(["네", "네네", "넵", "예", "예예", "응", "그래", "그래요", "좋아", "좋아요", "좋습니다", "맞아", "맞아요", "맞습니다", "오케이", "ok"]);
-const SEND = /^(보내|등록|접수|전달)(해|해요|해줘|해줘요|해주세요|줘|줘요|주세요|요)?$/;
-const FILLER = new Set(["이대로", "그대로", "그렇게", "그걸로", "다시", "해", "줘", "주세요", "해주세요", "해줘", "부탁해", "부탁해요", "부탁드려요", "음", "어", "아", "그럼", "그러면", "해요", "하세요", "해줘요"]);
+const SEND = /^(보내|등록|접수|전달)(해|해요|해줘|해줘요|해주세요|줘|줘요|주세요|주십시오|세요|요)?$/;
+const FILLER = new Set(["이대로", "그대로", "그렇게", "그걸로", "다시", "해", "줘", "주세요", "해주세요", "해줘", "부탁해", "부탁해요", "부탁드려요", "부탁드립니다", "부탁합니다", "주십시오", "해주십시오", "음", "어", "아", "그럼", "그러면", "해요", "하세요", "해줘요"]);
 // "그렇게 해 주세요", "이대로 부탁해요"처럼 가리키는 말 + 해 달라는 말이 함께 있으면 동의다(실호출 2026-11-24: 이 말이 동의로 잡히지 않아 대화가 헛돌았다).
 const DEICTIC = new Set(["이대로", "그대로", "그렇게", "그걸로"]);
-const DO_IT = new Set(["해", "해요", "해줘", "해줘요", "해주세요", "하세요", "주세요", "줘", "부탁해", "부탁해요", "부탁드려요"]);
-const POLITE = new Set(["주시면", "주면", "돼요", "됩니다", "되겠어요", "해도", "좋겠어요", "감사합니다", "고마워요"]);
+const DO_IT = new Set(["해", "해요", "해줘", "해줘요", "해주세요", "하세요", "주세요", "줘", "부탁해", "부탁해요", "부탁드려요", "부탁드립니다", "부탁합니다", "주십시오", "해주십시오"]);
+// '괜찮아요'·'됐어요'는 혼자 쓰면 거절일 수 있다. FILLER가 아니라 POLITE에만 두어, 앞에 YES·SEND가 있고 AI도 동의로 본 경우에만 통과시킨다.
+const POLITE = new Set(["주시면", "주면", "돼요", "됩니다", "되겠어요", "해도", "좋겠어요", "감사합니다", "고마워요", "괜찮아요", "괜찮습니다", "됐어요", "됐습니다", "할게요"]);
 const NEGATIVE = /아니|아뇨|안\s?돼|지\s?마|말고|말아|잠깐|잠시|바꿔|바꿀|바꾸|고쳐|고칠|고치|수정|취소|틀렸|틀려|근데|그런데|하지만|대신|그리고|추가|또/;
 const ECHO = /버튼|단추|링크|흐리게|선택됨|머리말|텍스트\s?필드/;   // 화면 낭독이 덧붙이는 말
 export const CONSENT_PLAUSIBLE_MAX = 40;
 
-/** 토큰: NFKC, 소문자로 바꾸고 공백과 문장부호(, . ! ? ~ …)로 나눈다. 이웃한 두 토큰을 붙이면 SEND인 것은 하나로 본다. */
+/** 토큰: NFKC, 소문자로 바꾸고 공백과 문장부호(, . ! ? ~ …)로 나눈다. 이웃한 두 토큰을 붙이면 SEND이거나 동의 낱말 표(FILLER, DO_IT, POLITE)에 있는 것은 하나로 본다("부탁 드립니다"). */
 function consentTokens(text: string): string[] {
   const raw = text.normalize("NFKC").toLowerCase().split(/[\s,.!?~…]+/).filter(Boolean);
   const out: string[] = [];
   for (let i = 0; i < raw.length; i++) {
     const next = raw[i + 1];
-    if (next !== undefined && SEND.test(raw[i] + next)) {
-      out.push(raw[i] + next);
+    const joined = next === undefined ? "" : raw[i] + next;
+    if (next !== undefined && (SEND.test(joined) || FILLER.has(joined) || DO_IT.has(joined) || POLITE.has(joined))) {
+      out.push(joined);
       i++;
     } else {
       out.push(raw[i]);
@@ -118,6 +120,15 @@ export function isPlausibleConsent(text: string): boolean {
   if (tokens.length === 0) return false;
   if (!tokens.every((t) => isAffirm(t) || FILLER.has(t) || POLITE.has(t))) return false;
   return hasAffirm(tokens);
+}
+
+const DECLINE = /^(?:아니요?|아뇨|아니오|아냐|아니에요|아니야)?(?:계속(?:할게요?|해요?|하겠습니다|할래요?|해줘요?)?|안끝낼래요?|끝내지마(?:세요)?)?$/;
+
+/** "끝낼까요?"에 대한 "아니요"·"계속할게요". 글 전체가 거절이나 계속하겠다는 말일 때만 참이다. 다른 말이 섞이면 거짓. */
+export function isDecline(text: string): boolean {
+  if (hasQuestion(text)) return false;
+  const n = normalizeSpeech(text);
+  return n !== "" && DECLINE.test(n);
 }
 
 const ROLE_WORDS = ["흐리게표시됨", "선택됨", "머리말", "버튼", "단추", "링크"];
