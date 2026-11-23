@@ -217,9 +217,12 @@ test.describe("/live 음성 도우미 화면", () => {
 
   test("22절 나 초점이 body일 때 Space를 누르면 대화가 시작된다", async ({ page }) => {
     await openLive(page);
+    // 화면이 준비되면 초점이 큰 단추로 온다. 그 뒤에 초점을 빼야 한다(준비 전에 빼면 뒤늦게 큰 단추로 초점이 돌아와,
+    // 전체 실행이 느릴 때 아래 단언이 가끔 실패했다. 2026-11-24 전체 화면 시험 1회).
+    await expect(bigButton(page)).toBeFocused();
     await holdTts(page);
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body), POLL).toBe(true);
     await page.keyboard.press("Space");
     await expectState(page, "guiding");
     await heard(page, new RegExp(`^${script("guideFirstVoice")}`));
