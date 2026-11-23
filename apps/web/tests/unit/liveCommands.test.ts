@@ -155,6 +155,36 @@ describe("isCardEcho", () => {
   it("draft가 없으면 거짓이다", () => {
     expect(isCardEcho("제품은 무선 이어폰", null)).toBe(false);
   });
+
+  // Codex 3차 지적 1: 60% 기준에서는 아래 첫 문장이 메아리로 판정돼 이용자의 수정이 버려졌다.
+  const sony = toDraft({ product: "소니 헤드폰", info: "노이즈 캔슬링 성능", options: "무선", budget: "20만 원" });
+  it("카드 낱말이 많아도 고치는 말, 새 낱말, 답하는 말, 물음은 거짓이다", () => {
+    expect(isCardEcho("소니 헤드폰 말고 보스 헤드폰", sony)).toBe(false);
+    expect(isCardEcho("소니 헤드폰 대신 보스 헤드폰", sony)).toBe(false);
+    expect(isCardEcho("예산 30만 원", sony)).toBe(false); // 새 금액
+    expect(isCardEcho("소니 헤드폰 유선", sony)).toBe(false); // 새 낱말 하나(세 낱말 중)
+    expect(isCardEcho("소니 헤드폰 맞아요", sony)).toBe(false); // 답하는 말
+    expect(isCardEcho("소니 헤드폰은 무선인가요?", sony)).toBe(false); // 물음
+  });
+  it("카드 낱말만 있는 낭독은 참이고, 긴 낭독은 잘못 받아 적은 낱말 하나까지 봐준다", () => {
+    expect(isCardEcho("제품은 소니 헤드폰", sony)).toBe(true);
+    expect(isCardEcho("옵션은 무선 예산은 20만 원", sony)).toBe(true);
+    expect(isCardEcho("제품은 소니 헤드폰 알고 싶은 정보는 노이즈 캔슬린 성능", sony)).toBe(true); // 9낱말 중 1개
+    expect(isCardEcho("제품은 소니 헤드폰 알고 싶은 정보는 노이즈 캔슬린 성농", sony)).toBe(false); // 2개
+  });
+  it("카드 화면의 이름표(제품, 옵션, 예산)로 읽혀도 참이다", () => {
+    expect(isCardEcho("제품 소니 헤드폰", sony)).toBe(true);
+    expect(isCardEcho("옵션 무선 예산 20만 원", sony)).toBe(true);
+  });
+  it("카드 낱말만 쓰더라도 순서가 다르면 거짓이다(뒤집어 고치는 말)", () => {
+    const wired = toDraft({ product: "헤드폰", info: "", options: "유선 말고 무선", budget: "" });
+    expect(isCardEcho("옵션은 유선 말고 무선", wired)).toBe(true); // 카드에 있는 "말고"는 낭독이다
+    expect(isCardEcho("무선 말고 유선", wired)).toBe(false);
+    expect(isCardEcho("헤드폰 무선 말고 유선", wired)).toBe(false);
+  });
+  it("카드 밖 낱말이 하나뿐이어도 고치는 말이면 거짓이다", () => {
+    expect(isCardEcho("제품은 소니 헤드폰 말고 노이즈 캔슬링 성능", sony)).toBe(false);
+  });
 });
 
 describe("isDecline: '끝낼까요?'에 대한 거절(A36)", () => {

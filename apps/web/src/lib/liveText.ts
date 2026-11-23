@@ -58,6 +58,7 @@ export function readSlots(value: unknown): LiveSlots {
 // 실호출(2026-11-24, gpt-realtime-2.1-mini)에서 모델이 이용자가 하지 않은 말(지시문의 문장과 보기, 자기가 할 질문)을 칸에 섞어 넣는 일이 있었다.
 // 원칙: 이용자가 한 말일 수 있는 것은 지우지 않는다. 확인 요약을 읽어 주는 것이 안전장치이므로, 근거가 불확실한 문장은 남겨 이용자가 듣고 고치게 한다.
 // 지우는 것은 "이용자 말에 근거가 없고" 동시에 "지시문 표지가 있거나 물음표로 끝나는" 문장뿐이다(Codex 2차 지적 2·3).
+// 하나 더: 이용자에게 되묻는 말투의 물음("…원하세요?")은 모델이 한 말이므로, 이용자가 거의 그대로 말했을 때만 남긴다(Codex 3차 지적 3).
 
 /** 근거로 세지 않는 흔한 낱말의 앞 두 글자(어느 요청에나 나온다). */
 const GROUND_STOP = new Set(["알고", "싶어", "싶은", "궁금", "정보", "제품", "원하", "있는", "같은", "관련", "대한", "확인", "함께", "좋겠", "좋습", "가능", "여부", "조건", "옵션", "예산", "그리", "또는"]);
@@ -81,11 +82,43 @@ function sentenceGrounded(sentence: string, userFlat: string): boolean {
   return false;
 }
 
-/** 근거가 없으면서 지시문 표지가 있거나 물음표로 끝나는 문장만 뺀다. 나머지는 그대로 둔다. */
+/**
+ * 이용자에게 되묻는 말투의 물음: 높임 물음("…원하세요?", "…생각하시나요?"), 보낼지 묻기("등록할까요?"),
+ * 더 있는지 묻기("더 필요한 조건이 있나요?"). 되묻는 말은 모델이 한 말이다.
+ * 이용자가 알고 싶은 것을 적은 물음("방수가 되나요?", "얼마인가요?", "다른 색도 있나요?")은 해당하지 않는다.
+ */
+const ASK_USER =
+  /(?:세요|시나요|신가요|실까요|시겠어요|셨나요|십니까|드릴까요|(?:등록|접수|전달)할까요)\s*[?？]$|(?:^|\s)(?:더|또|추가로|다른)\s*(?:필요한|필요하신|궁금한|궁금하신|알고\s*싶은|알고\s*싶으신|원하는|원하시는|말씀하실|바라는|바라시는)\s.*[?？]$/;
+/** 되묻는 말투의 문장은 글자 쌍의 이 비율 이상이 이용자 말에 있을 때만 남긴다(이용자가 거의 그대로 말한 경우). */
+export const ASK_COVER = 0.6;
+
+/** 문장의 글자 쌍 가운데 이용자 말에 있는 비율(0~1). */
+function coverage(sentence: string, userFlat: string): number {
+  const s = flat(sentence);
+  if (s.length < 2) return 0;
+  let hit = 0;
+  for (let i = 0; i < s.length - 1; i++) if (userFlat.includes(s.slice(i, i + 2))) hit++;
+  return hit / (s.length - 1);
+}
+
+/**
+ * 문장을 남길지 정한다.
+ * - 되묻는 말투의 물음: 제품 이름처럼 낱말 하나가 겹치는 것만으로는 남기지 않는다(Codex 3차 지적 3:
+ *   이용자가 "소니 헤드폰"만 말했는데 "소니 헤드폰은 어떤 색을 원하세요?"가 정보 칸에 남았다). 거의 그대로 말했을 때만 남긴다.
+ * - 그 밖의 물음과 지시문 표지가 있는 문장: 이용자 말에 낱말이 하나라도 있으면 남긴다(바꿔 적은 것일 수 있다).
+ * - 표지도 물음표도 없는 문장: 지우지 않는다.
+ */
+function keepSentence(sentence: string, userFlat: string): boolean {
+  if (ASK_USER.test(sentence)) return coverage(sentence, userFlat) >= ASK_COVER;
+  if (LEAK_MARK.test(sentence) || /[?？]$/.test(sentence)) return sentenceGrounded(sentence, userFlat);
+  return true;
+}
+
+/** 지시문이 샌 문장과 모델이 되묻는 물음을 뺀다. 나머지는 그대로 둔다. */
 function dropLeaked(text: string, userFlat: string): string {
   if (!text) return text;
   const sentences = sentencesOf(text);
-  const kept = sentences.filter((s) => sentenceGrounded(s, userFlat) || !(LEAK_MARK.test(s) || /[?？]$/.test(s)));
+  const kept = sentences.filter((s) => keepSentence(s, userFlat));
   return kept.length === sentences.length ? text : kept.join(" ");
 }
 
@@ -133,6 +166,26 @@ export function tidySlots(slots: LiveSlots): LiveSlots {
   return { product: slots.product, info, options: dropBudget(slots.options), budget: slots.budget };
 }
 
+const NUMERAL = /[\d일이삼사오육칠팔구십백천만억]/;
+
+/**
+ * 예산 칸의 글이 다른 칸 글에 그대로 들어 있는가(공백·문장부호는 무시).
+ * "120만 원" 안의 "20만 원"처럼 숫자가 이어 붙은 자리는 같은 값이 아니다. 헷갈리면 거짓으로 답해 예산을 따로 읽게 한다.
+ */
+function saysBudget(text: string, budget: string): boolean {
+  const b = flat(budget);
+  if (!b) return true; // 읽을 예산 글이 없다
+  const t = flat(text);
+  for (let i = t.indexOf(b); i !== -1; i = t.indexOf(b, i + 1)) {
+    const before = t[i - 1] ?? "";
+    const after = t[i + b.length] ?? "";
+    if (NUMERAL.test(b[0]) && NUMERAL.test(before)) continue;
+    if (/\d/.test(b[b.length - 1]) && /\d/.test(after)) continue;
+    return true;
+  }
+  return false;
+}
+
 /** 앱이 칸으로 만드는 요약. 가장 긴 경우에도 SUMMARY_MAX 이하(299자)다. */
 export function summaryOf(slots: LiveSlots): string {
   const product = stripEnd(slots.product);
@@ -143,8 +196,9 @@ export function summaryOf(slots: LiveSlots): string {
   if (product) parts.push(`제품은 ${product}.`);
   if (info) parts.push(`알고 싶은 정보는 ${info}.`);
   if (options) parts.push(`옵션은 ${options}.`);
-  // 예산 글이 옵션 안에 그대로 들어 있으면 같은 말을 두 번 하지 않는다.
-  if (budget && !options.includes(budget) && !options.includes("예산") && !info.includes("예산")) parts.push(`예산은 ${budget}.`);
+  // 예산 칸의 값이 옵션·정보 글에 그대로 들어 있을 때만 따로 읽지 않는다(같은 말을 두 번 하지 않으려고).
+  // 값이 다르면 접수에 쓰는 예산 칸을 반드시 읽는다. 읽어 준 예산과 접수되는 예산이 달라지면 안 된다(Codex 3차 지적 2).
+  if (budget && !saysBudget(`${options} ${info}`, budget)) parts.push(`예산은 ${budget}.`);
   return parts.join(" ");
 }
 

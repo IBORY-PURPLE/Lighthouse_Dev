@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EngineEvent, LiveTurn } from "@/lib/liveEngine";
 import { createFallbackEngine, resetFallbackPageState } from "@/lib/liveFallbackEngine";
-import { SPEAK_RATES, createLiveSpeaker } from "@/lib/liveSpeaker";
+import { SPEAK_RATES, SPEAK_RATES_SAPI, createLiveSpeaker, speakGuardMs, usesSapiRates } from "@/lib/liveSpeaker";
 import {
   createWakeLock,
   newConversationId,
@@ -530,18 +530,28 @@ describe("liveSpeaker", () => {
     return { win: { speechSynthesis: synth, SpeechSynthesisUtterance: Utterance } as unknown as Window, spoken, synth };
   }
 
-  it("ko-KR로 읽고 onend와 onerror 둘 다 끝으로 본다", () => {
+  it("ko-KR로 읽고, onend는 끝으로 onerror는 읽지 못한 것으로 구별해 알린다", () => {
     const { win, spoken, synth } = fakeWin();
     const speaker = createLiveSpeaker(win);
-    const ended: string[] = [];
-    speaker.speak("a", "안녕하세요", (id) => ended.push(id));
+    const ended: Array<[string, boolean | undefined]> = [];
+    speaker.speak("a", "안녕하세요", (id, failed) => ended.push([id, failed]));
     expect(synth.speak).toHaveBeenCalledTimes(1);
     expect(spoken[0].lang).toBe("ko-KR");
     expect(spoken[0].rate).toBe(SPEAK_RATES.normal);
     spoken[0].onend?.();
-    speaker.speak("b", "다시", (id) => ended.push(id));
+    speaker.speak("b", "다시", (id, failed) => ended.push([id, failed]));
     spoken[1].onerror?.();
-    expect(ended).toEqual(["a", "b"]);
+    expect(ended).toEqual([["a", false], ["b", true]]);
+  });
+
+  it("speak가 던지면 읽지 못한 것으로 알린다", () => {
+    const { win, synth } = fakeWin();
+    synth.speak.mockImplementation(() => {
+      throw new Error("not-allowed");
+    });
+    const onEnd = vi.fn();
+    createLiveSpeaker(win).speak("a", "요약", onEnd);
+    expect(onEnd).toHaveBeenCalledWith("a", true);
   });
 
   it("speak는 호출 스택 안에서 바로 speechSynthesis.speak를 부른다", () => {
@@ -576,15 +586,23 @@ describe("liveSpeaker", () => {
     expect(onEnd).not.toHaveBeenCalled();
   });
 
-  it("끝남 신호가 없으면 글자 수 × 250ms + 3000ms 뒤에 끝으로 본다", () => {
+  it("끝남 신호가 없으면 감시 시간 뒤에 읽지 못한 것으로 알린다(다 읽었는지 알 수 없다)", () => {
     const { win } = fakeWin();
     const speaker = createLiveSpeaker(win);
     const onEnd = vi.fn();
-    speaker.speak("a", "가나다라마", onEnd); // 5자 → 4250ms
-    vi.advanceTimersByTime(4_249);
+    speaker.speak("a", "가나다라마", onEnd); // 5자, 보통 빠르기(0.95) → 1316 + 3000ms
+    expect(speakGuardMs(5, SPEAK_RATES.normal)).toBe(4_316);
+    vi.advanceTimersByTime(4_315);
     expect(onEnd).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(onEnd).toHaveBeenCalledWith("a");
+    expect(onEnd).toHaveBeenCalledWith("a", true);
+  });
+
+  it("감시 시간은 천천히 읽을 때 늘어나고 빠르게 읽을 때는 줄지 않는다", () => {
+    expect(speakGuardMs(100, SPEAK_RATES.slow)).toBe(34_250);
+    expect(speakGuardMs(100, SPEAK_RATES.fast)).toBe(28_000);
+    // 실제 Chrome 측정(글자당 190ms, 시작까지 1초)보다 넉넉해야 한다.
+    expect(speakGuardMs(287, SPEAK_RATES.normal)).toBeGreaterThan(287 * 190 + 1_000);
   });
 
   it("setRate는 다음 읽기부터 적용된다", () => {
@@ -603,8 +621,38 @@ describe("liveSpeaker", () => {
     const onEnd = vi.fn();
     speaker.speak("a", "안내", onEnd);
     vi.advanceTimersByTime(0);
-    expect(onEnd).toHaveBeenCalledWith("a");
+    expect(onEnd).toHaveBeenCalledWith("a", true); // 읽을 수단이 없어 읽지 못했다
     expect(() => speaker.stop()).not.toThrow();
+  });
+
+  it("읽을 글이 비어 있으면 읽지 못한 것이 아니라 끝난 것이다", () => {
+    const { win, synth } = fakeWin();
+    const onEnd = vi.fn();
+    createLiveSpeaker(win).speak("a", "", onEnd);
+    vi.advanceTimersByTime(0);
+    expect(synth.speak).not.toHaveBeenCalled();
+    expect(onEnd).toHaveBeenCalledWith("a", false);
+  });
+
+  it("Windows의 Chrome 계열에서는 빠르기가 실제로 달라지는 값을 쓴다", () => {
+    const chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+    expect(usesSapiRates(chrome)).toBe(true);
+    expect(usesSapiRates(chrome + " Edg/141.0.0.0")).toBe(false);
+    expect(usesSapiRates("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1")).toBe(false);
+    expect(usesSapiRates(undefined)).toBe(false);
+    // SAPI 단계 trunc(10 × log10(rate)): 천천히는 −2, 보통은 0, 빠르게는 +1이어야 한다. 옛 값(0.8, 1.15)은 모두 0이었다.
+    const step = (rate: number) => Math.trunc(10 * Math.log10(rate));
+    expect([step(SPEAK_RATES_SAPI.slow), step(SPEAK_RATES_SAPI.normal), step(SPEAK_RATES_SAPI.fast)]).toEqual([-2, 0, 1]);
+    expect([step(SPEAK_RATES.slow), step(SPEAK_RATES.fast)].map((n) => n + 0)).toEqual([0, 0]);
+
+    const { win, spoken } = fakeWin();
+    (win as unknown as { navigator: { userAgent: string } }).navigator = { userAgent: chrome };
+    const speaker = createLiveSpeaker(win);
+    speaker.setRate("slow");
+    speaker.speak("a", "천천히", () => {});
+    speaker.setRate("fast");
+    speaker.speak("b", "빠르게", () => {});
+    expect([spoken[0].rate, spoken[1].rate]).toEqual([SPEAK_RATES_SAPI.slow, SPEAK_RATES_SAPI.fast]);
   });
 });
 

@@ -129,7 +129,7 @@ interface Harness {
   calls: string[];                 // 부른 순서(신호음, 펄스, 읽기)
   played: EarconName[];
   spoken: { id: string; text: string }[];
-  finishSpeak(): void;
+  finishSpeak(failed?: boolean): void;
   announced: { channel: string; text: string }[];
   rates: string[];
   streamRequests: ((s: MediaStream | undefined) => void)[];
@@ -157,7 +157,7 @@ function harness(opts: { tts?: boolean; instantSpeak?: boolean } = {}): Harness 
   const wake: boolean[] = [];
   const focuses: string[] = [];
   const storage = fakeStorage();
-  let endSpeak: (() => void) | null = null;
+  let endSpeak: ((failed?: boolean) => void) | null = null;
 
   const deps: LiveRunnerDeps = {
     createEngine(kind) {
@@ -171,7 +171,7 @@ function harness(opts: { tts?: boolean; instantSpeak?: boolean } = {}): Harness 
         calls.push(`speak:${id}`);
         spoken.push({ id, text });
         if (opts.instantSpeak) onEnd(id);
-        else endSpeak = () => onEnd(id);
+        else endSpeak = (failed) => onEnd(id, failed);
       },
       stop() { calls.push("stopSpeak"); endSpeak = null; },
       setRate(r) { rates.push(r); },
@@ -208,7 +208,7 @@ function harness(opts: { tts?: boolean; instantSpeak?: boolean } = {}): Harness 
   return {
     runner, engines, timers, calls, played, spoken, announced, rates, streamRequests, registerCalls, pushes,
     storage, wake, focuses,
-    finishSpeak() { const f = endSpeak; endSpeak = null; f?.(); },
+    finishSpeak(failed) { const f = endSpeak; endSpeak = null; f?.(failed); },
     async resolveRegister(r) { registerResolvers.shift()?.(r); await flush(); },
     state: () => runner.getState(),
   };
@@ -627,5 +627,46 @@ describe("실행기: 정리", () => {
     expect(h.engines[0].closed).toBeGreaterThan(0);
     expect(track.stopped).toBeGreaterThan(0);
     expect(h.wake.at(-1)).toBe(false);
+  });
+});
+
+// Codex 3차 지적 4: 낭독 오류는 끝까지 읽은 것과 구별해 상태 기계에 전한다.
+describe("기기 목소리가 읽지 못했을 때", () => {
+  it("확인 요약을 읽지 못하면 다시 읽고, 또 못 읽으면 알림으로 전한 뒤에야 동의를 받는다", async () => {
+    const h = harness();
+    const engine = reachListening(h);
+    engine.emit({ type: "USER_TURN_END", text: "전기밥솥 알려줘", transcribed: true });
+    engine.emit({ type: "TURN_RESULT", reply: "확인해요", status: "confirming", slots: SLOTS });
+    const reading = h.spoken.at(-1);
+    expect(reading?.id).toBe("confirm");
+    const text = reading?.text ?? "";
+    const count = h.spoken.length;
+
+    h.finishSpeak(true); // 낭독 오류
+    expect(h.state().phase).toBe("speaking");
+    expect(h.state().awaitingConsent).toBe(false);
+    expect(h.spoken).toHaveLength(count + 1);
+    expect(h.spoken.at(-1)).toEqual({ id: "confirm", text });
+
+    h.finishSpeak(true); // 다시 읽기도 오류
+    expect(h.state().phase).toBe("speaking");
+    expect(h.state().awaitingConsent).toBe(false);
+    expect(h.spoken).toHaveLength(count + 1);
+    expect(h.played.at(-1)).toBe("cancel");
+    expect(h.announced.at(-1)).toEqual({ channel: "status", text });
+
+    await h.timers.advance(text.length * 250 + 1000 - 1);
+    expect(h.state().phase).toBe("speaking");
+    await h.timers.advance(1);
+    expect(h.state().phase).toBe("confirming");
+    expect(h.state().awaitingConsent).toBe(true);
+  });
+
+  it("끝까지 읽으면 실패 표시 없이 평소대로 간다", () => {
+    const h = harness();
+    reachConfirming(h);
+    expect(h.state().phase).toBe("confirming");
+    expect(h.state().awaitingConsent).toBe(true);
+    expect(h.played).not.toContain("cancel");
   });
 });

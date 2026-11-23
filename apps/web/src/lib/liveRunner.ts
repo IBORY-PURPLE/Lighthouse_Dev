@@ -292,15 +292,15 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
     deps.setAudioSession("playback");
     speakingId = id;
     try {
-      deps.speaker.speak(id, text, (endedId) => {
+      deps.speaker.speak(id, text, (endedId, failed) => {
         if (speakingId === endedId) speakingId = null;
         if (pulseWanted && speakingId === null) startPulse();
-        dispatch({ type: "SPEAK_END", id: endedId });
+        dispatch(failed ? { type: "SPEAK_END", id: endedId, failed: true } : { type: "SPEAK_END", id: endedId });
       });
     } catch {
-      // 읽기를 시작하지 못하면 끝난 것으로 보고 이어 간다.
+      // 읽기를 시작하지 못했다. 읽지 못한 것으로 알린다(상태 기계가 화면 낭독기 알림으로 대신 전한다).
       speakingId = null;
-      dispatch({ type: "SPEAK_END", id });
+      dispatch({ type: "SPEAK_END", id, failed: true });
     }
   }
 

@@ -62,6 +62,8 @@ export interface LiveState {
   inputMode: InputMode;               // "voice" | "text"
   tts: boolean;                       // speechSynthesis를 쓸 수 있다
   speaking: string | null;            // 지금 기기 목소리로 읽는 대본 id
+  speakingText: string | null;        // 기기 목소리로 읽는 글. 읽지 못하면 화면 낭독기 알림으로 대신 전한다
+  speakRetried: boolean;              // 이 글을 기기 목소리로 한 번 더 읽어 보았다
   mic: "off" | "on" | "held";         // held: 단추를 찾는 동안 잠시 닫음
   micOnce: boolean;                   // 이 페이지에서 듣기가 한 번이라도 실제로 시작됐다
   hidden: boolean;                    // 화면이 숨겨져 있다(HIDDEN·VISIBLE)
@@ -101,7 +103,7 @@ export type LiveEvent =
   | { type: "START" }
   | EngineEvent                                        // 6절
   | { type: "MIC_READY" } | { type: "MIC_DENIED" }     // Realtime용 마이크 요청 결과(실행기가 넣는다)
-  | { type: "SPEAK_END"; id: string }                  // 기기 목소리 읽기가 끝남
+  | { type: "SPEAK_END"; id: string; failed?: boolean }                  // 기기 목소리 읽기가 끝남
   | { type: "MAIN_BUTTON" } | { type: "CONSENT_BUTTON" } | { type: "EDIT_BUTTON" }
   | { type: "REPEAT" } | { type: "HELP" } | { type: "PAUSE" } | { type: "RESUME" } | { type: "RATE_BUTTON" }
   | { type: "EXIT" } | { type: "CONTINUE" } | { type: "NEW_REQUEST"; cid: string } | { type: "RETRY" }
@@ -164,6 +166,8 @@ export function createInitialLive(o: {
     inputMode: o.speechAvailable ? "voice" : "text",
     tts: o.tts,
     speaking: null,
+    speakingText: null,
+    speakRetried: false,
     mic: "off",
     micOnce: false,
     hidden: false,
@@ -239,6 +243,8 @@ function say(c: Cx, id: string, text: string, channel: "status" | "alert" = "sta
   if (c.s.tts) c.fx.push({ type: "SPEAK", id, text });
   else c.fx.push({ type: "ANNOUNCE", channel, text, endId: id });
   c.s.speaking = id;
+  c.s.speakingText = c.s.tts ? text : null;
+  c.s.speakRetried = false;
 }
 function sayScript(c: Cx, id: ScriptId, vars?: { n?: number; s?: number; summary?: string }): void {
   say(c, id, script(id, vars));
@@ -249,6 +255,7 @@ const confirmText = (s: LiveState, id: "confirmAgain" | "confirmRetell") =>
 function stopSpeak(c: Cx): void {
   c.fx.push({ type: "STOP_SPEAK" });
   c.s.speaking = null;
+  c.s.speakingText = null;
 }
 
 /** 시작한 엔진 종류. 시작 때 정해진 두 값으로 다시 구한다. */
@@ -1200,10 +1207,27 @@ function onReplyEnd(c: Cx): void {
   }
 }
 
-function onSpeakEnd(c: Cx, id: string): void {
+function onSpeakEnd(c: Cx, id: string, failed = false): void {
   const s = c.s;
   if (id !== s.speaking) return;   // 낡은 SPEAK_END는 버린다
+  // 기기 목소리가 읽지 못했다(낭독 오류, 끝남 신호 없음). 들은 것으로 치지 않는다(Codex 3차 지적 4).
+  // 동의 관문 앞의 요약은 기기 목소리로 한 번 더 읽어 본다. 그래도 안 되거나 다른 글이면 취소음을 내고
+  // 같은 글을 화면 낭독기 알림으로 전한 뒤 그 길이만큼 기다린다. 그 알림이 끝나면 SPEAK_END가 다시 온다(이때는 failed가 아니다).
+  if (failed) {
+    const text = s.speakingText;
+    if (text === null) return;   // 이미 알림으로 전하는 중이다. 그 알림의 끝을 기다린다(실패 신호로는 관문을 열지 않는다).
+    if (id === "confirm" && !s.speakRetried) {
+      s.speakRetried = true;
+      c.fx.push({ type: "SPEAK", id, text });
+      return;
+    }
+    s.speakingText = null;
+    c.fx.push({ type: "EARCON", name: "cancel" });
+    c.fx.push({ type: "ANNOUNCE", channel: "status", text, endId: id });
+    return;
+  }
   s.speaking = null;
+  s.speakingText = null;
   switch (s.phase) {
     case "guiding":
       c.fx.push({ type: "VISIT_MARK" });
@@ -1527,7 +1551,7 @@ function step(c: Cx, e: LiveEvent): void {
       return;
 
     case "SPEAK_END":
-      onSpeakEnd(c, e.id);
+      onSpeakEnd(c, e.id, e.failed === true);
       return;
 
     case "MAIN_BUTTON":

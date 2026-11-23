@@ -356,6 +356,35 @@ test.describe("/live 음성 도우미 화면", () => {
     expect(live.chat).toHaveLength(5);
   });
 
+  test("낭독 오류: 확인 요약을 읽지 못하면 다시 읽고, 또 못 읽으면 알림으로 전한 뒤에야 동의를 받는다", async ({ page }) => {
+    const live = await openLive(page);
+    await startAndListen(page);
+    await sayLive(page, ANSWERS[0]);
+    await sayLive(page, ANSWERS[1]);
+    await whenListening(page);
+    // 다음 두 번의 읽기(확인 요약, 다시 읽기)가 오류로 끝난다.
+    await page.evaluate(() => {
+      window.__fakeLive.tts.failNext = 2;
+    });
+    await sayLive(page, ANSWERS[2]);
+    const confirms = async () => heardCount(page, CONFIRM_RE);
+    await expect.poll(confirms, POLL).toBe(2); // 한 번 더 읽어 보았다
+    const text = (await spokenOf(page)).filter((t) => CONFIRM_RE.test(t)).at(-1) ?? "";
+    // 두 번 다 읽지 못했다: 취소음이 나고, 요약이 화면 낭독기 알림으로 간다. 아직 동의를 받지 않는다.
+    await expect.poll(() => earconsOf(page), POLL).toContain("cancel");
+    await expect.poll(() => announcedOf(page), POLL).toContain(text);
+    await expectState(page, "speaking");
+    await expect(surface(page)).toHaveAttribute("data-live-mic", "off");
+    expect(await page.evaluate(() => window.__fakeLive.rec.listening)).toBe(false);
+    expect(live.register).toHaveLength(0);
+    // 알림 길이만큼 기다린 뒤에야 확인 상태가 되고 차례가 열린다(글자 수 × 250ms + 1초).
+    await expect(surface(page)).toHaveAttribute("data-live-state", "confirming", { timeout: text.length * 250 + 20_000 });
+    expect(await confirms()).toBe(2);
+    await sayLive(page, "네");
+    await expectState(page, "done");
+    expect(live.register).toHaveLength(1);
+  });
+
   test("사례 4 AI를 거친 접수", async ({ page }) => {
     const live = await openLive(page);
     await reachConfirm(page);

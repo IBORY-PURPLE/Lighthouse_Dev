@@ -24,6 +24,8 @@ export interface FakeLive {
     cancels: number;
     /** 읽기 요청마다 받은 빠르기(rate) */
     rates: number[];
+    /** 0보다 크면 다음 읽기들이 끝남이 아니라 오류(onerror)로 끝난다. 한 번마다 1씩 준다 */
+    failNext: number;
     finish(): void;
   };
   rec: {
@@ -98,6 +100,7 @@ export async function installFakeLive(page: Page, options: FakeLiveOptions = {})
       hold: false,
       cancels: 0,
       rates: [] as number[],
+      failNext: 0,
       finish() {
         const u = current;
         if (!u) return;
@@ -122,6 +125,15 @@ export async function installFakeLive(page: Page, options: FakeLiveOptions = {})
             spoken.push(u.text);
             tts.rates.push(u.rate);
             current = u;
+            if (tts.failNext > 0) {
+              tts.failNext -= 1;
+              setTimeout(() => {
+                if (current !== u) return;
+                current = null;
+                u.onerror?.();
+              }, 0);
+              return;
+            }
             if (!tts.hold) {
               setTimeout(() => {
                 if (current !== u) return;

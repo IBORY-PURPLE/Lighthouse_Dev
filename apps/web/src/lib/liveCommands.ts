@@ -153,22 +153,46 @@ export function isScreenReaderEcho(text: string): boolean {
   return SCREEN_TEXTS.has(n) && matchLocalCommand(text) === null;
 }
 
-export const CARD_ECHO_RATIO = 0.6;
+/** 카드 낭독으로 보려면 낱말의 이 비율 이상이 요약 글에 순서대로 있어야 한다. */
+export const CARD_ECHO_RATIO = 0.8;
+/** 받아 적기 오류로 봐 줄 수 있는 카드 밖 낱말 수. 둘 이상이면 이용자가 새로 한 말로 본다. */
+export const CARD_ECHO_STRAY_MAX = 1;
 
 function cardTokens(text: string): string[] {
   return text.normalize("NFKC").toLowerCase().split(/[\s\p{P}\p{S}]+/u).filter(Boolean);
 }
 
-/** 확인 상태에서 카드 글을 쓸어 넘기며 읽는 낭독이 이용자 말로 들어온 것을 거른다. draft가 없으면 거짓. */
+/** 요약 문장의 줄 머리("제품은")는 카드 화면의 이름표("제품")로 읽혀도 같은 낱말로 본다. */
+const CARD_LABELS = new Set(["제품은", "정보는", "옵션은", "예산은"]);
+const sameCardToken = (said: string, card: string) => said === card || (CARD_LABELS.has(card) && said === card.slice(0, -1));
+
+/**
+ * 확인 상태에서 카드 글을 쓸어 넘기며 읽는 낭독이 이용자 말로 들어온 것을 거른다. draft가 없으면 거짓.
+ * 이용자 말을 버리는 판정이라 좁게 잡는다(Codex 3차 지적 1: "소니 헤드폰 말고 보스 헤드폰"이 60% 기준에 걸려 버려졌다).
+ * - 물음, 동의로 읽히는 말은 메아리가 아니다.
+ * - 요약 글의 낱말 순서대로 나온 낱말만 카드 낱말로 센다. 낭독은 카드를 순서대로 읽지만 고치는 말은 순서가 다르다("무선 말고 유선").
+ * - 카드 밖 낱말이 둘 이상이거나, 하나라도 고치는 말(말고, 바꿔, 아니…)이거나, 카드 낱말이 80% 미만이면 메아리가 아니다.
+ *   새 낱말(다른 제품, 다른 금액)은 고치려는 말일 수 있다.
+ */
 export function isCardEcho(text: string, draft: LiveDraft | null): boolean {
   if (!draft) return false;
   const tokens = cardTokens(text);
   if (tokens.length < 2) return false;
-  const card = new Set(
-    cardTokens(
-      [draft.summary, draft.product, draft.info, draft.options, draft.budget, "제품", "알고 싶은 정보", "옵션", "예산"].join(" "),
-    ),
-  );
-  const hit = tokens.filter((t) => card.has(t)).length;
+  if (hasQuestion(text) || isClearConsent(text) || isPlausibleConsent(text)) return false;
+  const card = cardTokens(draft.summary);
+  const stray: string[] = [];
+  let at = 0;
+  let hit = 0;
+  for (const token of tokens) {
+    let found = -1;
+    for (let i = at; i < card.length && found === -1; i++) if (sameCardToken(token, card[i])) found = i;
+    if (found === -1) {
+      stray.push(token);
+    } else {
+      hit += 1;
+      at = found + 1;
+    }
+  }
+  if (stray.length > CARD_ECHO_STRAY_MAX || stray.some((t) => NEGATIVE.test(t))) return false;
   return hit / tokens.length >= CARD_ECHO_RATIO;
 }

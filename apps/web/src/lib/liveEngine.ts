@@ -63,7 +63,8 @@ export interface EarconPlayer { unlock(): void; play(name: EarconName): Promise<
 
 export interface LiveSpeaker {
   readonly available: boolean;
-  speak(id: string, text: string, onEnd: (id: string) => void): void;  // 앞의 읽기는 끊는다
+  // 앞의 읽기는 끊는다. failed가 참이면 읽지 못했거나 끝까지 읽었는지 알 수 없다(낭독 오류, 끝남 신호 없음).
+  speak(id: string, text: string, onEnd: (id: string, failed?: boolean) => void): void;
   stop(): void;
   setRate(rate: "slow" | "normal" | "fast"): void;
 }

@@ -2327,3 +2327,74 @@ describe("5.11 불변식 4: 끝없이 도는 길이가 없다", () => {
 });
 
 type ScriptName = Parameters<typeof script>[0];
+
+// Codex 3차 지적 4: 낭독 오류를 "요약을 들었다"로 처리하면 안 된다.
+describe("기기 목소리가 읽지 못했을 때", () => {
+  const speakFailed = (s: LiveState): LiveEvent => ({ type: "SPEAK_END", id: s.speaking as string, failed: true });
+
+  it("확인 요약 낭독이 실패하면 동의 관문을 열지 않고 한 번 더 읽는다", () => {
+    const a = atSpeakingConfirm();
+    expect(a.state.speaking).toBe("confirm");
+    const b = run(a.state, speakFailed(a.state));
+    expect(b.state.phase).toBe("speaking");
+    expect(b.state.awaitingConsent).toBe(false);
+    expect(ofType(b.effects, "SPEAK").map((f) => [f.id, f.text])).toEqual([["confirm", CONFIRM]]);
+    expect(types(b.effects)).not.toContain("OPEN_TURN");
+    expect(canRegister(b.state, "speech", "네")).toBe(false);
+    expect(canRegister(b.state, "button")).toBe(false);
+  });
+
+  it("다시 읽기가 성공하면 평소대로 관문을 연다", () => {
+    const a = atSpeakingConfirm();
+    const b = run(a.state, speakFailed(a.state));
+    const c = run(b.state, speakEnd(b.state));
+    expect(c.state.phase).toBe("confirming");
+    expect(c.state.awaitingConsent).toBe(true);
+    expect(types(c.effects)).toContain("OPEN_TURN");
+  });
+
+  it("다시 읽기도 실패하면 취소음과 화면 낭독기 알림으로 요약을 전하고, 그 알림이 끝난 뒤에야 관문을 연다", () => {
+    const a = atSpeakingConfirm();
+    const b = run(a.state, speakFailed(a.state));
+    const c = run(b.state, speakFailed(b.state));
+    expect(c.state.phase).toBe("speaking");
+    expect(c.state.awaitingConsent).toBe(false);
+    expect(spoken(c.effects)).toEqual([]);
+    expect(ofType(c.effects, "EARCON").map((f) => f.name)).toEqual(["cancel"]);
+    expect(ofType(c.effects, "ANNOUNCE")).toEqual([{ type: "ANNOUNCE", channel: "status", text: CONFIRM, endId: "confirm" }]);
+    expect(types(c.effects)).not.toContain("OPEN_TURN");
+    // 알림으로 전하는 중에 실패 신호가 또 와도 관문을 열지 않는다.
+    const stray = run(c.state, speakFailed(c.state));
+    expect(stray.state.phase).toBe("speaking");
+    expect(stray.state.awaitingConsent).toBe(false);
+    expect(stray.effects).toEqual([]);
+    // 알림이 끝나면(실패 아님) 확인 상태로 가고 차례가 열린다.
+    const d = run(stray.state, speakEnd(stray.state));
+    expect(d.state.phase).toBe("confirming");
+    expect(d.state.awaitingConsent).toBe(true);
+    expect(types(d.effects)).toContain("OPEN_TURN");
+  });
+
+  it("다른 글(첫 안내)은 다시 읽지 않고 알림으로 전한 뒤 이어 간다", () => {
+    const r = run(mk(), { type: "CONFIG", realtime: false }, { type: "START" });
+    expect(r.state.phase).toBe("guiding");
+    const id = r.state.speaking as string;
+    const text = ofType(r.effects, "SPEAK").at(-1)?.text ?? "";
+    expect(text).not.toBe("");
+    const b = run(r.state, speakFailed(r.state));
+    expect(b.state.phase).toBe("guiding");
+    expect(spoken(b.effects)).toEqual([]);
+    expect(ofType(b.effects, "EARCON").map((f) => f.name)).toEqual(["cancel"]);
+    expect(ofType(b.effects, "ANNOUNCE")).toEqual([{ type: "ANNOUNCE", channel: "status", text, endId: id }]);
+    const c = run(b.state, speakEnd(b.state));
+    expect(c.state.phase).toBe("connecting");
+  });
+
+  it("끊은 뒤에 온 실패 신호는 버린다", () => {
+    const a = atSpeakingConfirm();
+    const stale: LiveEvent = { type: "SPEAK_END", id: "guideFirstVoice", failed: true };
+    const b = run(a.state, stale);
+    expect(b.effects).toEqual([]);
+    expect(b.state.speaking).toBe("confirm");
+  });
+});

@@ -307,3 +307,65 @@ describe("tidySlots: 읽어 주기 좋게 칸을 정리한다(내용은 잃지 �
     expect(draft?.summary).toBe("제품은 무선 이어폰. 알고 싶은 정보는 노이즈 캔슬링 성능. 옵션은 검은색. 예산은 10만 원 이하.");
   });
 });
+
+// Codex 3차 지적 2: 읽어 준 예산과 접수되는 예산이 달라지면 안 된다.
+describe("summaryOf: 예산 칸은 값이 그대로 읽힐 때만 생략한다", () => {
+  it("같은 값이 옵션에 그대로 있으면 한 번만 읽는다", () => {
+    expect(summaryOf(slots({ product: "TV", options: "예산 10만 원 이하 무선", budget: "10만 원 이하" }))).toBe(
+      "제품은 TV. 옵션은 예산 10만 원 이하 무선.",
+    );
+    expect(summaryOf(slots({ product: "TV", info: "예산 10만원으로 살 수 있는지", budget: "10만 원" }))).toBe(
+      "제품은 TV. 알고 싶은 정보는 예산 10만원으로 살 수 있는지.",
+    );
+  });
+  it("옵션의 예산과 예산 칸이 다르면 접수에 쓰는 예산 칸을 반드시 읽는다", () => {
+    expect(summaryOf(slots({ product: "TV", options: "예산 10만 원 이하 무선", budget: "20만 원" }))).toBe(
+      "제품은 TV. 옵션은 예산 10만 원 이하 무선. 예산은 20만 원.",
+    );
+  });
+  it("'예산'이라는 말만 있고 값이 없으면 예산 칸을 읽는다", () => {
+    expect(summaryOf(slots({ product: "TV", info: "예산 안에서 가장 큰 화면", budget: "50만 원" }))).toBe(
+      "제품은 TV. 알고 싶은 정보는 예산 안에서 가장 큰 화면. 예산은 50만 원.",
+    );
+  });
+  it("숫자가 이어 붙은 자리는 같은 값으로 보지 않는다", () => {
+    expect(summaryOf(slots({ product: "TV", options: "120만 원대 모델", budget: "20만 원" }))).toBe(
+      "제품은 TV. 옵션은 120만 원대 모델. 예산은 20만 원.",
+    );
+    expect(summaryOf(slots({ product: "TV", options: "백이십만 원대 모델", budget: "이십만 원" }))).toBe(
+      "제품은 TV. 옵션은 백이십만 원대 모델. 예산은 이십만 원.",
+    );
+  });
+  it("toDraft를 거쳐도 요약에 예산 칸의 값이 들어 있다", () => {
+    const draft = toDraft(slots({ product: "TV", options: "예산 10만 원 이하 무선, 벽걸이", budget: "20만 원" }));
+    expect(draft?.budget).toBe("20만 원");
+    expect(draft?.summary).toContain("예산은 20만 원.");
+  });
+});
+
+// Codex 3차 지적 3: 모델이 이용자에게 되묻는 물음이 칸에 남으면 안 된다.
+describe("groundSlots: 되묻는 말투의 물음", () => {
+  it("제품 이름이 겹쳐도 되묻는 물음은 뺀다", () => {
+    const out = groundSlots(slots({ product: "소니 헤드폰", info: "소니 헤드폰은 어떤 색을 원하세요?" }), ["소니 헤드폰"]);
+    expect(out.info).toBe("");
+    expect(out.product).toBe("소니 헤드폰");
+  });
+  it("되묻는 물음만 빼고 앞의 이용자 내용은 남긴다", () => {
+    const user = ["헤드폰 노이즈 캔슬링 성능이 궁금해요. 예산은 10만 원"];
+    const out = groundSlots(
+      slots({ product: "헤드폰", info: "노이즈 캔슬링 성능. 예산은 얼마 정도 생각하세요?", options: "더 필요한 조건이 있나요?" }),
+      user,
+    );
+    expect(out.info).toBe("노이즈 캔슬링 성능.");
+    expect(out.options).toBe("");
+  });
+  it("이용자가 알고 싶은 것을 적은 물음은 남긴다", () => {
+    const user = ["소니 헤드폰 방수 되는지 궁금해요", "가격도요. 다른 색도 있는지도요"];
+    const out = groundSlots(slots({ product: "소니 헤드폰", info: "방수가 되나요? 가격은 얼마인가요? 다른 색도 있나요?" }), user);
+    expect(out.info).toBe("방수가 되나요? 가격은 얼마인가요? 다른 색도 있나요?");
+  });
+  it("이용자가 거의 그대로 말한 높임 물음은 남긴다", () => {
+    const out = groundSlots(slots({ product: "이어폰", info: "배터리 시간 알려 주세요?" }), ["이어폰이요. 배터리 시간 알려 주세요"]);
+    expect(out.info).toBe("배터리 시간 알려 주세요?");
+  });
+});

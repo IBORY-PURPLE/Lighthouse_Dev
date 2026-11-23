@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LiveDraft } from "@/lib/liveEngine";
+import { toDraft } from "@/lib/liveText";
 import {
   LIVE_DEVICE_READY_MS,
   LIVE_PUSH_KEY,
@@ -492,5 +493,31 @@ describe("attachPushIfOn", () => {
     const { win } = fakeWin();
     (win as unknown as { fetch: unknown }).fetch = vi.fn().mockRejectedValue(new Error("network"));
     await expect(attachPushIfOn("req-1", win)).resolves.toBeUndefined();
+  });
+});
+
+// Codex 3차 지적 2: 확인 요약으로 읽어 준 예산과 접수 본문의 예산이 같아야 한다.
+describe("읽어 준 요약과 접수 본문", () => {
+  const flatText = (text: string) => text.replace(/[^0-9a-z가-힣]+/g, "");
+  it.each([
+    { options: "예산 10만 원 이하 무선", budget: "20만 원" },
+    { options: "무선", budget: "20만 원 이하" },
+    { options: "예산은 20만 원 이하, 무선", budget: "20만 원 이하" },
+    { options: "120만 원대", budget: "20만 원" },
+  ])("옵션 '$options', 예산 '$budget': 접수되는 예산이 요약에 들어 있다", ({ options, budget }) => {
+    const draft = toDraft({ product: "헤드폰", info: "", options, budget });
+    expect(draft).not.toBeNull();
+    const body = toLiveRequest(draft as LiveDraft, CID);
+    expect(body?.budget).toBe(budget);
+    // 이 사례들은 옵션 글에 같은 예산이 그대로 있지 않으므로 예산 문장이 따로 읽혀야 한다.
+    expect(flatText(draft?.summary ?? "")).toContain(flatText(`예산은 ${budget}`));
+    expect(body?.details.summary).toBe(draft?.summary);
+  });
+
+  it("옵션 글에 같은 예산이 그대로 있으면 한 번만 읽고, 그 값이 접수 예산이다", () => {
+    const draft = toDraft({ product: "헤드폰", info: "", options: "예산 20만 원 이하 무선", budget: "20만 원 이하" });
+    const body = toLiveRequest(draft as LiveDraft, CID);
+    expect(draft?.summary).toBe("제품은 헤드폰. 옵션은 예산 20만 원 이하 무선.");
+    expect(body?.budget).toBe("20만 원 이하");
   });
 });
