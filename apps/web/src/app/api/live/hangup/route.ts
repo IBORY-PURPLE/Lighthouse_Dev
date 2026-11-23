@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { realCallTail, realtimeGate, refundRealCalls } from "@/lib/liveConfig";
+import { isLiveEnabled, realCallTail, realtimeGate, refundRealCalls } from "@/lib/liveConfig";
 import { CALL_ID_PATTERN, hangupRealtimeCall, settleCall } from "@/lib/liveRealtimeSession";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
 import { readLimitedText } from "@/lib/readLimited";
 
-// /live 통화 끊기. 설계서 7.6절. 화면이 닫을 때(sendBeacon 포함) 부른다. 응답은 언제나 204다.
+// /live 통화 끊기. 설계서 7.6절. 화면이 닫을 때(sendBeacon 포함) 부른다. 기능이 켜져 있으면 응답은 언제나 204다.
+// 기능이 꺼져 있으면(LIVE_ENABLED) 다른 /api/live/* 라우트처럼 404이고 OpenAI를 부르지 않는다(Codex 1차 지적 1).
 // 장부와 상관없이 모양이 맞는 callId를 끊는다(라우트마다 인스턴스가 다를 수 있다). callId는 로그에 남기지 않는다.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,9 @@ function readBody(raw: string): { callId: string; turns?: number } | null {
 }
 
 async function handleHangup(request: NextRequest, note: (text: string) => void) {
+  if (!isLiveEnabled()) {
+    return NextResponse.json({ ok: false, error: "disabled" }, { status: 404, headers: NO_STORE });
+  }
   if (!checkIpLimit(clientKey(request.headers)).allowed) {
     note(" upstream=skipped reason=rate_limited");
     return done();

@@ -65,7 +65,10 @@ export function hasQuestion(text: string): boolean {
 
 const YES = new Set(["네", "네네", "넵", "예", "예예", "응", "그래", "그래요", "좋아", "좋아요", "좋습니다", "맞아", "맞아요", "맞습니다", "오케이", "ok"]);
 const SEND = /^(보내|등록|접수|전달)(해|해요|해줘|해줘요|해주세요|줘|줘요|주세요|요)?$/;
-const FILLER = new Set(["이대로", "그대로", "그렇게", "그걸로", "다시", "해", "줘", "주세요", "해주세요", "해줘", "부탁해", "부탁해요", "부탁드려요"]);
+const FILLER = new Set(["이대로", "그대로", "그렇게", "그걸로", "다시", "해", "줘", "주세요", "해주세요", "해줘", "부탁해", "부탁해요", "부탁드려요", "음", "어", "아", "그럼", "그러면", "해요", "하세요", "해줘요"]);
+// "그렇게 해 주세요", "이대로 부탁해요"처럼 가리키는 말 + 해 달라는 말이 함께 있으면 동의다(실호출 2026-11-24: 이 말이 동의로 잡히지 않아 대화가 헛돌았다).
+const DEICTIC = new Set(["이대로", "그대로", "그렇게", "그걸로"]);
+const DO_IT = new Set(["해", "해요", "해줘", "해줘요", "해주세요", "하세요", "주세요", "줘", "부탁해", "부탁해요", "부탁드려요"]);
 const POLITE = new Set(["주시면", "주면", "돼요", "됩니다", "되겠어요", "해도", "좋겠어요", "감사합니다", "고마워요"]);
 const NEGATIVE = /아니|아뇨|안\s?돼|지\s?마|말고|말아|잠깐|잠시|바꿔|바꿀|바꾸|고쳐|고칠|고치|수정|취소|틀렸|틀려|근데|그런데|하지만|대신|그리고|추가|또/;
 const ECHO = /버튼|단추|링크|흐리게|선택됨|머리말|텍스트\s?필드/;   // 화면 낭독이 덧붙이는 말
@@ -94,6 +97,9 @@ function consentRejected(text: string): boolean {
 }
 
 const isAffirm = (t: string) => YES.has(t) || SEND.test(t);
+/** 동의 낱말(YES, SEND)이 있거나, 가리키는 말과 해 달라는 말이 함께 있다. */
+const hasAffirm = (tokens: string[]) =>
+  tokens.some(isAffirm) || (tokens.some((t) => DEICTIC.has(t)) && tokens.some((t) => DO_IT.has(t)));
 
 /** AI를 거치지 않고 바로 접수할 때 쓴다. 토큰이 모두 YES, SEND, FILLER이고 YES나 SEND가 하나 이상 있다. */
 export function isClearConsent(text: string): boolean {
@@ -101,7 +107,7 @@ export function isClearConsent(text: string): boolean {
   const tokens = consentTokens(text);
   if (tokens.length === 0) return false;
   if (!tokens.every((t) => isAffirm(t) || FILLER.has(t))) return false;
-  return tokens.some(isAffirm);
+  return hasAffirm(tokens);
 }
 
 /** AI가 동의라고 판단한 것을 한 번 더 거를 때만 쓴다. 허용 목록에 없는 낱말이 하나라도 있으면 거짓이다. */
@@ -111,7 +117,7 @@ export function isPlausibleConsent(text: string): boolean {
   const tokens = consentTokens(text);
   if (tokens.length === 0) return false;
   if (!tokens.every((t) => isAffirm(t) || FILLER.has(t) || POLITE.has(t))) return false;
-  return tokens.some(isAffirm);
+  return hasAffirm(tokens);
 }
 
 const ROLE_WORDS = ["흐리게표시됨", "선택됨", "머리말", "버튼", "단추", "링크"];

@@ -52,9 +52,11 @@ export function liveTranscribeLang(): string {
   return value === undefined ? "ko" : value.trim();
 }
 
-/** LIVE_REALTIME_VAD, 기본 "semantic". "server"면 server_vad. */
+/** LIVE_REALTIME_VAD, 기본 "server"(server_vad, 침묵 1.2초). "semantic"이면 semantic_vad. */
 export function liveVadMode(): "semantic" | "server" {
-  return process.env.LIVE_REALTIME_VAD?.trim().toLowerCase() === "server" ? "server" : "semantic";
+  // 기본은 server(침묵 1.2초 뒤에 차례를 넘긴다). 실호출(2026-11-24)에서 semantic은 두 문장 사이의 쉼에서 차례를 끊어
+  // 뒷말이 버려지는 일이 있었다. 말하다 잠깐 쉬는 이용자를 기다리는 쪽을 기본으로 둔다.
+  return process.env.LIVE_REALTIME_VAD?.trim().toLowerCase() === "semantic" ? "semantic" : "server";
 }
 
 /** LIVE_REALTIME_REASONING, 기본 "minimal". "off"면 null(필드를 뺀다). */

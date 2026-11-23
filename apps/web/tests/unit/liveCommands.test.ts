@@ -136,3 +136,18 @@ describe("isCardEcho", () => {
     expect(isCardEcho("제품은 무선 이어폰", null)).toBe(false);
   });
 });
+
+describe("동의 판정 보강(실호출 2026-11-24)", () => {
+  it("가리키는 말 + 해 달라는 말은 동의다. 망설이는 말이 앞에 붙어도 된다", () => {
+    for (const text of ["그렇게 해 주세요", "음, 그렇게 해주세요.", "어 그렇게 해줘", "이대로 부탁해요", "그대로 해요", "아 그걸로 해 주세요"]) {
+      expect(isClearConsent(text), text).toBe(true);
+      expect(isPlausibleConsent(text), text).toBe(true);
+    }
+  });
+
+  it("동의가 아닌 말은 그대로 아니다", () => {
+    for (const text of ["그렇게", "음", "다시 해 주세요", "그렇게 하지 마세요", "그렇게 해 주세요?", "그렇게 말고 흰색으로 해 주세요", "음 글쎄요"]) {
+      expect(isClearConsent(text), text).toBe(false);
+    }
+  });
+});

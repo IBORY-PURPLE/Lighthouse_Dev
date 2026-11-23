@@ -360,8 +360,10 @@ describe("POST /api/live/call 성공과 세션 설정", () => {
     expect(sent.audio.input.transcription).toEqual({ model: "gpt-transcribe", language: "ko" });
     expect(sent.audio.input.noise_reduction).toEqual({ type: "near_field" });
     expect(sent.audio.input.turn_detection).toEqual({
-      type: "semantic_vad",
-      eagerness: "low",
+      type: "server_vad",
+      threshold: 0.5,
+      prefix_padding_ms: 300,
+      silence_duration_ms: 1200,
       create_response: false,
       interrupt_response: false,
     });
@@ -383,18 +385,19 @@ describe("POST /api/live/call 성공과 세션 설정", () => {
     expect(speeds).toEqual([0.85, 1.2, 1.0, 1.0, 1.0]);
   });
 
-  it("LIVE_REALTIME_VAD=server → server_vad(idle_timeout_ms 없음)", async () => {
-    vi.stubEnv("LIVE_REALTIME_VAD", "server");
+  it("LIVE_REALTIME_VAD=semantic → semantic_vad(idle_timeout_ms 없음). 그 밖의 값은 기본(server_vad)", async () => {
+    vi.stubEnv("LIVE_REALTIME_VAD", "semantic");
     await makeCall();
     const detection = (sentSession().audio as { input: { turn_detection: Json } }).input.turn_detection;
     expect(detection).toEqual({
-      type: "server_vad",
-      threshold: 0.5,
-      prefix_padding_ms: 300,
-      silence_duration_ms: 1200,
+      type: "semantic_vad",
+      eagerness: "low",
       create_response: false,
       interrupt_response: false,
     });
+    vi.stubEnv("LIVE_REALTIME_VAD", "something-else");
+    await makeCall();
+    expect((sentSession(1).audio as { input: { turn_detection: Json } }).input.turn_detection.type).toBe("server_vad");
   });
 
   it("LIVE_REALTIME_REASONING=off → reasoning 필드 없음, 다른 값이면 그 값", async () => {
@@ -774,5 +777,60 @@ describe("liveRealtimeSession 부품", () => {
     expect(await session.createRealtimeCall(OFFER, { type: "realtime" })).toEqual({ ok: true, sdp: ANSWER, callId: "rtc_ok" });
     const form = createCalls()[2][1].body as FormData;
     expect(form.get("session")).toBe(JSON.stringify({ type: "realtime" }));
+  });
+});
+
+describe("Codex 1차 지적과 거절 사유 꼬리표", () => {
+  it("끊기 라우트: 기능이 꺼져 있으면 404 disabled이고 OpenAI를 부르지 않는다", async () => {
+    vi.stubEnv("LIVE_ENABLED", "off");
+    const response = await hangup.POST(hangupRequest({ callId: "rtc_any_call", turns: 0 }));
+    expect(response.status).toBe(404);
+    expect(await json(response)).toEqual({ ok: false, error: "disabled" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("끊기 라우트: 운영(VERCEL_ENV=production)에서 LIVE_ENABLED가 없으면 404, on이면 204", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    expect((await hangup.POST(hangupRequest({ callId: "rtc_any_call" }))).status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.stubEnv("LIVE_ENABLED", "on");
+    expect((await hangup.POST(hangupRequest({ callId: "rtc_any_call" }))).status).toBe(204);
+    expect(hangupCalls()).toHaveLength(1);
+  });
+
+  it("통화 만들기 거절: 어느 필드인지(param, code)만 로그에 남고 오류 글은 남지 않는다", async () => {
+    const spy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            message: "Unknown parameter: 'session.reasoning'. v=0 SECRET-SDP-PIECE",
+            type: "invalid_request_error",
+            param: "session.reasoning",
+            code: "unknown_parameter",
+          },
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const failed = await makeCall();
+    expect(failed.body).toEqual({ engine: "fallback", reason: "upstream" });
+    const line = spy.mock.calls.map((args) => args.join(" ")).join(" | ");
+    expect(line).toMatch(/reason=upstream status=400 param=session\.reasoning code=unknown_parameter/);
+    expect(line).not.toContain("Unknown parameter");
+    expect(line).not.toContain("SECRET-SDP-PIECE");
+  });
+
+  it("거절 사유: 본문이 JSON이 아니면 꼬리표 없이 코드만, 이상한 글자는 걸러진다", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("not json", { status: 502 }));
+    expect(await session.createRealtimeCall(OFFER, {})).toEqual({ ok: false, status: 502 });
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { param: "session.audio output\nvoice=<x>", code: 42, type: "invalid request!" } }), { status: 400 }),
+    );
+    expect(await session.createRealtimeCall(OFFER, {})).toEqual({
+      ok: false,
+      status: 400,
+      detail: " param=session.audiooutputvoicex code=invalidrequest",
+    });
   });
 });

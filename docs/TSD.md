@@ -469,7 +469,7 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 | `LIVE_ENABLED` | 운영(`VERCEL_ENV=production`)은 끔, 그 밖은 켬 | 운영에서는 `on`일 때만 연다. 그 밖에서는 `off`가 아니면 연다. 꺼져 있으면 페이지는 안내만 보이고 `/api/live/*`는 404 `{ok:false,error:"disabled"}` |
 | `LIVE_REALTIME` | 끔 | `on`이고, mock이 아니고, `OPENAI_API_KEY`가 있을 때만 OpenAI Realtime을 부른다 |
 | `LIVE_REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Realtime 모델 |
-| `LIVE_REALTIME_VAD` | `semantic` | `server`면 `server_vad`로 바꾼다 |
+| `LIVE_REALTIME_VAD` | `server` | 말 끝 판정. 기본은 `server_vad`(침묵 1.2초 뒤에 차례를 넘긴다). `semantic`이면 `semantic_vad`다. 2026-11-24 로컬 실호출에서 `semantic_vad`가 두 문장 사이의 쉼에서 차례를 끊어 뒷말이 버려진 일이 있어 기본값을 바꿨다 |
 | `LIVE_REALTIME_REASONING` | `minimal` | `reasoning.effort` 값. `off`면 필드를 뺀다 |
 | `LIVE_MAX_SESSION_SEC` | 270 | 세션 길이 상한. 60~280으로 자른다 |
 | `LIVE_DAILY_SESSION_CAP` | 10 | 하루 Realtime 세션 수. 첫 통화부터 재는 고정 24시간 창, 인스턴스별. 0~200 |
@@ -498,10 +498,13 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 - 병합만으로 운영에 열리지 않는다. `LIVE_ENABLED`는 운영에서 `on`일 때만 켜지고, Realtime은 `LIVE_REALTIME=on`이어야 한다. 여는 것은 사람이 정한다.
 - `/api/live/chat`은 `/api/voice/chat`과 제한기가 따로다. 두 경로를 합치면 IP 하나가 분당 40회까지 유료 글자 LLM을 부를 수 있다.
 - 표준 키(`OPENAI_API_KEY`)는 서버에만 있다. 임시 키(`client_secrets`)를 쓰지 않는 이유는 서버가 세션 설정을 고정하고 `call_id`를 쥐어 끊을 수 있게 하려는 것이다.
-- 브라우저는 데이터 채널로 `session.update`를 보내 세션 설정을 바꿀 수 있다. 우리 화면은 보내지 않지만 조작한 화면은 할 수 있어서, 돈은 통화 끊기(270초), 하루 상한(10세션), 통화당 턴 상한(30), OpenAI 쪽 프로젝트 예산 한도로 묶고 접수는 화면 관문과 서버 검사를 거친다. 서버가 실제로 기대할 수 있는 끊기는 "화면 hangup"과 "같은 인스턴스의 예약 끊기" 둘뿐이다.
+- 브라우저는 데이터 채널로 `session.update`를 보내 세션 설정을 바꿀 수 있다. 우리 화면은 보내지 않지만 조작한 화면은 할 수 있어서, 돈은 통화 끊기(270초), 하루 상한(10세션), OpenAI 쪽 프로젝트 예산 한도로 묶고 접수는 화면 관문과 서버 검사를 거친다. 통화당 턴 상한(30)은 우리 화면이 스스로 지키는 장치일 뿐 서버가 강제하지 못한다(응답 요청은 브라우저와 OpenAI 사이에서 오간다). 그래서 비용 방어선으로 세지 않는다. 서버가 통화를 지켜보며 끊는 장치(서버 감시)는 아직 없고, 운영에서 Realtime을 켜기 전에 정해야 한다. 서버가 실제로 기대할 수 있는 끊기는 "화면 hangup"과 "같은 인스턴스의 예약 끊기" 둘뿐이다.
 - 비용 어림(추정, 1달러 = 1,400원): Realtime mini는 말하는 1분에 약 0.035달러, 한 세션 4.5분에 약 220원이다. 서버 끊기가 동작하지 않는 최악(세션 하나가 OpenAI 상한 60분)이면 세션당 약 2.1달러, 하루 10세션이면 약 2.9만 원이다.
 - 운영에서 Realtime을 켜는 조건: 사람이 켜기로 정했다, OpenAI 프로젝트 예산 한도가 실제로 막는지 확인했다, 서버 끊기가 배포 환경에서 동작함을 확인했다(`maxDuration = 300`과 예약 끊기), 로컬 실호출 점검을 통과했다.
-- 확인하지 못한 것: Realtime 실호출(한국어 인식 품질, `reasoning.effort`·`semantic_vad`를 모델이 받는지, `call_id` 형식, hangup의 응답 코드, 응답 `max_output_tokens`가 잘리는지), 실기기 iOS·VoiceOver 동작, 서버리스에서 예약 끊기가 끝까지 도는지. 로컬 실호출 결과는 `docs/plans/2026-11-23-voice-live/progress.md`에 적는다.
+- 동의 관문의 위협 모델: 화면 쪽 관문과 `/api/live/chat`의 서버 관문은 **모델의 실수와 잘못 알아들은 말**로 접수되는 일을 막는 장치다. 서버는 대화를 저장하지 않고 화면이 보낸 기록을 믿으므로, 조작한 화면이 기록을 꾸미는 것은 막지 못한다. 접수 API(`POST /api/requests`)가 원래 로그인 없이 열려 있어 이 관문을 위조 방어선으로 세지 않는다.
+- 요약의 근거 검사: 모델이 넘긴 칸(제품, 알고 싶은 정보, 옵션, 예산)에서 이용자 말에 근거가 없는 문장, 물음표로 끝나는 문장, 다른 칸에 되풀이한 예산을 앱이 뺀 뒤 요약을 만든다(`liveText.ts`의 `groundSlots`, `tidySlots`). 이용자가 요약을 눈으로 확인할 수 없기 때문이다.
+- 로컬 실호출 결과(2026-11-24, 누적 86회, `docs/plans/2026-11-23-voice-live/progress.md`): 세션 설정(`reasoning.effort`, `server_vad`·`semantic_vad`, 전사 `ko`, 도구 3개)을 모델이 받는다. `call_id`는 `Location`에서 얻는다. 살아 있는 통화의 hangup은 200이고 브라우저의 데이터 채널이 바로 닫힌다. 이미 끝난 통화의 hangup은 5초 뒤 시간 초과로 끝난다. 응답 `max_output_tokens` 400에 닿으면 `incomplete`로 잘리고 화면은 다시 듣는다. 세션 상한에서 연결을 새로 하고 앞 대화를 이어 간다. `gpt-realtime-2.1-mini`는 긴 말을 들으면 말이 길어지고 지시를 어길 때가 있었고, `gpt-realtime-2.1`은 같은 대화에서 지시를 그대로 따랐다(토큰 단가 3.2배).
+- 확인하지 못한 것: 실기기 iOS·VoiceOver 동작, 사람 목소리와 소음이 있는 환경의 인식 품질(실호출은 음성 합성으로 만든 말소리로 했다), 서버리스에서 예약 끊기가 끝까지 도는지.
 
 ### 리서치 챗 사진 축소(브라우저)
 

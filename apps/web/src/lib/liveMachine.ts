@@ -42,7 +42,7 @@ import {
   WAIT_SAY1_MS,
   WAIT_SAY2_MS,
 } from "@/lib/liveTiming";
-import { cutText, EMPTY_SLOTS, encodeAiTurn, toDraft } from "@/lib/liveText";
+import { cutText, EMPTY_SLOTS, encodeAiTurn, groundSlots, toDraft } from "@/lib/liveText";
 
 export type LivePhase =
   | "idle" | "guiding" | "connecting" | "listening" | "thinking" | "speaking"
@@ -212,6 +212,8 @@ const isRunning = (p: LivePhase) => p === "listening" || p === "thinking" || p =
 const isActive = (p: LivePhase) => p === "guiding" || p === "connecting" || isRunning(p);
 
 const userCell = (text: string): LiveTurn => ({ role: "user", content: cutText(text, USER_TURN_MAX) });
+/** 이용자가 지금까지 한 말. 칸의 근거 검사(groundSlots)에 쓴다. */
+const userTexts = (s: LiveState): string[] => s.history.filter((t) => t.role === "user").map((t) => t.content);
 const aiCell = (reply: string, status: "asking" | "confirming", slots: LiveDraft | typeof EMPTY_SLOTS): LiveTurn => ({
   role: "assistant",
   content: encodeAiTurn({ reply, status, slots }),
@@ -1069,7 +1071,7 @@ function onTurnResult(c: Cx, e: Extract<EngineEvent, { type: "TURN_RESULT" }>): 
       asAsking();
       return;
     case "confirming": {
-      const draft = toDraft(e.slots);
+      const draft = toDraft(groundSlots(e.slots, userTexts(s)));
       if (!draft) {
         asAsking();   // 서버가 이미 낮춰 보내므로 올 수 없는 방어 줄
         return;
@@ -1094,7 +1096,7 @@ function onIntent(c: Cx, e: Extract<EngineEvent, { type: "INTENT" }>): void {
   const s = c.s;
   if (s.phase !== "thinking" && s.phase !== "speaking") return;
   if (e.kind === "confirm") {
-    const draft = toDraft(e.slots);
+    const draft = toDraft(groundSlots(e.slots, userTexts(s)));
     if (!draft) return;   // 엔진이 bad_arguments로 되돌린다
     s.draft = draft;
     s.pendingConfirm = true;

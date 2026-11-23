@@ -132,7 +132,7 @@ async function handleCall(request: NextRequest, note: (text: string) => void) {
       daily.release();
       refundRealCalls(1 + maxTurns);
     }
-    note(` engine=fallback reason=upstream status=${created.status}${realCallTail()}`);
+    note(` engine=fallback reason=upstream status=${created.status}${created.detail ?? ""}${realCallTail()}`);
     return fallback("upstream");
   }
 

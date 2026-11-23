@@ -79,11 +79,31 @@ export function parseCallId(location: string | null): string | null {
   return CALL_ID_PATTERN.test(last) && last !== "." && last !== ".." ? last : null;
 }
 
-/** 통화를 만든다(SDP 중계). 응답 본문이 answer SDP다. 실패해도 던지지 않는다. */
+/**
+ * OpenAI가 통화 만들기를 거절했을 때 어느 필드 때문인지만 꺼낸다(param, code). 로그 꼬리표로 쓴다.
+ * 오류 글(message)은 남기지 않는다(SDP 조각이 섞일 수 있다). 글자는 꼬리표에 쓸 수 있는 것만 남긴다.
+ */
+async function readRejectDetail(response: Response): Promise<string> {
+  try {
+    const data = (await response.json()) as { error?: { param?: unknown; code?: unknown; type?: unknown } };
+    const clean = (value: unknown) =>
+      typeof value === "string" ? value.replace(/[^A-Za-z0-9_.[\]-]/g, "").slice(0, 60) : "";
+    const param = clean(data.error?.param);
+    const code = clean(data.error?.code) || clean(data.error?.type);
+    return `${param ? ` param=${param}` : ""}${code ? ` code=${code}` : ""}`;
+  } catch {
+    return "";
+  }
+}
+
+/** 통화를 만든다(SDP 중계). 응답 본문이 answer SDP다. 실패해도 던지지 않는다. detail은 거절 사유 꼬리표다(없으면 빈 글). */
 export async function createRealtimeCall(
   offerSdp: string,
   session: object,
-): Promise<{ ok: true; sdp: string; callId: string } | { ok: false; status: number | "timeout" | "network" | "no_call_id" }> {
+): Promise<
+  | { ok: true; sdp: string; callId: string }
+  | { ok: false; status: number | "timeout" | "network" | "no_call_id"; detail?: string }
+> {
   const form = new FormData();
   form.set("sdp", offerSdp);
   form.set("session", JSON.stringify(session));
@@ -96,7 +116,10 @@ export async function createRealtimeCall(
       body: form,
       signal: controller.signal,
     });
-    if (!response.ok) return { ok: false, status: response.status };
+    if (!response.ok) {
+      const detail = await readRejectDetail(response);
+      return detail ? { ok: false, status: response.status, detail } : { ok: false, status: response.status };
+    }
     const sdp = await response.text();
     const callId = parseCallId(response.headers.get("location"));
     if (!callId) return { ok: false, status: "no_call_id" };

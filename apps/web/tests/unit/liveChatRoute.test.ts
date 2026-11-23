@@ -465,9 +465,9 @@ describe("liveConfig 스위치(7.1절)", () => {
     vi.stubEnv("LIVE_TRANSCRIBE_LANG", "en");
     expect(c.liveTranscribeLang()).toBe("en");
 
-    expect(c.liveVadMode()).toBe("semantic");
-    vi.stubEnv("LIVE_REALTIME_VAD", "server");
     expect(c.liveVadMode()).toBe("server");
+    vi.stubEnv("LIVE_REALTIME_VAD", "semantic");
+    expect(c.liveVadMode()).toBe("semantic");
 
     expect(c.liveReasoningEffort()).toBe("minimal");
     vi.stubEnv("LIVE_REALTIME_REASONING", "off");

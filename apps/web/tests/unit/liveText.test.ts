@@ -2,18 +2,20 @@ import { describe, expect, it } from "vitest";
 import { PHONE } from "@/lib/researchCheck";
 import { MAX_HISTORY_CONTENT } from "@/lib/voiceChat";
 import {
-  EMPTY_SLOTS,
-  PHONE as LIVE_PHONE,
-  REPLY_MAX,
-  SLOT_MAX,
-  SUMMARY_MAX,
   cleanSlot,
   cutText,
   decodeAiTurn,
+  EMPTY_SLOTS,
   encodeAiTurn,
+  groundSlots,
   maskPhone,
+  PHONE as LIVE_PHONE,
   readSlots,
+  REPLY_MAX,
+  SLOT_MAX,
+  SUMMARY_MAX,
   summaryOf,
+  tidySlots,
   toDraft,
 } from "@/lib/liveText";
 
@@ -178,5 +180,117 @@ describe("encodeAiTurn / decodeAiTurn", () => {
   });
   it("칸이 빠진 JSON은 빈 칸으로 읽는다", () => {
     expect(decodeAiTurn('{"reply":"가","status":"done"}')).toEqual({ reply: "가", status: "done", slots: EMPTY_SLOTS });
+  });
+});
+
+describe("groundSlots: 이용자 말에 근거가 없는 문장을 칸에서 뺀다", () => {
+  const slots = (o: Partial<Record<"product" | "info" | "options" | "budget", string>>) => ({
+    product: "", info: "", options: "", budget: "", ...o,
+  });
+
+  it("실호출 사례 1: 알고 싶은 정보에 섞인 지시문 문장과 덧붙인 보기를 뺀다", () => {
+    const user = ["무선 이어폰을 찾고 있어요.", "노이즈 캔슬링이 잘 되는지, 그리고 배터리가 얼마나 가는지 알고 싶어요."];
+    const out = groundSlots(
+      slots({
+        product: "무선 이어폰",
+        info: "노이즈 캔슬링 성능과 배터리 사용 시간을 알고 싶어요. 할인, 사용 후기, 비교 정보도 함께 확인 가능하면 좋습니다. 가격, 재고, 할인율, 모델명, 출시 여부는 봉사자가 찾아서 알려 주세요.",
+      }),
+      user,
+    );
+    expect(out.product).toBe("무선 이어폰");
+    expect(out.info).toBe("노이즈 캔슬링 성능과 배터리 사용 시간을 알고 싶어요.");
+  });
+
+  it("실호출 사례 2: 이용자가 말하지 않은 칸 전체가 지시문에서 왔으면 비운다", () => {
+    const user = ["전화를 찾고 있어요.", "검은색이면 좋겠고 예산은 10만 원 이하예요."];
+    const out = groundSlots(
+      slots({
+        product: "보드게임",
+        info: "혜택, 할인, 사용 후기, 비교, 구성, 크기와 무게 같은 정보. 가격, 재고, 할인율, 모델명, 출시 여부는 봉사자가 찾아서 알려 주세요.",
+        options: "색상 블랙 또는 검은색. 새 제품. 조건은 없다면 비워두기.",
+        budget: "10만 원 이내",
+      }),
+      user,
+    );
+    expect(out.info).toBe("");
+    expect(out.options).toBe("색상 블랙 또는 검은색.");
+    expect(out.budget).toBe("10만 원 이내");
+    expect(out.product).toBe("보드게임"); // 제품 이름은 바꿔 적힐 수 있어 그대로 둔다
+  });
+
+  it("바꿔 말한 칸은 지시문 표지가 없으면 그대로 둔다", () => {
+    const out = groundSlots(slots({ product: "이어폰", info: "차음 성능" }), ["이어폰이요. 소리가 밖으로 안 새는지 알려 주면 좋겠어요."]);
+    expect(out.info).toBe("차음 성능");
+  });
+
+  it("숫자를 한글로 받아 적어도 예산 칸이 남는다", () => {
+    const out = groundSlots(slots({ product: "헤드폰", budget: "30만 원 이하" }), ["헤드폰이요. 예산은 삼십만 원 이하예요."]);
+    expect(out.budget).toBe("30만 원 이하");
+  });
+
+  it("받아 적은 글이 거의 없으면(전사를 못 받음) 판단하지 않고 그대로 돌려준다", () => {
+    const given = slots({ product: "이어폰", info: "가격은 봉사자가 찾아서 알려 주세요." });
+    expect(groundSlots(given, [])).toEqual(given);
+    expect(groundSlots(given, ["네"])).toEqual(given);
+  });
+
+  it("근거 있는 칸은 바뀌지 않는다", () => {
+    const user = ["소니 무선 헤드폰을 찾고 있어요. 노이즈 캔슬링 성능이 궁금하고, 검은색에 예산은 30만 원 이하예요."];
+    const given = slots({ product: "소니 무선 헤드폰", info: "노이즈 캔슬링 성능", options: "검은색", budget: "30만 원 이하" });
+    expect(groundSlots(given, user)).toEqual(given);
+  });
+});
+
+describe("tidySlots: 읽어 주기 좋게 칸을 정리한다", () => {
+  const slots = (o: Partial<Record<"product" | "info" | "options" | "budget", string>>) => ({
+    product: "무선 이어폰", info: "", options: "", budget: "", ...o,
+  });
+
+  it("실호출 사례: 예산을 다른 칸에 되풀이하면 그 마디를 빼고, 끝말을 뗀다", () => {
+    const out = tidySlots(
+      slots({
+        info: "노이즈 캔슬링 성능과 배터리 사용 시간을 알고 싶음. 예산은 10만 원 이내",
+        options: "검은색, 예산 10만 원 이내",
+        budget: "10만 원 이하",
+      }),
+    );
+    expect(out.info).toBe("노이즈 캔슬링 성능과 배터리 사용 시간");
+    expect(out.options).toBe("검은색");
+    expect(out.budget).toBe("10만 원 이하");
+  });
+
+  it("끝말 떼기: 궁금, 궁금함, 궁금합니다, 알고 싶어요", () => {
+    expect(tidySlots(slots({ info: "노이즈 캔슬링 성능이 궁금" })).info).toBe("노이즈 캔슬링 성능");
+    expect(tidySlots(slots({ info: "가격과 재고가 궁금함" })).info).toBe("가격과 재고");
+    expect(tidySlots(slots({ info: "노이즈 캔슬링 성능이 궁금합니다." })).info).toBe("노이즈 캔슬링 성능");
+    expect(tidySlots(slots({ info: "배터리가 얼마나 가는지 알고 싶어요" })).info).toBe("배터리가 얼마나 가는지");
+  });
+
+  it("끝말만 있는 칸은 비우지 않고, 예산 칸이 없으면 예산 마디를 그대로 둔다", () => {
+    expect(tidySlots(slots({ info: "궁금합니다" })).info).toBe("궁금합니다");
+    expect(tidySlots(slots({ options: "검은색, 예산 10만 원 이내" })).options).toBe("검은색, 예산 10만 원 이내");
+  });
+
+  it("toDraft는 정리한 칸으로 요약을 만든다", () => {
+    const draft = toDraft(slots({ info: "노이즈 캔슬링 성능이 궁금", options: "검은색, 예산 10만 원 이내", budget: "10만 원 이하" }));
+    expect(draft?.summary).toBe("제품은 무선 이어폰. 알고 싶은 정보는 노이즈 캔슬링 성능. 옵션은 검은색. 예산은 10만 원 이하.");
+  });
+});
+
+describe("tidySlots: 질문 문장은 칸에 둘 수 없다(실호출 2026-11-24)", () => {
+  it("모델이 자기 질문을 칸에 적으면 그 문장을 뺀다", () => {
+    const out = tidySlots({
+      product: "헤드폰",
+      info: "어떤 점이 궁금하세요? 재질(스테인리스)는 필요 없어요? 내솥이 스테인리스인지 알고 싶음",
+      options: "작은 크기. 다른 조건이 있나요?",
+      budget: "",
+    });
+    expect(out.info).toBe("내솥이 스테인리스인지");
+    expect(out.options).toBe("작은 크기.");
+    expect(out.product).toBe("헤드폰");
+  });
+
+  it("질문만 있는 칸은 빈다", () => {
+    expect(tidySlots({ product: "헤드폰", info: "어떤 점이 궁금하세요?", options: "", budget: "" }).info).toBe("");
   });
 });

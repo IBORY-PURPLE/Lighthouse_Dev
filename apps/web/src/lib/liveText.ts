@@ -54,7 +54,83 @@ export function readSlots(value: unknown): LiveSlots {
   };
 }
 
+// ---------- 칸의 근거 검사 ----------
+// 실호출(2026-11-24, gpt-realtime-2.1-mini)에서 모델이 이용자가 하지 않은 말(지시문의 문장과 보기)을 칸에 섞어 넣는 일이 있었다.
+// 이용자는 요약을 눈으로 확인할 수 없으므로, 앱이 읽어 주기 전에 이용자 말에 근거가 없는 문장을 뺀다.
+
+/** 근거로 세지 않는 흔한 낱말의 앞 두 글자(어느 요청에나 나온다). */
+const GROUND_STOP = new Set(["알고", "싶어", "싶은", "궁금", "정보", "제품", "원하", "있는", "같은", "관련", "대한", "확인", "함께", "좋겠", "좋습", "가능", "여부", "조건", "옵션", "예산", "그리", "또는"]);
+/** 지시문에서 온 문장에 흔한 말. 근거 없는 문장에 이 말이 있으면 칸 전체에 근거가 없어도 뺀다. */
+const LEAK_MARK = /봉사자|지시문|비워|없다면|알려\s*주세요|찾아서|확인\s*가능|같은\s*정보|조건은/;
+
+const flat = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[^0-9a-z가-힣]+/g, "");
+
+/** 문장의 내용 낱말(앞 두 글자) 가운데 이용자 말에 있는 것이 하나라도 있는가. */
+function sentenceGrounded(sentence: string, userFlat: string): boolean {
+  for (const m of sentence.normalize("NFKC").toLowerCase().matchAll(/[0-9a-z가-힣]{2,}/g)) {
+    const head = m[0].slice(0, 2);
+    if (GROUND_STOP.has(head)) continue;
+    if (userFlat.includes(head)) return true;
+  }
+  return false;
+}
+
+function groundText(text: string, userFlat: string): string {
+  if (!text) return text;
+  const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+  const judged = sentences.map((s) => ({ s, ok: sentenceGrounded(s, userFlat) }));
+  const anyGrounded = judged.some((j) => j.ok);
+  // 근거 있는 문장이 하나라도 있으면 근거 없는 문장을 모두 뺀다. 하나도 없으면(바꿔 말했을 수 있다) 지시문 표지가 있는 문장만 뺀다.
+  return judged.filter((j) => j.ok || (!anyGrounded && !LEAK_MARK.test(j.s))).map((j) => j.s).join(" ");
+}
+
+/**
+ * 칸에서 이용자 말에 근거가 없는 문장을 뺀다. userTexts는 이용자가 한 말(받아 적은 글)이다.
+ * 이용자 말이 너무 짧으면(전사를 못 받은 경우) 판단할 수 없어 그대로 돌려준다. 제품 칸은 표지 문장만 뺀다(이름은 바꿔 적힐 수 있다).
+ */
+export function groundSlots(slots: LiveSlots, userTexts: string[]): LiveSlots {
+  const userFlat = flat(userTexts.join(" "));
+  if (userFlat.length < 4) return slots;
+  const product = slots.product
+    .split(/(?<=[.!?])\s+/)
+    .filter((s) => !LEAK_MARK.test(s) || sentenceGrounded(s, userFlat))
+    .join(" ")
+    .trim();
+  return {
+    product: product || slots.product,
+    info: groundText(slots.info, userFlat),
+    options: groundText(slots.options, userFlat),
+    budget: groundText(slots.budget, userFlat),
+  };
+}
+
 const stripEnd = (s: string) => s.replace(/[.,!?]+$/, "");
+
+/** "…을 알고 싶음", "…이 궁금합니다" 같은 끝말. 요약이 "알고 싶은 정보는 …"으로 읽히므로 뗀다. */
+const INFO_TAIL = /\s*(?:(?:을|를|이|가|도)\s*)?(?:알고\s*싶(?:음|어요|습니다|다)|궁금(?:함|해요|합니다|하다)?)$/;
+
+/**
+ * 읽어 주기 좋게 칸을 정리한다(실호출에서 모델이 예산을 다른 칸에 되풀이하거나 끝말을 붙이는 일이 있었다).
+ * - 예산 칸이 있으면 알고 싶은 정보와 옵션에서 "예산"이 든 마디를 뺀다.
+ * - 알고 싶은 정보의 끝말("알고 싶음", "궁금합니다")을 뗀다. 떼고 나서 비면 그대로 둔다.
+ * - 물음표로 끝나는 문장은 뺀다(모델이 자기가 할 질문을 칸에 적은 일이 있었다). 제품 칸은 건드리지 않는다.
+ */
+export function tidySlots(slots: LiveSlots): LiveSlots {
+  const dropQuestions = (text: string) =>
+    /[?？]/.test(text)
+      ? text.split(/(?<=[.!?？])\s+/).map((part) => part.trim()).filter((part) => part && !/[?？]$/.test(part)).join(" ")
+      : text;
+  const dropBudget = (raw: string) => {
+    const text = dropQuestions(raw);
+    if (!slots.budget || !text.includes("예산")) return text;
+    const kept = text.split(/\s*[.,]\s*/).map((part) => part.trim()).filter((part) => part && !part.includes("예산"));
+    return kept.join(", ");
+  };
+  let info = dropBudget(slots.info);
+  const trimmed = stripEnd(info).replace(INFO_TAIL, "").trim();
+  if (trimmed) info = trimmed;
+  return { product: slots.product, info, options: dropBudget(slots.options), budget: slots.budget };
+}
 
 /** 앱이 칸으로 만드는 요약. 가장 긴 경우에도 SUMMARY_MAX 이하(299자)다. */
 export function summaryOf(slots: LiveSlots): string {
@@ -74,7 +150,8 @@ export function summaryOf(slots: LiveSlots): string {
 /** 제품이 비면 null. */
 export function toDraft(slots: LiveSlots): LiveDraft | null {
   if (!slots.product) return null;
-  return { ...slots, summary: summaryOf(slots) };
+  const tidy = tidySlots(slots);
+  return { ...tidy, summary: summaryOf(tidy) };
 }
 
 const STATUSES: readonly LiveChatStatus[] = ["asking", "confirming", "done", "ended"];
