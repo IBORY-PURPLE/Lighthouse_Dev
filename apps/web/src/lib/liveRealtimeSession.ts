@@ -65,7 +65,11 @@ export function buildRealtimeSession(o?: { rate?: RealtimeRate }): object {
   };
 }
 
-/** 응답 Location 헤더에서 call_id를 꺼낸다. 전체 URL과 상대 경로 둘 다 된다. 모양이 틀리면 null. */
+/**
+ * 응답 Location 헤더에서 call_id를 꺼낸다. 전체 URL과 상대 경로 둘 다 된다. 모양이 틀리면 null.
+ * 경로가 "…/calls/<id>"로 끝날 때만 받는다. "/v1/realtime/calls/"처럼 id 구간이 없으면 마지막 구간("calls")을 id로 읽지 않는다
+ * (Codex 5차 지적 2: 없는 id로 통화를 화면에 넘기면 예약 끊기가 그 통화를 끊지 못한다).
+ */
 export function parseCallId(location: string | null): string | null {
   if (!location) return null;
   let pathname: string;
@@ -74,9 +78,10 @@ export function parseCallId(location: string | null): string | null {
   } catch {
     return null;
   }
-  const last = pathname.split("/").filter(Boolean).pop();
-  if (!last) return null;
-  return CALL_ID_PATTERN.test(last) && last !== "." && last !== ".." ? last : null;
+  const parts = pathname.split("/").filter(Boolean);
+  const id = parts[parts.length - 1];
+  if (parts.length < 2 || parts[parts.length - 2] !== "calls" || !id) return null;
+  return CALL_ID_PATTERN.test(id) && id !== "." && id !== ".." ? id : null;
 }
 
 /**

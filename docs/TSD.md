@@ -459,7 +459,7 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 - fallback 엔진(`liveFallbackEngine.ts`, 본체): 브라우저 음성 인식과 기기 목소리(`speechSynthesis`) + 글자 LLM 라우트 `POST /api/live/chat`.
 - Realtime 엔진(`liveRealtimeEngine.ts`, 기본 꺼짐): OpenAI Realtime API를 WebRTC로 쓴다. 서버는 SDP만 중계하고(`POST /api/live/call`) 소리는 브라우저와 OpenAI 사이를 직접 오간다. Realtime이 꺼져 있거나 통화를 못 만들면 fallback으로 간다.
 - 차례제다. 앱이나 AI가 말하는 동안 마이크를 닫고, 말로 끼어들기는 끈다(끼어들기는 '말하기' 단추나 길게 누르기). 고정 대본과 확인 문장은 기기 목소리로 읽는다. 확인 문장은 AI가 아니라 앱이 칸(제품, 알고 싶은 정보, 옵션, 예산)으로 만들어서, 이용자가 들은 내용과 접수되는 내용이 같다.
-- 접수 관문은 기기(`canRegister`)와 서버(`/api/requests`의 검사) 두 곳에 있다. 확인 상태, 방금 읽어 준 요약, 그 뒤의 분명한 동의가 모두 있어야 한다. "등록됐어요"는 `POST /api/requests`가 성공한 뒤에만 말한다.
+- 접수 관문은 화면(`canRegister`)과 서버(`/api/live/chat`의 `gateLiveResult`. 예비 엔진에서 AI가 `done`이라고 답할 때 한 번 더 거른다) 두 곳에 있다. 확인 상태, 방금 읽어 준 요약, 그 뒤의 분명한 동의가 모두 있어야 한다. 접수 API(`POST /api/requests`)는 형식·길이·횟수만 검사하고 동의는 확인하지 않는다. "등록됐어요"는 `POST /api/requests`가 성공한 뒤에만 말한다.
 - 화면은 `session.update`를 보내지 않는다.
 
 **환경 변수 9개** (`liveConfig.ts`. `.env` 파일은 만들지 않는다)

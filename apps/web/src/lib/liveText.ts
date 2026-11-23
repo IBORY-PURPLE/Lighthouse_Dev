@@ -164,7 +164,8 @@ export function amountKey(text: string): string {
 export function tidySlots(slots: LiveSlots): LiveSlots {
   const dropBudget = (text: string) => {
     if (!slots.budget || !text.includes("예산")) return text;
-    const parts = text.split(/\s*,\s*|\.\s+|\.$/).map((part) => part.trim()).filter(Boolean);
+    // 쉼표로 마디를 나누되, 숫자 사이의 쉼표("10,000원")는 나누지 않는다(Codex 5차 지적 1: 금액이 잘려 "000원"만 남았다).
+    const parts = text.split(/\s*(?<!\d),\s*|\s*,(?!\d)\s*|\.\s+|\.$/).map((part) => part.trim()).filter(Boolean);
     const budgetKey = amountKey(slots.budget);
     const kept = parts.filter((part) => {
       if (!PURE_BUDGET.test(part)) return true;

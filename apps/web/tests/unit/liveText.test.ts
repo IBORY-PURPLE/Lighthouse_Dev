@@ -406,3 +406,25 @@ describe("tidySlots: 금액이 다른 예산 마디", () => {
   });
 });
 
+// Codex 5차 지적 1: 숫자 안의 쉼표에서 마디를 나누면 금액이 잘린다.
+describe("tidySlots: 천 단위 쉼표가 있는 금액", () => {
+  it("금액이 다르면 쉼표가 있는 금액을 그대로 남기고 두 금액을 모두 읽는다", () => {
+    const draft = toDraft(slots({ product: "TV", options: "예산은 10,000원", budget: "20,000원" }));
+    expect(draft?.options).toBe("예산은 10,000원");
+    expect(draft?.summary).toBe("제품은 TV. 옵션은 예산은 10,000원. 예산은 20,000원.");
+  });
+  it("금액이 같으면 되풀이 마디만 빼고 다른 마디의 숫자는 건드리지 않는다", () => {
+    const draft = toDraft(slots({ product: "TV", options: "화면 1,920픽셀, 예산은 200,000원", budget: "200,000원" }));
+    expect(draft?.options).toBe("화면 1,920픽셀");
+    expect(draft?.summary).toBe("제품은 TV. 옵션은 화면 1,920픽셀. 예산은 200,000원.");
+  });
+  it("쉼표 뒤에 띄어 쓴 숫자는 다른 마디다", () => {
+    const draft = toDraft(slots({ product: "TV", options: "예산은 10만 원, 55인치", budget: "10만 원" }));
+    expect(draft?.options).toBe("55인치");
+  });
+  it("amountKey는 쉼표가 있는 금액을 통째로 읽는다", () => {
+    expect(amountKey("예산은 10,000원")).toBe("10000");
+    expect(amountKey("20,000원")).toBe("20000");
+  });
+});
+

@@ -424,8 +424,16 @@ describe("POST /api/live/call 성공과 세션 설정", () => {
     expect((await makeCall()).body.callId).toBe("rtc_full_url");
     fetchMock.mockResolvedValueOnce(openaiOk("/v1/realtime/calls/rtc_relative/"));
     expect((await makeCall()).body.callId).toBe("rtc_relative");
-    fetchMock.mockResolvedValueOnce(openaiOk("rtc_bare"));
-    expect((await makeCall()).body.callId).toBe("rtc_bare");
+  });
+
+  it("Location에 id 구간이 없으면(…/calls/, 맨 id) 통화를 화면에 넘기지 않는다", async () => {
+    // Codex 5차 지적 2: "/v1/realtime/calls/"의 마지막 구간 "calls"를 id로 읽어 answer SDP를 넘기면 예약 끊기가 그 통화를 끊지 못한다.
+    for (const location of ["/v1/realtime/calls/", "https://api.openai.com/v1/realtime/calls", "rtc_bare"]) {
+      fetchMock.mockResolvedValueOnce(openaiOk(location));
+      const res = await makeCall();
+      expect(res.body).toEqual({ engine: "fallback", reason: "upstream" });
+      expect(JSON.stringify(res.body)).not.toContain("v=0");
+    }
   });
 
   it("maxTurns: 예산 제한이 없으면 30, 예산이 있으면 min(30, 남은 수 - 1)이고 1 + maxTurns를 미리 쓴다", async () => {
@@ -644,7 +652,13 @@ describe("liveRealtimeSession 부품", () => {
     expect(parseCallId("https://api.openai.com/v1/realtime/calls/rtc_abc123")).toBe("rtc_abc123");
     expect(parseCallId("/v1/realtime/calls/rtc_abc123")).toBe("rtc_abc123");
     expect(parseCallId("/v1/realtime/calls/rtc_abc123/")).toBe("rtc_abc123");
-    expect(parseCallId("rtc_bare")).toBe("rtc_bare");
+    // 경로가 …/calls/<id>로 끝날 때만 받는다. id 구간이 없으면 마지막 구간을 id로 읽지 않는다.
+    expect(parseCallId("rtc_bare")).toBeNull();
+    expect(parseCallId("/v1/realtime/calls/")).toBeNull();
+    expect(parseCallId("/v1/realtime/calls")).toBeNull();
+    expect(parseCallId("https://api.openai.com/v1/realtime/calls/")).toBeNull();
+    expect(parseCallId("/v1/realtime/")).toBeNull();
+    expect(parseCallId("/v1/realtime/calls/rtc_abc123/hangup")).toBeNull();
     expect(parseCallId("/v1/realtime/calls/rtc abc")).toBeNull();
     expect(parseCallId("/v1/realtime/calls/rtc%2Fabc")).toBeNull();
     expect(parseCallId(`/v1/realtime/calls/${"x".repeat(201)}`)).toBeNull();
