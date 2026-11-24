@@ -667,7 +667,7 @@ describe("liveRealtimeSession 부품", () => {
 
   it("buildRealtimeSession: LIVE_ASK_NAME=on이면 지시문 끝에 성함 여쭙기가 붙고, 그 밖의 값이면 그대로다", () => {
     vi.stubEnv("LIVE_ASK_NAME", "on");
-    const asked = (session.buildRealtimeSession() as unknown as LooseSession).instructions;
+    const asked = String((session.buildRealtimeSession() as unknown as LooseSession).instructions);
     expect(asked.startsWith(LIVE_REALTIME_INSTRUCTIONS)).toBe(true);
     expect(asked).toContain("[성함 여쭙기]");
     vi.stubEnv("LIVE_ASK_NAME", "yes");
