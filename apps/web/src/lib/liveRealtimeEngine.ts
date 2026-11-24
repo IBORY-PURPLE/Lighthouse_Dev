@@ -292,7 +292,7 @@ export function createRealtimeEngine(deps: RealtimeEngineDeps = {}): LiveEngine 
   return {
     kind: "realtime",
     start,
-    listen: (opts) => applyOp({ op: "listen", keep: opts?.keep === true }),
+    listen: (opts) => applyOp(opts?.sticky === true ? { op: "listen", keep: opts.keep === true, sticky: true } : { op: "listen", keep: opts?.keep === true }),
     hold: () => applyOp({ op: "hold" }),
     submit: () => applyOp({ op: "submit" }),
     cancelListen: (discard) => applyOp({ op: "cancelListen", discard }),

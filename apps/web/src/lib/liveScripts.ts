@@ -1,6 +1,6 @@
 // /live 안내 문구 대본, 음절 세기, 방문 횟수 읽기·쓰기. 설계서 10절.
 // 단추 이름과 말 명령은 BUTTONS, COMMANDS에서 끼워 넣는다. 모든 대본은 100음절 이하다.
-import { BUTTONS, COMMANDS, type LocalCommand } from "@/lib/liveCommands";
+import { BUTTONS, COMMANDS, NEXT_WORD, type LocalCommand } from "@/lib/liveCommands";
 import type { InputMode, LiveErrorKind } from "@/lib/liveEngine";
 
 export const LIVE_VISITS_KEY = "lh.live.visits.v1";
@@ -65,6 +65,8 @@ const SCRIPTS = {
   helpMoreVoice: `VoiceOver를 쓰시면 ${B.talk} 단추를 찾아 두 번 탭해서 제 말을 멈출 수 있어요. VoiceOver를 쓰지 않으면 화면을 길게 눌러도 돼요. ${W.repeat}는 다시 듣기, ${W.slow}와 ${W.fast}는 말 빠르기, ${W.pause}은 멈춤, ${W.end}은 끝내기예요.`,
   helpText: `원하는 제품, 알고 싶은 정보, 원하는 옵션을 알려 주시면 봉사자에게 전달해 드려요. ${B.textInput} 칸에 쓰고 ${B.sendText} 단추를 누르세요. 제 말을 멈추려면 ${B.stopTalking} 단추를 누르세요. ${B.repeat}, ${B.pause}, ${B.exit} 단추와 말 빠르기 단추도 있어요.`,
   silence1: "천천히 말씀하셔도 돼요. 띵 소리가 나면 말씀하세요.",
+  manualGuide: `말씀하시다 쉬어도 계속 듣고 있어요. 다 말씀하신 뒤 ${q(NEXT_WORD)}이라고 하시면 넘어갈게요.`,
+  manualMore: `더 말씀하셔도 돼요. 다 말씀하셨으면 ${q(NEXT_WORD)}이라고 해 주세요.`,
   silence2: `무엇을 말할지 모르겠으면 ${W.help}이라고 해 보세요. 예를 들면 전기밥솥, 할인 혜택이 궁금해요, 이렇게 말씀하시면 돼요.`,
   extendAsk: "계속 들을까요? 아무 말씀이나 해 주세요. 20초 동안 조용하면 잠시 멈출게요.",
   pausedBySilence: `잠시 멈췄어요. 이어서 하려면 ${B.resume} 단추를 누르세요.`,

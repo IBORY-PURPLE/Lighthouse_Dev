@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   isLiveEnabled,
   LIVE_WARN_BEFORE_SEC,
+  liveAdvanceMode,
   liveMaxSessionSec,
   realtimeGate,
 } from "@/lib/liveConfig";
@@ -34,6 +35,7 @@ function handleConfig(request: NextRequest): Response {
       ...(gate.ok ? {} : { reason: gate.reason }),
       maxSessionSec: liveMaxSessionSec(),
       warnBeforeSec: LIVE_WARN_BEFORE_SEC,
+      ...(liveAdvanceMode() === "manual" ? { advance: "manual" } : {}),
     },
     { headers: NO_STORE },
   );

@@ -25,6 +25,7 @@ export type EngineEvent =
   | { type: "NO_SPEECH" }
   | { type: "USER_TURN_END"; text: string; transcribed: boolean }   // transcribed=false: Realtime 전사가 아직 안 옴
   | { type: "USER_TRANSCRIPT"; text: string; final: boolean }        // 자막, 늦게 온 전사
+  | { type: "USER_PART"; text: string }                              // Realtime만: 이어 듣기(sticky) 중에 말 한 토막의 전사가 옴. 차례는 끝나지 않았다
   | { type: "TURN_RESULT"; reply: string; status: LiveChatStatus; slots: LiveSlots }   // fallback만: 한 턴의 결과
   | { type: "REPLY_START" }                                          // Realtime만: AI 소리 시작
   | { type: "REPLY_TEXT"; text: string; final: boolean }             // Realtime만: AI 말의 자막
@@ -46,7 +47,7 @@ export interface EngineStartContext {
 export interface LiveEngine {
   readonly kind: EngineKind;
   start(ctx: EngineStartContext): Promise<void>;   // 실패는 던지지 않고 FAILED나 LOST로 알린다
-  listen(opts?: { keep?: boolean }): void;          // 마이크를 연다. keep: 붙든 글과 버퍼를 버리지 않는다
+  listen(opts?: { keep?: boolean; sticky?: boolean }): void;   // 마이크를 연다. keep: 붙든 글과 버퍼를 버리지 않는다. sticky: 말이 잠깐 끊겨도 마이크를 닫지 않는다(Realtime만)
   hold(): void;                                     // 마이크를 잠시 닫는다. 들은 글은 버리지 않는다
   submit(): void;                                   // 지금까지 들은 것으로 차례를 끝낸다
   cancelListen(discard: boolean): void;

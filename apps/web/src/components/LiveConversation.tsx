@@ -374,9 +374,9 @@ export function LiveConversation() {
 
     let cancelled = false;
     void fetch("/api/live/config", { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<{ realtime?: unknown } | null>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<{ realtime?: unknown; advance?: unknown } | null>) : null))
       .then((data) => {
-        if (!cancelled && data) runner.dispatch({ type: "CONFIG", realtime: data.realtime === true });
+        if (!cancelled && data) runner.dispatch({ type: "CONFIG", realtime: data.realtime === true, ...(data.advance === "manual" ? { advance: "manual" as const } : {}) });
       })
       .catch(() => {});
 

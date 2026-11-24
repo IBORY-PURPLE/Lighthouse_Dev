@@ -182,11 +182,11 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
         return;
       case "OPEN_TURN":
         caption = { ...caption, user: "" };
-        openTurn(fx.earcon, fx.settle, fx.keep);
+        openTurn(fx.earcon, fx.settle, fx.keep, fx.sticky === true);
         return;
       case "RELISTEN":
         deps.setAudioSession("auto");
-        current?.engine.listen({ keep: true });
+        current?.engine.listen(fx.sticky === true ? { keep: true, sticky: true } : { keep: true });
         return;
       case "ENGINE_START":
         startEngine(fx.kind);
@@ -352,7 +352,7 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
     });
   }
 
-  function openTurn(earcon: "turn" | "confirm", settle: boolean, keep: boolean): void {
+  function openTurn(earcon: "turn" | "confirm", settle: boolean, keep: boolean, sticky: boolean): void {
     cancelTurn();
     turnOpening = true;
     const mine = turnSeq;
@@ -374,7 +374,7 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
       if (!alive()) return;
       turnOpening = false;
       deps.setAudioSession("auto");
-      current?.engine.listen({ keep });
+      current?.engine.listen(sticky ? { keep, sticky } : { keep });
     })();
   }
 

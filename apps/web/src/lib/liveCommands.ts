@@ -58,6 +58,29 @@ export function matchLocalCommand(text: string): LocalCommand | null {
   return null;
 }
 
+// '다음' 방식(LIVE_ADVANCE=manual): 이용자가 이 말을 해야 모은 말을 AI에게 넘긴다. 말 명령(COMMANDS)과 달리 다른 말 끝에 붙어도 듣는다.
+const NEXT_RE = /^(?:다음(?:단계|질문|으로|거)?(?:넘어가|넘어갈게|갈게|가)?|넘어가|넘어갈게|다했어|다말했어|이상이에요|이상입니다)(?:요|줘|줘요|주세요|자|죠)?$/;
+const NEXT_TAIL_MAX = 3;
+/** 안내 문구에 적는 대표 낱말. */
+export const NEXT_WORD = "다음";
+
+/** 글 전체가 '다음으로 넘어가자'는 말인가. */
+export function isNextCommand(text: string): boolean {
+  const n = normalizeSpeech(text);
+  return n !== "" && NEXT_RE.test(n);
+}
+
+/** 글 끝의 '다음' 말을 떼어 낸다. next: 넘어가자는 말이 있었다. content: 그 말을 뺀 나머지(없으면 ""). */
+export function splitNext(text: string): { content: string; next: boolean } {
+  const trimmed = text.trim();
+  if (isNextCommand(trimmed)) return { content: "", next: true };
+  const tokens = trimmed.split(/\s+/);
+  for (let k = Math.min(NEXT_TAIL_MAX, tokens.length - 1); k >= 1; k--) {
+    if (isNextCommand(tokens.slice(-k).join(" "))) return { content: tokens.slice(0, -k).join(" "), next: true };
+  }
+  return { content: trimmed, next: false };
+}
+
 /** "?"나 "？"가 있다. */
 export function hasQuestion(text: string): boolean {
   return /[?？]/.test(text);

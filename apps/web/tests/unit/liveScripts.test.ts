@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUTTONS, COMMANDS } from "@/lib/liveCommands";
+import { BUTTONS, COMMANDS, NEXT_WORD } from "@/lib/liveCommands";
 import type { LiveErrorKind } from "@/lib/liveEngine";
 import {
   LIVE_VISITS_KEY,
@@ -40,6 +40,7 @@ describe("대본 표", () => {
       ...Object.values(BUTTONS),
       ...COMMANDS.flatMap((c) => c.words),
       "네", "다시 보내", "허용",
+      NEXT_WORD,   // '다음' 방식에서 차례를 넘기는 말(liveCommands)
     ]);
     for (const id of SCRIPT_IDS) {
       for (const m of text(id).matchAll(/'([^']+)'/g)) {

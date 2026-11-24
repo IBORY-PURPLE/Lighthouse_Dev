@@ -67,6 +67,14 @@ export function liveVadMode(): "semantic" | "server" {
   return process.env.LIVE_REALTIME_VAD?.trim().toLowerCase() === "semantic" ? "semantic" : "server";
 }
 
+/**
+ * LIVE_ADVANCE: 차례를 누가 넘기나. 기본 "auto"(말이 멎으면 앱이 AI에게 넘긴다).
+ * "manual"이면 이용자가 '다음'이라고 하거나 큰 단추를 누를 때만 넘긴다(말이 잠깐 끊겨도 계속 듣는다).
+ */
+export function liveAdvanceMode(): "auto" | "manual" {
+  return process.env.LIVE_ADVANCE?.trim().toLowerCase() === "manual" ? "manual" : "auto";
+}
+
 /** LIVE_REALTIME_REASONING, 기본 "minimal". "off"면 null(필드를 뺀다). */
 export function liveReasoningEffort(): string | null {
   const value = process.env.LIVE_REALTIME_REASONING?.trim();

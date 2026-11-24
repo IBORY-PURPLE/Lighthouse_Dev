@@ -13,6 +13,7 @@ export interface RealtimeTracker {
   committedInTurn: boolean;              // 이 차례에 committed가 왔다
   held: boolean;                         // 단추를 찾느라 붙든 상태
   heldText: string;                      // 붙든 동안 온 전사
+  sticky: boolean;                       // 이어 듣기: 서버가 commit해도 마이크를 닫지 않고, 전사를 USER_PART로 낸다. submit·hold·cancelListen이 끈다
   responseActive: boolean;               // response.created부터 response.done까지
   audioPlaying: boolean;                 // output_audio_buffer.started부터 stopped·cleared까지
   audioStarted: boolean;                 // 이 응답에서 소리가 났다
@@ -26,7 +27,7 @@ export interface RealtimeTracker {
 }
 
 export type EngineOp =
-  | { op: "listen"; keep: boolean } | { op: "hold" } | { op: "submit" } | { op: "cancelListen"; discard: boolean }
+  | { op: "listen"; keep: boolean; sticky?: boolean } | { op: "hold" } | { op: "submit" } | { op: "cancelListen"; discard: boolean }
   | { op: "respond"; text: string; source: "voice" | "text" } | { op: "cancelResponse" }
   | { op: "toolResult"; callId: string; output: object; respond: boolean }
   | { op: "setRate"; rate: Rate }
@@ -50,7 +51,7 @@ const SPEAK_WORD: Record<Rate, string> = { slow: "천천히", normal: "보통 �
 /** 통화를 만든 뒤 쓸 처음 상태. maxTurns는 /api/live/call이 준 값이다. */
 export function createRealtimeTracker(maxTurns: number): RealtimeTracker {
   return {
-    awaitingItemId: null, heard: false, committedInTurn: false, held: false, heldText: "",
+    awaitingItemId: null, heard: false, committedInTurn: false, held: false, heldText: "", sticky: false,
     responseActive: false, audioPlaying: false, audioStarted: false, replyText: "",
     turnsSent: 0, maxTurns, nextEventId: 1, ignoreEventIds: [], logOnlyEventIds: [], badArgsRetried: false,
   };
@@ -114,17 +115,26 @@ export function realtimeOp(t: RealtimeTracker, op: EngineOp): RealtimeResult {
       n.heard = false;
       n.committedInTurn = false;
       n.held = false;
+      n.sticky = op.sticky === true;
       actions.push({ emit: { type: "LISTEN_STARTED", late: false } });
+      if (n.sticky && n.heldText) {
+        // 붙든 동안 쌓인 글은 이어 듣기에서는 토막으로 넘긴다(차례 끝이 따로 없다).
+        const text = n.heldText;
+        n.heldText = "";
+        actions.push({ emit: { type: "USER_PART", text } });
+      }
       break;
     }
     case "hold": {
       actions.push({ mic: false }, { turnCap: false });
       n.held = true;
+      n.sticky = false;
       break;
     }
     case "submit": {
       actions.push({ mic: false }, { turnCap: false });
       n.held = false;   // 붙들기가 끝났다. 남겨 두면 뒤에 오는 전사가 붙든 글로 삼켜져 차례가 끝나지 않는다.
+      n.sticky = false; // 이어 듣기를 끝낸다. 아래는 보통 차례와 같다(말하는 중이면 commit, 아니면 NO_SPEECH).
       if (n.heldText) {
         const text = n.heldText;
         n.heldText = "";
@@ -144,6 +154,7 @@ export function realtimeOp(t: RealtimeTracker, op: EngineOp): RealtimeResult {
     case "cancelListen": {
       actions.push({ mic: false }, { turnCap: false });
       n.held = false;
+      n.sticky = false;
       if (op.discard) {
         pushSend(n, actions, { type: "input_audio_buffer.clear" }, "ignore");
         n.heldText = "";
@@ -313,6 +324,12 @@ export function realtimeStep(t: RealtimeTracker, event: unknown): RealtimeResult
     }
     case "input_audio_buffer.committed": {
       const itemId = typeof e.item_id === "string" ? e.item_id : null;
+      if (n.sticky) {
+        // 이어 듣기: 숨을 고르는 사이일 수 있다. 마이크를 닫지 않고 다음 말을 기다린다. 전사는 오는 대로 USER_PART로 낸다.
+        n.heard = false;
+        actions.push({ turnCap: false });
+        break;
+      }
       n.committedInTurn = true;
       actions.push({ mic: false }, { turnCap: false });
       if (itemId) {
@@ -330,7 +347,9 @@ export function realtimeStep(t: RealtimeTracker, event: unknown): RealtimeResult
       const itemId = typeof e.item_id === "string" ? e.item_id : null;
       const transcript = typeof e.transcript === "string" ? e.transcript.trim() : "";
       const mine = itemId !== null && itemId === n.awaitingItemId;
-      if (n.held) {
+      if (n.sticky) {
+        if (transcript) actions.push({ emit: { type: "USER_PART", text: transcript } });
+      } else if (n.held) {
         // 붙든 동안 온 전사는 쌓아 두고, 차례는 submit 때 끝낸다.
         // 빈 전사면 기다림을 그대로 둔다(submit이 타이머를 다시 걸어 차례를 끝낸다).
         if (transcript) {

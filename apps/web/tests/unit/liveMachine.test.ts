@@ -2161,7 +2161,7 @@ describe("5.11 불변식(도달 가능한 모든 상태 × 모든 사건)", () =
     for (const t of allTraces) {
       if (!["listening", "confirming"].includes(t.next.phase)) expect(t.next.mic, `${t.prev.phase} ${t.event.type}`).toBe("off");
     }
-  });
+  }, 20_000);   // 거의 모든 전이를 하나씩 단언해 단독으로도 2초쯤 걸린다. 전체 시험을 함께 돌리면 기본 5초를 넘긴다(2026-11-24). 단언은 그대로다.
   it("9. mic가 held인 동안에는 TIMER 사건이 SPEAK를 내지 않는다", () => {
     let count = 0;
     for (const t of allTraces) {
