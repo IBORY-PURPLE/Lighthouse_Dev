@@ -341,6 +341,7 @@ export function LiveConversation() {
       now: () => Date.now(),
       label,
       onStored: () => setLogMark((cur) => cur ?? { label }),
+      onStopped: () => setLogMark(null),
     });
 
     const runner = createLiveRunner(

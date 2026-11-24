@@ -207,6 +207,8 @@ export interface LiveLogDeps {
   label: string;
   /** 서버가 stored > 0을 답할 때마다 부른다(저장된 줄 수). */
   onStored?(count: number): void;
+  /** 서버 답(off·ended·no_label·404)이나 설정 때문에 이 화면에서 보내기를 멈출 때 한 번 부른다(표시를 내리는 용도). */
+  onStopped?(): void;
 }
 
 export interface LiveLog {
@@ -245,6 +247,13 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
   const noDevice = new Map<string, number>();
   let deviceSettled = false;
   let disposed = false;
+  let stopped = false;
+  /** 쉬는 구간 번호. 평소 전송이 실패해 새로 쉬기 시작하거나 성공하면 올라간다(떠날 때 전송의 실패는 구간을 바꾸지 않는다). */
+  let restEpoch = 0;
+  /** 떠날 때 전송을 이미 한 쉬는 구간 번호. 쉬는 구간 하나에 한 번만 허용한다. */
+  let leaveEpoch = -1;
+  /** 응답을 아직 못 받은 평소 묶음. 페이지를 닫으면 브라우저가 취소하므로 떠날 때 한 번 더 보낸다. */
+  let active: { batch: LiveLogEntry[]; dup: boolean } | null = null;
   const cids = new Map<string, { seq: number; startAt: number }>();
   /** 끊겼을지 모르는 AI 답(final이 아닌 REPLY_TEXT 중 마지막 것). */
   let pendingCut: { cid: string; text: string; phase: string; engine: LiveLogEntry["engine"] } | null = null;
@@ -258,6 +267,14 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
     lastCut = null;
     noDevice.clear();
     clearTimer();
+    if (!stopped) {
+      stopped = true;
+      try {
+        deps.onStopped?.();
+      } catch {
+        // 표시 오류가 멈춤을 막지 않게 한다.
+      }
+    }
   };
 
   function clearTimer(): void {
@@ -386,6 +403,8 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
   /** 한 묶음을 보내고 응답을 처리한다. 던지지 않는다. leaving이면 reservedBytes(예약한 keepalive 본문)를 응답 뒤 돌려준다. */
   async function sendBatch(batch: LiveLogEntry[], leaving: boolean, reservedBytes: number): Promise<void> {
     inflight += 1;
+    const mine = leaving ? null : { batch, dup: false };
+    if (mine) active = mine;
     try {
       if (!leaving && !deviceSettled) {
         try {
@@ -397,12 +416,13 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
       }
       if (mode !== "on" || disposed) return;
       const result = await post(bodyOf(batch), leaving);
-      handle(batch, result.status, result.data);
+      handle(batch, result.status, result.data, leaving);
     } catch {
       requeue(batch);
-      fail();
+      fail(leaving);
     } finally {
       inflight -= 1;
+      if (mine && active === mine) active = null;
       if (leaving) keepaliveBytes = Math.max(0, keepaliveBytes - reservedBytes);
     }
   }
@@ -414,9 +434,10 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
   }
 
   /** 실패한 뒤: 5초(1·2번째)·30초(3번째부터) 쉰다. 그동안 평소 전송은 막고 재시도 타이머만 보낸다. */
-  function fail(): void {
+  function fail(leaving = false): void {
     if (mode !== "on" || disposed) return;
     failures += 1;
+    if (!leaving) restEpoch += 1; // 평소 전송의 실패는 새 쉬는 구간이다. 떠날 때 전송의 실패는 같은 구간을 늘릴 뿐이다.
     const ms = failures >= FAIL_REST_AFTER ? LIVE_LOG_REST_MS : LIVE_LOG_RETRY_MS;
     retryAt = deps.now() + ms;
     clearTimer();
@@ -426,9 +447,10 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
   function succeed(): void {
     failures = 0;
     retryAt = 0;
+    restEpoch += 1;
   }
 
-  function handle(batch: LiveLogEntry[], status: number, data: unknown): void {
+  function handle(batch: LiveLogEntry[], status: number, data: unknown, leaving: boolean): void {
     if (mode !== "on") return;
     if (status === 404) {
       stopSending();
@@ -436,7 +458,7 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
     }
     if (status === 429 || status === 408 || status >= 500 || status === 0) {
       requeue(batch);
-      fail();
+      fail(leaving);
       return;
     }
     if (status !== 200) {
@@ -446,11 +468,10 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
       afterDone();
       return;
     }
-    succeed();
-    onReply(batch, data);
+    onReply(batch, data, leaving);
   }
 
-  function onReply(batch: LiveLogEntry[], data: unknown): void {
+  function onReply(batch: LiveLogEntry[], data: unknown, leaving: boolean): void {
     try {
       if (mode !== "on") return;
       const obj = (data && typeof data === "object" ? data : {}) as { stored?: unknown; reason?: unknown };
@@ -460,6 +481,13 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
         stopSending();
         return;
       }
+      if (reason === "unavailable") {
+        // 표가 아직 없다. 대화 중에 생길 수 있으니 실패와 같이 되돌려 놓고 쉬었다 다시 보낸다(onStored는 부르지 않는다).
+        requeue(batch);
+        fail(leaving);
+        return;
+      }
+      succeed();
       const key = batchKey(batch);
       if (reason === "no_device") {
         const tries = (noDevice.get(key) ?? 0) + 1;
@@ -575,6 +603,7 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
       if (disposed) return;
       if (next === "all" || (next === "label" && deps.label !== "")) {
         mode = "on";
+        stopped = false;
         if (queue.length >= LIVE_LOG_CLIENT_BATCH) void sendNext();
         else if (queue.some(worthy)) arm(LIVE_LOG_SEND_DELAY_MS);
         return;
@@ -585,13 +614,57 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
     }
   }
 
+  /** 응답을 못 받은 평소 묶음의 응답 처리(떠날 때 한 번 더 보낸 사본). 서버가 같은 cid·seq를 한 번만 저장하므로 결과는 가볍게만 본다. */
+  async function sendDuplicate(batch: LiveLogEntry[], reservedBytes: number): Promise<void> {
+    try {
+      const { status, data } = await post(bodyOf(batch), true);
+      if (mode !== "on" || disposed) return;
+      if (status === 404) {
+        stopSending();
+        return;
+      }
+      if (status !== 200) return; // 실패해도 평소 요청이 자기 몫을 처리한다(큐로 되돌림).
+      const obj = (data && typeof data === "object" ? data : {}) as { stored?: unknown; reason?: unknown };
+      if (obj.reason === "off" || obj.reason === "ended" || obj.reason === "no_label") {
+        stopSending();
+        return;
+      }
+      if (typeof obj.stored === "number" && obj.stored > 0) {
+        try {
+          deps.onStored?.(obj.stored);
+        } catch {
+          // 표시 오류는 삼킨다.
+        }
+      }
+    } catch {
+      // 삼킨다.
+    } finally {
+      keepaliveBytes = Math.max(0, keepaliveBytes - reservedBytes);
+    }
+  }
+
   function flush(leaving = false): void {
     try {
       if (leaving) emitCut();
       if (mode !== "on" || disposed) return;
+      if (leaving && failures > 0) {
+        // 연속 실패로 쉬는 중: 떠날 때 전송은 쉬는 구간 하나에 한 번만(탭을 숨겼다 보였다 해도 그때마다 서버를 부르지 않는다).
+        if (resting() && leaveEpoch === restEpoch) return;
+        leaveEpoch = restEpoch;
+      }
       clearTimer();
       if (leaving) {
         // 떠나는 중: 기기 쿠키를 기다리지 않고, 쌓인 것을 바로 보낸다. keepalive 본문 합계는 LIVE_LOG_LEAVE_BYTES까지만.
+        // 응답을 못 받은 평소 묶음은 페이지가 닫히면 취소되므로 먼저 한 번 더 보낸다(한 묶음에 한 번).
+        const act = active;
+        if (act && !act.dup) {
+          const size = byteLength(bodyOf(act.batch));
+          if (size <= LIVE_LOG_LEAVE_BYTES - keepaliveBytes) {
+            act.dup = true;
+            keepaliveBytes += size;
+            void sendDuplicate(act.batch, size);
+          }
+        }
         // 못 보낸 줄은 큐에 남겨 두고(화면이 돌아오면 평소 전송으로 나간다) 타이머를 다시 건다.
         while (queue.length > 0) {
           const batch = take(Math.min(LIVE_LOG_CLIENT_BYTES, LIVE_LOG_LEAVE_BYTES - keepaliveBytes));

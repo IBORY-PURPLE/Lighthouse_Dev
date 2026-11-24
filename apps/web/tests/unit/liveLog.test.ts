@@ -375,6 +375,7 @@ function harness(opts: { label?: string; deviceReady?: Promise<void> } = {}) {
   const urls: string[] = [];
   const plan: Reply[] = [];
   const stored: number[] = [];
+  const stops = { n: 0 };
   const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     urls.push(String(url));
     inits.push(init ?? {});
@@ -391,8 +392,11 @@ function harness(opts: { label?: string; deviceReady?: Promise<void> } = {}) {
     now: () => timers.now,
     label: opts.label ?? "T01",
     onStored: (n) => stored.push(n),
+    onStopped: () => {
+      stops.n += 1;
+    },
   });
-  return { log, timers, sent, inits, urls, plan, stored, fetchFn };
+  return { log, timers, sent, inits, urls, plan, stored, stops, fetchFn };
 }
 
 const heard = (text: string): LiveEvent => ({ type: "USER_TURN_END", text, transcribed: true });
@@ -749,7 +753,7 @@ describe("createLiveLog: 응답 처리", () => {
   });
 
   it("stored가 0이면(empty, capped 등) onStored를 부르지 않고 다시 보내지도 않는다", async () => {
-    for (const reason of ["empty", "capped", "unavailable", "failed"]) {
+    for (const reason of ["empty", "capped", "failed"]) {
       const h = harness();
       h.plan.push({ json: { stored: 0, reason } });
       await started(h);
@@ -928,21 +932,22 @@ describe("createLiveLog: 실패 중 쉬기·시간 제한·묶음별 다시 보�
     const h = harness();
     h.log.setMode("label");
     h.fetchFn.mockImplementationOnce(async () => new Promise<Response>(() => {})); // 평소 첫 묶음(20줄)은 끝나지 않는다
-    const mid = "가".repeat(100);
+    const mid = "가".repeat(60);
     for (let i = 0; i < 80; i += 1) say(h.log, `${i} ${mid}`);
     await settle();
     expect(h.fetchFn).toHaveBeenCalledTimes(1);
     h.plan.push(
+      { json: { stored: 0, reason: "no_device" } }, // 끝나지 않는 평소 묶음의 사본(떠날 때 한 번 더 보낸 것)
       { json: { stored: 0, reason: "no_device" } },
       { json: { stored: 0, reason: "no_device" } },
       { json: { stored: 0, reason: "no_device" } },
     );
-    h.log.flush(true); // 남은 60줄 = 20줄씩 3묶음
+    h.log.flush(true); // 사본 1개 + 남은 60줄 = 20줄씩 3묶음
     await settle();
-    expect(h.fetchFn).toHaveBeenCalledTimes(4);
-    expect(h.inits.filter((i) => i.keepalive === true)).toHaveLength(3);
+    expect(h.fetchFn).toHaveBeenCalledTimes(5);
+    expect(h.inits.filter((i) => i.keepalive === true)).toHaveLength(4);
     await h.timers.advance(60_000);
-    const sentAgain = h.sent.slice(3).flatMap((r) => r.entries.map((e) => e.seq));
+    const sentAgain = h.sent.slice(4).flatMap((r) => r.entries.map((e) => e.seq));
     expect(new Set(sentAgain).size).toBe(80); // 0~79 모두 다시 나갔다(버려진 묶음 없음)
   });
 
@@ -976,6 +981,147 @@ describe("createLiveLog: 실패 중 쉬기·시간 제한·묶음별 다시 보�
       await h.timers.advance(2000);
     }
     expect(new Set(h.sent.flatMap((r) => r.entries.map((e) => e.seq))).size).toBe(100);
+  });
+
+  it("200 unavailable(표가 아직 없음)은 실패와 같이 되돌려 놓고 5초, 5초, 그 뒤 30초 쉬며 다시 보낸다. onStored는 부르지 않는다", async () => {
+    const h = harness();
+    h.plan.push(
+      { json: { stored: 0, reason: "unavailable" } },
+      { json: { stored: 0, reason: "unavailable" } },
+      { json: { stored: 0, reason: "unavailable" } },
+    );
+    h.log.setMode("label");
+    say(h.log, "표가 없을 때의 말");
+    await h.timers.advance(LIVE_LOG_SEND_DELAY_MS);
+    expect(h.fetchFn).toHaveBeenCalledTimes(1);
+    await h.timers.advance(LIVE_LOG_RETRY_MS - 1);
+    expect(h.fetchFn).toHaveBeenCalledTimes(1);
+    await h.timers.advance(1);
+    expect(h.fetchFn).toHaveBeenCalledTimes(2);
+    await h.timers.advance(LIVE_LOG_RETRY_MS);
+    expect(h.fetchFn).toHaveBeenCalledTimes(3);
+    await h.timers.advance(LIVE_LOG_REST_MS - 1);
+    expect(h.fetchFn).toHaveBeenCalledTimes(3);
+    expect(h.stored).toEqual([]);
+    await h.timers.advance(1);
+    expect(h.fetchFn).toHaveBeenCalledTimes(4);
+    expect(h.sent[3].entries).toEqual(h.sent[0].entries); // 같은 묶음이 빠지지 않고 다시 갔다
+    expect(h.stored).toEqual([1]);
+  });
+
+  it("쉬는 중(연속 실패)에는 flush(true)를 5번 불러도 그 쉬는 구간 안의 떠날 때 요청은 한 차례뿐이고, 구간이 끝나 다시 실패하면 한 차례 더 허용한다", async () => {
+    const h = harness();
+    for (let i = 0; i < 50; i += 1) h.plan.push({ status: 503 });
+    h.log.setMode("label");
+    say(h.log, "말 하나");
+    say(h.log, "말 둘");
+    await h.timers.advance(LIVE_LOG_SEND_DELAY_MS); // 평소 전송 1번째 실패 → 5초 쉼
+    expect(h.fetchFn).toHaveBeenCalledTimes(1);
+    const leavingCount = () => h.inits.filter((i) => i.keepalive === true).length;
+    for (let i = 0; i < 5; i += 1) {
+      h.log.flush(true);
+      await settle();
+    }
+    expect(leavingCount()).toBe(1);
+    expect(h.fetchFn).toHaveBeenCalledTimes(2);
+    // 쉬는 구간이 끝나면 재시도 타이머가 평소 전송을 하고, 다시 실패해 새 구간이 시작된다.
+    await h.timers.advance(LIVE_LOG_REST_MS);
+    const before = h.fetchFn.mock.calls.length;
+    for (let i = 0; i < 5; i += 1) {
+      h.log.flush(true);
+      await settle();
+    }
+    expect(leavingCount()).toBe(2);
+    expect(h.fetchFn.mock.calls.length).toBe(before + 1);
+  });
+
+  it("실패 상태가 아닐 때의 flush(true)는 평소처럼 부를 때마다 보낸다", async () => {
+    const h = harness();
+    h.log.setMode("label");
+    for (let i = 0; i < 3; i += 1) {
+      say(h.log, `말 ${i}`);
+      h.log.flush(true);
+      await settle();
+    }
+    expect(h.inits.filter((i) => i.keepalive === true)).toHaveLength(3);
+  });
+
+  it("응답을 못 받은 평소 묶음은 flush(true)에서 떠날 때 요청으로 먼저 한 번 더 보낸다. 두 번째 flush(true)에는 다시 보내지 않는다", async () => {
+    const h = harness();
+    h.log.setMode("label");
+    h.fetchFn.mockImplementationOnce(async (_url, init) => {
+      h.sent.push(JSON.parse(String(init?.body)) as LiveLogRequest);
+      h.inits.push(init ?? {});
+      return new Promise<Response>(() => {}); // 끝나지 않는 평소 전송
+    });
+    say(h.log, "보내는 중인 말");
+    await h.timers.advance(LIVE_LOG_SEND_DELAY_MS);
+    expect(h.fetchFn).toHaveBeenCalledTimes(1);
+    expect(h.inits[0].keepalive).toBe(false);
+    say(h.log, "큐에 남은 말");
+    h.log.flush(true);
+    await settle();
+    expect(h.fetchFn).toHaveBeenCalledTimes(3);
+    expect(h.inits[1].keepalive).toBe(true);
+    expect(h.inits[2].keepalive).toBe(true);
+    expect(h.sent[1].entries.map((e) => e.body)).toEqual(["보내는 중인 말"]); // 사본이 먼저
+    expect(h.sent[1].entries).toEqual(h.sent[0].entries); // 같은 cid·seq(서버가 한 번만 저장한다)
+    expect(h.sent[2].entries.map((e) => e.body)).toEqual(["큐에 남은 말"]);
+    h.log.flush(true);
+    h.log.flush(true);
+    await settle();
+    expect(h.fetchFn).toHaveBeenCalledTimes(3); // 같은 묶음을 되풀이해 보내지 않는다
+  });
+
+  it("떠날 때 보낸 사본의 바이트도 한도(32KB) 계산에 들어간다", async () => {
+    const h = harness();
+    h.log.setMode("label");
+    const resolvers: (() => void)[] = [];
+    h.fetchFn.mockImplementation(async (_url, init) => {
+      const req = JSON.parse(String(init?.body)) as LiveLogRequest;
+      h.sent.push(req);
+      h.inits.push(init ?? {});
+      await new Promise<void>((r) => resolvers.push(r));
+      return new Response(JSON.stringify({ stored: req.entries.length, reason: "saved" }), { status: 200 });
+    });
+    const long = "가".repeat(900);
+    for (let i = 0; i < 100; i += 1) say(h.log, `${i} ${long}`);
+    await settle();
+    h.log.flush(true);
+    h.log.flush(true);
+    await settle();
+    const total = h.inits.filter((i) => i.keepalive === true).reduce((n, i) => n + new TextEncoder().encode(String(i.body)).length, 0);
+    expect(total).toBeLessThanOrEqual(LIVE_LOG_LEAVE_BYTES);
+    expect(h.sent[1].entries).toEqual(h.sent[0].entries); // 첫 keepalive는 진행 중이던 평소 묶음의 사본
+  });
+
+  it("onStopped: off·ended·no_label·404 답으로 보내기를 멈출 때 한 번만 부른다", async () => {
+    for (const first of [
+      { json: { stored: 0, reason: "off" } },
+      { json: { stored: 0, reason: "ended" } },
+      { json: { stored: 0, reason: "no_label" } },
+      { status: 404 },
+    ] as Reply[]) {
+      const h = harness();
+      h.plan.push(first);
+      h.log.setMode("label");
+      say(h.log, "말");
+      await h.timers.advance(LIVE_LOG_SEND_DELAY_MS);
+      expect(h.stops.n, JSON.stringify(first)).toBe(1);
+      say(h.log, "이후");
+      h.log.flush(true);
+      await h.timers.advance(60_000);
+      expect(h.stops.n, JSON.stringify(first)).toBe(1);
+    }
+  });
+
+  it("onStopped: 저장이 잘 되는 동안에는 부르지 않는다", async () => {
+    const h = harness();
+    h.log.setMode("label");
+    say(h.log, "말");
+    await h.timers.advance(LIVE_LOG_SEND_DELAY_MS);
+    expect(h.stored).toEqual([1]);
+    expect(h.stops.n).toBe(0);
   });
 });
 

@@ -74,21 +74,17 @@ describe("liveLogMode (LIVE_LOG, LIVE_LOG_UNTIL)", () => {
     expect(liveLogMode(Date.parse("2026-12-03T15:00:00Z"))).toBeNull();
   });
 
-  it("끝 날짜가 없으면(빈 값 포함) 끝 날짜 없음으로 본다", () => {
+  it("끝 날짜 환경 변수가 아예 없으면 끝 날짜 없음으로 본다", () => {
     vi.stubEnv("LIVE_LOG", "all");
     const farFuture = Date.parse("2099-01-01T00:00:00Z");
-    for (const value of ["", "   "]) {
-      vi.stubEnv("LIVE_LOG_UNTIL", value);
-      expect(liveLogMode(farFuture)).toBe("all");
-    }
     vi.stubEnv("LIVE_LOG_UNTIL", undefined);
     expect(liveLogMode(farFuture)).toBe("all");
   });
 
-  it("끝 날짜의 모양이 틀리거나 없는 날짜면 꺼짐으로 본다(오타로 약속한 날짜 뒤에도 저장되는 일을 막는다)", () => {
+  it("끝 날짜가 빈 값이거나 모양이 틀리거나 없는 날짜면 꺼짐으로 본다(오타로 약속한 날짜 뒤에도 저장되는 일을 막는다)", () => {
     vi.stubEnv("LIVE_LOG", "all");
     const today = Date.parse("2026-11-25T00:00:00Z");
-    for (const value of ["12/03", "2026-12-3", "2026.12.03", "2026-13-01", "2026-02-30", "tomorrow", "2026-12-03T00:00"]) {
+    for (const value of ["", "   ", "12/03", "2026-12-3", "2026.12.03", "2026-13-01", "2026-02-30", "tomorrow", "2026-12-03T00:00"]) {
       vi.stubEnv("LIVE_LOG_UNTIL", value);
       expect(liveLogStatus(today)).toEqual({ mode: null, reason: "off" });
     }

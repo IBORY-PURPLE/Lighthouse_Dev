@@ -135,6 +135,25 @@ test.describe("/live 대화 기록", () => {
       .toBe("T02");
   });
 
+  test("저장 뒤 '기록 중'이 보였다가, 서버가 ended라고 답해 보내기를 멈추면 표시가 사라진다", async ({ page }) => {
+    let answered = 0;
+    const live = await openLive(page, {
+      url: "/live?p=T01",
+      config: { log: "label" },
+      reply: (body) => {
+        answered += 1;
+        return answered === 1 ? { stored: body.entries.length, reason: "saved" } : { stored: 0, reason: "ended" };
+      },
+    });
+    await oneTurn(page, "소니 헤드폰");
+    const mark = page.getByTestId("live-log-mark");
+    await expect(mark).toHaveText("기록 중 · T01", POLL);
+    await whenListening(page);
+    await sayLive(page, "삼성 이어폰");
+    await expect(mark).toHaveCount(0, POLL);
+    expect(live.logs.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("log:all이면 표지가 없어도 보내고 '기록 중'만 보여 준다", async ({ page }) => {
     const live = await openLive(page, { url: "/live", config: { log: "all" } });
     await oneTurn(page, "소니 헤드폰");

@@ -30,10 +30,10 @@ export interface LiveLogRequest {
 }
 
 /**
- * 서버가 200으로 답할 때의 결과. 화면은 200을 받으면 그 묶음을 다시 보내지 않는다(no_device만 예외).
+ * 서버가 200으로 답할 때의 결과. 화면은 200을 받으면 그 묶음을 다시 보내지 않는다(no_device와 unavailable만 예외).
  * saved: 저장함 / off: 스위치 꺼짐 / ended: 저장 기간이 끝남 / no_label: 표지가 필요한데 없음
  * no_device: 기기 쿠키가 없음(잠시 뒤 다시 보내 볼 수 있다) / empty: 쓸 수 있는 줄이 없음
- * capped: 상한에 닿음 / unavailable: 표가 아직 없음 / failed: 다시 보내도 안 되는 저장 오류
+ * capped: 상한에 닿음 / unavailable: 표나 연결이 아직 없음(화면은 묶음을 쥐고 쉬었다가 다시 보낸다) / failed: 다시 보내도 안 되는 저장 오류
  * 잠깐의 저장 오류는 503, 횟수 제한은 429로 답한다(화면이 나중에 다시 보낸다).
  */
 export type LiveLogReason =

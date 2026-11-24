@@ -90,12 +90,12 @@ const DAY_MS = 24 * 60 * 60_000;
 
 /**
  * LIVE_LOG_UNTIL(예: 2026-12-03)의 끝 시각(ms). 한국 시간으로 그 날짜의 23:59:59.999다.
- * 값이 없으면 null(끝 날짜 없음). 값이 있는데 모양이 틀리거나 없는 날짜(2026-02-30)면 "bad".
+ * 환경 변수가 아예 없으면 null(끝 날짜 없음). 있는데 모양이 틀리거나(빈 값·공백 포함) 없는 날짜(2026-02-30)면 "bad".
  */
 function liveLogEndMs(): number | null | "bad" {
-  const raw = process.env.LIVE_LOG_UNTIL?.trim() ?? "";
-  if (raw === "") return null;
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  const value = process.env.LIVE_LOG_UNTIL;
+  if (value === undefined) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (!match) return "bad";
   const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
   const startUtc = Date.UTC(year, month - 1, day);
