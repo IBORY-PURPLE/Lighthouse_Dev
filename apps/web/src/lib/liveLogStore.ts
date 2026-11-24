@@ -243,7 +243,8 @@ async function tableIsFull(table: LogTable, now: number): Promise<boolean> {
  * 정리된 줄을 저장한다. 던지지 않는다.
  * 열은 모두 채워서 보낸다(묶음 upsert는 줄마다 열이 다르면 빠진 열을 null로 보낸다). created_at, delete_after는 DB 기본값.
  */
-export async function saveLiveEvents(rows: LiveEventRow[]): Promise<SaveLiveEventsResult> {
+export async function saveLiveEvents(rows: LiveEventRow[], out?: { stored: number }): Promise<SaveLiveEventsResult> {
+  if (out) out.stored = 0;
   if (rows.length === 0) return "saved";
   let client: RpcClient | null;
   try {
@@ -255,6 +256,7 @@ export async function saveLiveEvents(rows: LiveEventRow[]): Promise<SaveLiveEven
     // Vercel 배포(운영·미리보기)에서 메모리에만 쌓이고 사라지는 일을 '저장됨'으로 보이지 않게 한다. 메모리 저장은 로컬·시험에서만 쓴다.
     if (process.env.VERCEL === "1" || (process.env.VERCEL_ENV ?? "") !== "") return "unavailable";
     saveToMemory(rows);
+    if (out) out.stored = rows.length;
     return "saved";
   }
 
@@ -277,6 +279,7 @@ export async function saveLiveEvents(rows: LiveEventRow[]): Promise<SaveLiveEven
     );
     if (!error) {
       current.dayRows += rows.length;
+      if (out) out.stored = rows.length;
       return "saved";
     }
     if (isMissingSchema(error)) {
@@ -285,21 +288,24 @@ export async function saveLiveEvents(rows: LiveEventRow[]): Promise<SaveLiveEven
     }
     if (!isPermanent(error)) return "retry";
     // 줄 하나 때문에 묶음 전체가 거부됐을 수 있다. 줄마다 따로 넣어 좋은 줄을 살린다.
-    const saved = await saveOneByOne(table, rows);
-    if (saved === 0) return "failed";
-    current.dayRows += saved;
+    const one = await saveOneByOne(table, rows);
+    current.dayRows += one.saved;
+    // 시간 안에 다 해 보지 못했으면 화면이 묶음을 다시 보내게 한다(이미 들어간 줄은 같은 순번이라 다시 와도 한 번만 남는다).
+    if (!one.complete) return "retry";
+    if (one.saved === 0) return "failed";
+    if (out) out.stored = one.saved;
     return "saved";
   } catch {
     return "retry";
   }
 }
 
-/** 묶음이 영구 오류로 거부됐을 때 줄마다 따로 넣는다. 저장된 줄 수를 돌려준다. 전체 5초를 넘기면 그만둔다. */
-async function saveOneByOne(table: LogTable, rows: LiveEventRow[]): Promise<number> {
+/** 묶음이 영구 오류로 거부됐을 때 줄마다 따로 넣는다. 저장된 줄 수와 모든 줄을 해 봤는지를 돌려준다. 전체 5초를 넘기면 그만둔다(complete: false). */
+async function saveOneByOne(table: LogTable, rows: LiveEventRow[]): Promise<{ saved: number; complete: boolean }> {
   const startedAt = Date.now();
   let saved = 0;
   for (const row of rows) {
-    if (Date.now() - startedAt > ONE_BY_ONE_BUDGET_MS) break;
+    if (Date.now() - startedAt > ONE_BY_ONE_BUDGET_MS) return { saved, complete: false };
     try {
       const { error } = await withTimeout(
         table.upsert([row], { onConflict: "cid,seq", ignoreDuplicates: true, defaultToNull: false }),
@@ -309,5 +315,5 @@ async function saveOneByOne(table: LogTable, rows: LiveEventRow[]): Promise<numb
       // 이 줄은 넘어간다.
     }
   }
-  return saved;
+  return { saved, complete: true };
 }

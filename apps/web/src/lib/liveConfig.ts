@@ -76,6 +76,14 @@ export function liveAdvanceMode(): "auto" | "manual" {
   return process.env.LIVE_ADVANCE?.trim().toLowerCase() === "manual" ? "manual" : "auto";
 }
 
+/**
+ * LIVE_ASK_NAME: "on"이면 AI가 대화 첫 답에서 저장 사실을 알리고 성함을 한 번 여쭙는다(QA 기간에 대화 기록을 사람별로 가르는 용도).
+ * 기본은 꺼짐이다. 성함은 대화 기록에만 남고 요청 항목에는 들어가지 않는다.
+ */
+export function liveAskName(): boolean {
+  return process.env.LIVE_ASK_NAME?.trim().toLowerCase() === "on";
+}
+
 /** LIVE_REALTIME_REASONING, 기본 "minimal". "off"면 null(필드를 뺀다). */
 export function liveReasoningEffort(): string | null {
   const value = process.env.LIVE_REALTIME_REASONING?.trim();

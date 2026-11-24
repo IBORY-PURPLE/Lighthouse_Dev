@@ -91,6 +91,7 @@ beforeEach(async () => {
     "LIVE_REALTIME_MODEL",
     "LIVE_REALTIME_VAD",
     "LIVE_REALTIME_REASONING",
+    "LIVE_ASK_NAME",
     "LIVE_TRANSCRIBE_LANG",
     "LIVE_CALL_IP_LIMIT",
   ]) {
@@ -662,6 +663,15 @@ describe("liveRealtimeSession 부품", () => {
     expect(parseCallId("/v1/realtime/calls/rtc abc")).toBeNull();
     expect(parseCallId("/v1/realtime/calls/rtc%2Fabc")).toBeNull();
     expect(parseCallId(`/v1/realtime/calls/${"x".repeat(201)}`)).toBeNull();
+  });
+
+  it("buildRealtimeSession: LIVE_ASK_NAME=on이면 지시문 끝에 성함 여쭙기가 붙고, 그 밖의 값이면 그대로다", () => {
+    vi.stubEnv("LIVE_ASK_NAME", "on");
+    const asked = (session.buildRealtimeSession() as unknown as LooseSession).instructions;
+    expect(asked.startsWith(LIVE_REALTIME_INSTRUCTIONS)).toBe(true);
+    expect(asked).toContain("[성함 여쭙기]");
+    vi.stubEnv("LIVE_ASK_NAME", "yes");
+    expect((session.buildRealtimeSession() as unknown as LooseSession).instructions).toBe(LIVE_REALTIME_INSTRUCTIONS);
   });
 
   it("buildRealtimeSession: 기본값과 LIVE_REALTIME_INSTRUCTIONS, 도구 3개", () => {

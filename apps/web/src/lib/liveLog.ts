@@ -438,6 +438,7 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
   /** 실패한 뒤: 5초(1·2번째)·30초(3번째부터) 쉰다. 그동안 평소 전송은 막고 재시도 타이머만 보낸다. */
   function fail(leaving = false): void {
     if (mode !== "on" || disposed) return;
+    notStored(); // 지금은 저장되지 않고 있다. 다시 저장되면 onStored가 표시를 올린다.
     failures += 1;
     if (!leaving) restEpoch += 1; // 평소 전송의 실패는 새 쉬는 구간이다. 떠날 때 전송의 실패는 같은 구간을 늘릴 뿐이다.
     const ms = failures >= FAIL_REST_AFTER ? LIVE_LOG_REST_MS : LIVE_LOG_RETRY_MS;
@@ -493,14 +494,14 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
       }
       if (reason === "unavailable") {
         // 표가 아직 없다. 대화 중에 생길 수 있으니 실패와 같이 되돌려 놓고 쉬었다 다시 보낸다(onStored는 부르지 않는다).
-        notStored();
         requeue(batch);
-        fail(leaving);
+        fail(leaving); // fail이 표시도 내린다
         return;
       }
       succeed();
       const key = batchKey(batch);
       if (reason === "no_device") {
+        notStored();
         const tries = (noDevice.get(key) ?? 0) + 1;
         if (tries < NO_DEVICE_MAX) {
           noDevice.set(key, tries);

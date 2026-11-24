@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { COMMANDS } from "@/lib/liveCommands";
 import {
   LIVE_CHAT_INSTRUCTIONS,
+  LIVE_NAME_BLOCK,
+  liveChatInstructions,
+  liveRealtimeInstructions,
   LIVE_COMMON_INSTRUCTIONS,
   LIVE_REALTIME_INSTRUCTIONS,
   LIVE_TOOLS,
@@ -117,5 +120,37 @@ describe("LIVE_TOOLS(7.5절)", () => {
   it("register_request와 end_conversation의 properties는 빈 객체다", () => {
     expect(tool("register_request").parameters.properties).toEqual({});
     expect(tool("end_conversation").parameters.properties).toEqual({});
+  });
+});
+
+describe("성함 여쭙기(LIVE_ASK_NAME)", () => {
+  it("꺼져 있으면 지시문이 그대로다", () => {
+    expect(liveChatInstructions(false)).toBe(LIVE_CHAT_INSTRUCTIONS);
+    expect(liveRealtimeInstructions(false)).toBe(LIVE_REALTIME_INSTRUCTIONS);
+  });
+
+  it("켜면 원래 지시문 뒤에 성함 여쭙기만 붙는다", () => {
+    expect(liveChatInstructions(true)).toBe(`${LIVE_CHAT_INSTRUCTIONS}
+
+${LIVE_NAME_BLOCK}`);
+    expect(liveRealtimeInstructions(true)).toBe(`${LIVE_REALTIME_INSTRUCTIONS}
+
+${LIVE_NAME_BLOCK}`);
+  });
+
+  it("저장 사실을 알리고, 한 번만 묻고, 항목에 넣지 않고, 연락처는 계속 묻지 않는다", () => {
+    for (const piece of [
+      "이 대화는 서비스 개선을 위해 글자로 저장돼요. 성함을 말씀해 주시겠어요?",
+      "한 번만 여쭙니다",
+      "어느 항목에도 넣지 않습니다",
+      "전화번호, 주소, 결제 정보는 지금처럼 묻지 않습니다",
+      "[하지 않는 것]",
+    ]) {
+      expect(LIVE_NAME_BLOCK).toContain(piece);
+    }
+  });
+
+  it("다른 지시문과 같은 낱말 규칙을 지킨다('반드시', '절대', '헤드셋' 없음)", () => {
+    for (const word of ["반드시", "절대", "헤드셋"]) expect(LIVE_NAME_BLOCK).not.toContain(word);
   });
 });

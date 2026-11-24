@@ -1,9 +1,10 @@
 import "server-only";
 import { after } from "next/server";
-import { LIVE_REALTIME_INSTRUCTIONS, LIVE_TOOLS } from "@/lib/liveInstructions";
+import { LIVE_TOOLS, liveRealtimeInstructions } from "@/lib/liveInstructions";
 import {
   LIVE_REALTIME_MODEL_DEFAULT,
   LIVE_VOICE,
+  liveAskName,
   liveDailySessionCap,
   liveMaxSessionSec,
   liveReasoningEffort,
@@ -47,7 +48,7 @@ export function buildRealtimeSession(o?: { rate?: RealtimeRate }): object {
   return {
     type: "realtime",
     model,
-    instructions: LIVE_REALTIME_INSTRUCTIONS,
+    instructions: liveRealtimeInstructions(liveAskName()),
     output_modalities: ["audio"],
     ...(effort === null ? {} : { reasoning: { effort } }),
     audio: {

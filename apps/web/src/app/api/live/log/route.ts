@@ -117,11 +117,12 @@ async function handleLog(request: NextRequest, note: Note): Promise<NextResponse
     return respond("empty");
   }
 
-  const result = await saveLiveEvents(rows);
+  const out = { stored: 0 };
+  const result = await saveLiveEvents(rows, out);
   note.store = result;
   switch (result) {
     case "saved":
-      return respond("saved", rows.length);
+      return respond("saved", out.stored);
     case "retry":
       return NextResponse.json({ ok: false, error: "unavailable", code: "store_busy" }, { status: 503, headers: NO_STORE });
     default:

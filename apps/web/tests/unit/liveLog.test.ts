@@ -1135,6 +1135,20 @@ describe("createLiveLog: 실패 중 쉬기·시간 제한·묶음별 다시 보�
     }
   });
 
+  it("onNotStored: 503·429·네트워크 오류·no_device처럼 지금 저장되지 않는 답에서도 부른다", async () => {
+    for (const first of [{ status: 503 }, { status: 429 }, "network", { json: { stored: 0, reason: "no_device" } }] as Reply[]) {
+      const h = harness();
+      h.plan.push(first);
+      h.log.setMode("label");
+      say(h.log, "말");
+      await h.timers.advance(LIVE_LOG_SEND_DELAY_MS);
+      expect(h.misses.n, JSON.stringify(first)).toBeGreaterThan(0);
+      expect(h.stored, JSON.stringify(first)).toEqual([]);
+      await h.timers.advance(60_000);
+      expect(h.stored.length, JSON.stringify(first)).toBeGreaterThan(0); // 다시 보내 저장되면 표시가 돌아온다
+    }
+  });
+
   it("onNotStored: 저장이 잘 되는 동안에는 부르지 않는다", async () => {
     const h = harness();
     h.log.setMode("label");

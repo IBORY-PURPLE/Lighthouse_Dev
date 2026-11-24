@@ -85,6 +85,32 @@ export const LIVE_CHAT_INSTRUCTIONS = `${LIVE_COMMON_INSTRUCTIONS}\n\n${CHAT_TAI
 export const LIVE_REALTIME_INSTRUCTIONS = `${LIVE_COMMON_INSTRUCTIONS}\n\n${REALTIME_TAIL}`;
 
 /** Realtime 세션의 도구 3개(7.5절). confirm_request에는 summary 인자가 없다. register_request에는 인자가 없다. */
+/**
+ * QA 기간에 누구와 나눈 대화인지 알 수 있게 성함을 한 번 여쭙는 지시(2026-11-25 이용자 결정). LIVE_ASK_NAME=on일 때만 붙인다.
+ * 성함은 대화 기록(live_events)에만 남고 요청 항목에는 넣지 않는다. 저장 사실을 알리는 문장을 함께 말한다.
+ */
+export const LIVE_NAME_BLOCK = `[성함 여쭙기]
+대화를 누구와 나눴는지 알 수 있게 성함을 한 번 여쭙니다. 이 지시는 [하지 않는 것]의 "이름을 묻지 않습니다"보다 먼저입니다.
+- 이 대화에서 아직 성함을 여쭙지 않았으면, 이용자의 첫 말에 답할 때 들은 내용을 한마디로 되짚은 뒤 이렇게 말합니다: "이 대화는 서비스 개선을 위해 글자로 저장돼요. 성함을 말씀해 주시겠어요?"
+- 성함을 들으면 성함에 "님, 고맙습니다"를 붙여 한마디 한 뒤 [모을 것]에서 아직 듣지 못한 것을 묻습니다.
+- 성함은 한 번만 여쭙니다. 이용자가 말하고 싶지 않다고 하면 "괜찮아요"라고 하고 다시 묻지 않습니다.
+- 성함은 어느 항목에도 넣지 않습니다. 전화번호, 주소, 결제 정보는 지금처럼 묻지 않습니다.
+- 첫 말에서 들은 제품이나 정보는 버리지 않고 항목에 그대로 둡니다.`;
+
+/** 글자 대화(예비 엔진) 지시문. askName이 참이면 성함 여쭙기를 붙인다. */
+export function liveChatInstructions(askName: boolean): string {
+  return askName ? `${LIVE_CHAT_INSTRUCTIONS}
+
+${LIVE_NAME_BLOCK}` : LIVE_CHAT_INSTRUCTIONS;
+}
+
+/** Realtime 지시문. askName이 참이면 성함 여쭙기를 붙인다. */
+export function liveRealtimeInstructions(askName: boolean): string {
+  return askName ? `${LIVE_REALTIME_INSTRUCTIONS}
+
+${LIVE_NAME_BLOCK}` : LIVE_REALTIME_INSTRUCTIONS;
+}
+
 export const LIVE_TOOLS: object[] = [
   {
     type: "function",

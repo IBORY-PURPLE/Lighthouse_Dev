@@ -346,8 +346,29 @@ describe("saveLiveEvents (DB)", () => {
         return Promise.resolve({ data: null, error: bad ? { code: "23514", message: "check" } : null });
       },
     });
-    expect(await saveLiveEvents(rows(3))).toBe("saved");
+    const out = { stored: 0 };
+    expect(await saveLiveEvents(rows(3), out)).toBe("saved");
+    expect(out.stored).toBe(2); // 실제로 들어간 줄 수
     expect(fake.upserts.map((call) => call.rows.map((row) => row.seq))).toEqual([[0, 1, 2], [0], [1], [2]]);
+  });
+
+  it("줄마다 따로 넣다가 시간 한도를 넘기면 retry다(남은 줄을 버리지 않고 화면이 다시 보내게 한다)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-30T03:00:00Z"));
+    let calls = 0;
+    const fake = fakeClient({
+      upsert: () => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve({ data: null, error: { code: "23514", message: "check" } });
+        vi.setSystemTime(Date.now() + 3000); // 줄 하나에 3초씩 걸린 셈
+        return Promise.resolve({ data: null, error: null });
+      },
+    });
+    const out = { stored: 0 };
+    expect(await saveLiveEvents(rows(5), out)).toBe("retry");
+    expect(out.stored).toBe(0);
+    expect(fake.upserts.length).toBeLessThan(6); // 묶음 1번 + 줄 5번을 다 하지 못했다
+    vi.useRealTimers();
   });
 
   it.each(["23514", "23502", "22001", "22P02"])("영구 오류 %s는(줄마다 따로 넣어도 모두 거부되면) failed다", async (code) => {

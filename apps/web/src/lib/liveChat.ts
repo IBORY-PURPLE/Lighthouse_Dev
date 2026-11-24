@@ -1,5 +1,6 @@
 import "server-only";
-import { LIVE_CHAT_INSTRUCTIONS } from "@/lib/liveInstructions";
+import { liveAskName } from "@/lib/liveConfig";
+import { liveChatInstructions } from "@/lib/liveInstructions";
 import { hasQuestion, isClearConsent, isPlausibleConsent, isScreenReaderEcho } from "@/lib/liveCommands";
 import type { LiveChatStatus, LiveSlots, LiveTurn } from "@/lib/liveEngine";
 import { cutText, decodeAiTurn, maskPhone, readSlots, REPLY_MAX } from "@/lib/liveText";
@@ -128,7 +129,7 @@ export async function callLiveAI(history: LiveTurn[]): Promise<LiveChatResult> {
       },
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || VOICE_MODEL_DEFAULT,
-        instructions: LIVE_CHAT_INSTRUCTIONS,
+        instructions: liveChatInstructions(liveAskName()),
         input: [{ role: "developer", content: "반드시 JSON 객체로 답변하세요." }, ...history],
         max_output_tokens: LIVE_CHAT_MAX_OUTPUT_TOKENS,
         text: { format: { type: "json_object" } },
