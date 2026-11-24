@@ -1,5 +1,6 @@
 import "server-only";
 import { getLlmMode } from "@/lib/llm";
+import type { LiveLogMode } from "@/lib/liveLogWire";
 
 // /live 서버 설정: 환경 변수 스위치, 상한, 실호출 예산 세기. 설계서 7.1절, 13절.
 // 예산 카운터는 프로세스 메모리다. 서버를 다시 띄우면 0부터 센다.
@@ -80,6 +81,52 @@ export function liveReasoningEffort(): string | null {
   const value = process.env.LIVE_REALTIME_REASONING?.trim();
   if (!value) return "minimal";
   return value.toLowerCase() === "off" ? null : value;
+}
+
+// ---------- 대화 기록(QA 분석용) ----------
+
+const KST_OFFSET_MS = 9 * 60 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+
+/**
+ * LIVE_LOG_UNTIL(예: 2026-12-03)의 끝 시각(ms). 한국 시간으로 그 날짜의 23:59:59.999다.
+ * 값이 없으면 null(끝 날짜 없음). 값이 있는데 모양이 틀리거나 없는 날짜(2026-02-30)면 "bad".
+ */
+function liveLogEndMs(): number | null | "bad" {
+  const raw = process.env.LIVE_LOG_UNTIL?.trim() ?? "";
+  if (raw === "") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!match) return "bad";
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const startUtc = Date.UTC(year, month - 1, day);
+  const check = new Date(startUtc);
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return "bad";
+  return startUtc + DAY_MS - KST_OFFSET_MS - 1;
+}
+
+/** 저장이 켜져 있는지와 이유. off: 스위치 꺼짐, ended: 끝 날짜가 지남. */
+export type LiveLogStatus =
+  | { mode: LiveLogMode; reason: "on" }
+  | { mode: null; reason: "off" | "ended" };
+
+/**
+ * LIVE_LOG: on = 참가자 표지가 있는 화면만 저장, all = 모든 화면 저장, 그 밖 = 꺼짐.
+ * LIVE_LOG_UNTIL이 있으면 한국 시간으로 그 날짜의 끝까지만 저장한다.
+ * LIVE_LOG_UNTIL의 모양이 틀리면 꺼짐으로 본다(오타 때문에 약속한 날짜 뒤에도 계속 저장되는 일을 막는다. 꺼지면 화면에 '기록 중'이 뜨지 않아 바로 알 수 있다).
+ */
+export function liveLogStatus(now: number = Date.now()): LiveLogStatus {
+  const value = process.env.LIVE_LOG?.trim().toLowerCase();
+  const mode: LiveLogMode | null = value === "on" ? "label" : value === "all" ? "all" : null;
+  if (!mode) return { mode: null, reason: "off" };
+  const end = liveLogEndMs();
+  if (end === "bad") return { mode: null, reason: "off" };
+  if (end !== null && now > end) return { mode: null, reason: "ended" };
+  return { mode, reason: "on" };
+}
+
+/** 저장 방식. 꺼져 있거나 끝 날짜가 지났으면 null. */
+export function liveLogMode(now: number = Date.now()): LiveLogMode | null {
+  return liveLogStatus(now).mode;
 }
 
 // ---------- 실호출 예산(로컬 강제 상한) ----------

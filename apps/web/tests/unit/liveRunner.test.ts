@@ -12,7 +12,7 @@ import type {
 } from "@/lib/liveEngine";
 import { earconDurationMs } from "@/lib/liveEarcons";
 import { createLiveRunner, type LiveRunner, type LiveRunnerDeps } from "@/lib/liveRunner";
-import { createInitialLive, type LiveState } from "@/lib/liveMachine";
+import { createInitialLive, type LiveEffect, type LiveEvent, type LiveState } from "@/lib/liveMachine";
 import { LIVE_RECORDS_KEY, type LiveRequestBody, type RegisterResult } from "@/lib/liveRequest";
 import { LIVE_VISITS_KEY, script } from "@/lib/liveScripts";
 import { EARCON_TO_MIC_MS, MIC_SETTLE_MS } from "@/lib/liveTiming";
@@ -139,10 +139,11 @@ interface Harness {
   storage: Storage;
   wake: boolean[];
   focuses: string[];
+  recorded: { event: LiveEvent; state: LiveState; effects: LiveEffect[] }[];
   state(): LiveState;
 }
 
-function harness(opts: { tts?: boolean; instantSpeak?: boolean } = {}): Harness {
+function harness(opts: { tts?: boolean; instantSpeak?: boolean; recordThrows?: boolean } = {}): Harness {
   const timers = makeTimers();
   const engines: FakeEngine[] = [];
   const calls: string[] = [];
@@ -156,6 +157,7 @@ function harness(opts: { tts?: boolean; instantSpeak?: boolean } = {}): Harness 
   const pushes: string[] = [];
   const wake: boolean[] = [];
   const focuses: string[] = [];
+  const recorded: Harness["recorded"] = [];
   const storage = fakeStorage();
   let endSpeak: ((failed?: boolean) => void) | null = null;
 
@@ -200,6 +202,10 @@ function harness(opts: { tts?: boolean; instantSpeak?: boolean } = {}): Harness 
     wakeLock(on) { wake.push(on); },
     waitSoundOn: () => true,
     attachPush(id) { pushes.push(id); },
+    record(event, state, effects) {
+      recorded.push({ event, state, effects });
+      if (opts.recordThrows) throw new Error("record boom");
+    },
   };
   const initial = createInitialLive({
     cid: "cid-1", visit: "first", tts: opts.tts ?? true, speechAvailable: true,
@@ -207,7 +213,7 @@ function harness(opts: { tts?: boolean; instantSpeak?: boolean } = {}): Harness 
   const runner = createLiveRunner(deps, initial);
   return {
     runner, engines, timers, calls, played, spoken, announced, rates, streamRequests, registerCalls, pushes,
-    storage, wake, focuses,
+    storage, wake, focuses, recorded,
     finishSpeak(failed) { const f = endSpeak; endSpeak = null; f?.(failed); },
     async resolveRegister(r) { registerResolvers.shift()?.(r); await flush(); },
     state: () => runner.getState(),
@@ -668,5 +674,48 @@ describe("기기 목소리가 읽지 못했을 때", () => {
     expect(h.state().phase).toBe("confirming");
     expect(h.state().awaitingConsent).toBe(true);
     expect(h.played).not.toContain("cancel");
+  });
+});
+
+describe("실행기: 대화 기록용 record(대화 로그)", () => {
+  it("사건마다 바뀐 state와 낸 효과(result.effects)를 함께 부른다", () => {
+    const h = harness();
+    // 밖에서 넣은 사건을 따로 센다(record가 부른 횟수와 비교하려고).
+    const fed: string[] = [];
+    h.runner.dispatch({ type: "START" });
+    fed.push("START");
+    expect(h.recorded).toHaveLength(1);
+    const first = h.recorded[0];
+    expect(first.event).toEqual({ type: "START" });
+    expect(first.state).toBe(h.state());          // 처리 뒤의 state다
+    expect(first.state.phase).toBe("guiding");
+    expect(first.effects.some((fx) => fx.type === "SPEAK")).toBe(true);
+
+    h.finishSpeak();
+    fed.push("SPEAK_END");                        // 낭독이 끝나면 실행기가 SPEAK_END를 넣는다
+    const engine = h.engines[0];
+    engine.emit({ type: "READY", engine: "fallback", inputMode: "voice" });
+    fed.push("READY");
+    engine.emit({ type: "USER_TURN_END", text: "전기밥솥 알려줘", transcribed: true });
+    fed.push("USER_TURN_END");
+    // 사건마다 한 번씩만, 넣은 순서대로 부른다(효과 안에서 온 사건도 각자 한 번).
+    expect(h.recorded.map((r) => r.event.type)).toEqual(fed);
+    const last = h.recorded.at(-1)!;
+    expect(last.state).toBe(h.state());
+    expect(last.effects.some((fx) => fx.type === "ENGINE_RESPOND")).toBe(true);
+  });
+
+  it("record가 던져도 step은 계속된다(효과 실행, 상태 변화, 구독 알림)", () => {
+    const h = harness({ recordThrows: true });
+    const seen = vi.fn();
+    h.runner.subscribe(seen);
+    h.runner.dispatch({ type: "START" });
+    expect(h.recorded).toHaveLength(1);
+    expect(h.state().phase).toBe("guiding");
+    expect(h.spoken).toHaveLength(1);              // 효과(SPEAK)가 실행됐다
+    expect(seen).toHaveBeenCalled();
+    h.finishSpeak();
+    h.engines[0].emit({ type: "READY", engine: "fallback", inputMode: "voice" });
+    expect(h.state().phase).toBe("listening");     // 다음 사건도 처리된다
   });
 });

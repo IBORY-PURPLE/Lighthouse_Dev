@@ -40,6 +40,8 @@ beforeEach(async () => {
   vi.stubEnv("VERCEL_ENV", "");
   vi.stubEnv("LIVE_ENABLED", undefined);
   vi.stubEnv("LIVE_REAL_CALL_BUDGET", undefined);
+  vi.stubEnv("LIVE_LOG", undefined);
+  vi.stubEnv("LIVE_LOG_UNTIL", undefined);
   vi.stubEnv("OPENAI_MODEL", "");
   chat = await import("@/app/api/live/chat/route");
   config = await import("@/app/api/live/config/route");
@@ -559,5 +561,30 @@ describe("GET /api/live/config", () => {
     const limited = await get(client);
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+  });
+
+  // 대화 기록(LIVE_LOG, LIVE_LOG_UNTIL): 저장이 켜져 있고 기간 안일 때만 log 열쇠를 싣는다.
+  it("LIVE_LOG=on이면 log: 'label'을 싣는다", async () => {
+    vi.stubEnv("LIVE_LOG", "on");
+    vi.stubEnv("LIVE_LOG_UNTIL", "2099-12-03");
+    const body = (await (await get()).json()) as ConfigBody & { log?: string };
+    expect(body.log).toBe("label");
+  });
+
+  it("LIVE_LOG=all이면 log: 'all'을 싣는다", async () => {
+    vi.stubEnv("LIVE_LOG", "all");
+    const body = (await (await get()).json()) as ConfigBody & { log?: string };
+    expect(body.log).toBe("all");
+  });
+
+  it("꺼져 있거나 끝 날짜가 지났으면 log 열쇠가 없다", async () => {
+    vi.stubEnv("LIVE_LOG", "on");
+    vi.stubEnv("LIVE_LOG_UNTIL", "2020-01-01");
+    expect("log" in ((await (await get()).json()) as object)).toBe(false);
+    vi.stubEnv("LIVE_LOG", "off");
+    vi.stubEnv("LIVE_LOG_UNTIL", undefined);
+    expect("log" in ((await (await get()).json()) as object)).toBe(false);
+    vi.stubEnv("LIVE_LOG", undefined);
+    expect("log" in ((await (await get()).json()) as object)).toBe(false);
   });
 });

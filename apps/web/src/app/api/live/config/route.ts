@@ -3,6 +3,7 @@ import {
   isLiveEnabled,
   LIVE_WARN_BEFORE_SEC,
   liveAdvanceMode,
+  liveLogMode,
   liveMaxSessionSec,
   realtimeGate,
 } from "@/lib/liveConfig";
@@ -28,6 +29,7 @@ function handleConfig(request: NextRequest): Response {
     );
   }
   const gate = realtimeGate();
+  const log = liveLogMode();
   return NextResponse.json(
     {
       enabled: true,
@@ -36,6 +38,7 @@ function handleConfig(request: NextRequest): Response {
       maxSessionSec: liveMaxSessionSec(),
       warnBeforeSec: LIVE_WARN_BEFORE_SEC,
       ...(liveAdvanceMode() === "manual" ? { advance: "manual" } : {}),
+      ...(log ? { log } : {}),
     },
     { headers: NO_STORE },
   );

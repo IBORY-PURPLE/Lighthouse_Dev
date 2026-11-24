@@ -23,6 +23,8 @@ export interface LiveRunnerDeps {
   wakeLock(on: boolean): void;
   waitSoundOn(): boolean;
   log?(tail: string): void;                           // 꼬리표만. 글을 남기지 않는다
+  /** 대화 기록용: 사건 하나를 처리할 때마다 바뀐 상태와 낸 효과를 넘긴다. 던져도 실행기는 계속된다. */
+  record?(event: LiveEvent, state: LiveState, effects: LiveEffect[]): void;
   /** 설계서에 없는 덧붙임: 접수된 요청에 이미 있는 푸시 구독을 붙인다(ATTACH_PUSH). 없으면 건너뛴다. */
   attachPush?(requestId: string): void;
 }
@@ -142,6 +144,11 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
       }
     }
     log(`step ${event.type} phase=${state.phase} fx=${result.effects.length}`);
+    try {
+      deps.record?.(event, state, result.effects);
+    } catch {
+      // 기록 오류가 대화를 멈추지 않게 한다.
+    }
     for (const fx of result.effects) {
       if (disposed) break;
       try {

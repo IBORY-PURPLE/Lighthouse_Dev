@@ -88,6 +88,7 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 리서치 챗 AI 호출 기록(대화 턴·추가 질문·리뷰 문단의 요청·응답 글) | OpenAI 대시보드 Logs(`store: true`, `metadata.feature` = research_turn·research_ask·research_review, `src/lib/openaiLog.ts`) | OpenAI 보관 기간을 따른다. `OPENAI_STORE_LOGS=off`면 남기지 않는다(이용자 요청 2026-11-17). 웹 검색·이용자 음성 대화는 `store: false` 그대로. 이용자 질문·답(`이용자조건`)이 든 리뷰 문단 호출은 `OPENAI_STORE_LOGS`와 상관없이 `store: false`(대화 턴 AI에는 넘기지 않는다) |
 | 이용자 리뷰 도착 알림 구독(웹 푸시 endpoint·p256dh·auth) | Supabase `push_subscriptions`(요청 하나에 하나, 마이그레이션 20261120000000) | 리뷰를 보내 알림을 한 번 보내면 지운다. 요청이 지워지면 같이 지워진다(A13 이용자 결정 2026-11-17). 키 `VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`가 없으면 기능이 꺼진다 |
 | 이용자가 확인한 요약과 질문·답(봉사자 브리핑, 이용자가 말한 그대로. 요약 300자·질문 150자·답 200자·12짝 이하, 전화번호 모양은 "(전화번호 가림)") | Supabase `request_details`(요청 하나에 하나, 마이그레이션 20261122000000. 없으면 메모리) | 맡은 봉사자 1명에게만, 그 요청이 진행 중인 동안만 내보낸다. 요청이 `done`·`expired`가 되면 DB 트리거가 지우고 요청이 지워지면 함께 지워진다. 내려놓기·6시간 반환 때는 남긴다(다음 봉사자가 봐야 한다). 이용자 상태 조회·대기열·로그·봉사자 기기(`sentHistory`)에는 나가지 않는다. 이름·주소 같은 말은 가리지 못한다(이용자가 말한 그대로이므로 시연에서는 개인정보를 말하지 않는다) |
+| `/live` 대화 기록(QA 분석용, 2026-11-24 이용자 결정): 이용자 말·AI 말·앱이 읽어 준 글의 글자와 글 없는 사건(단추, 끼어들기, 오류, 예비 전환, 접수 결과). 줄마다 기기 ID, 대화 id(`cid` = 접수의 `client_request_id`), 순번, 단계, 엔진, 경과 ms, 참가자 표지, 환경. 전화번호 모양은 "(전화번호 가림)". 소리, SDP, `callId`, IP는 저장하지 않는다 | Supabase `live_events`(마이그레이션 20261125000000. `requests`와 묶지 않아 요청이 지워져도 남는다. 표가 없으면 저장하지 않고 대화는 그대로 이어진다) | 저장은 `LIVE_LOG`가 켜져 있고 `LIVE_LOG_UNTIL`(2026-12-03) 안일 때만. 줄마다 `delete_after`(넣은 날 + 30일)가 붙고, 사람이 그 날짜가 지난 줄을 SQL로 지운다(자동 삭제 없음). 봉사자 화면에는 보이지 않는다. 이름·주소·건강 이야기는 가리지 못한다 |
 | 이용자 기기의 요청 기록(대화 id·요청 번호·상태·리뷰) | 이용자 `localStorage` `lh-requests`, 알림 켬 여부 `lh-push` | 최근 20건의 캐시일 뿐이다. 서버가 이 기기(`lh_device`)에 준 목록(`GET /api/requests`)이 기준이고, 목록을 열면 그 응답으로 상태·리뷰를 갱신한다. 번호를 못 받은 기록(접수 중·실패)은 남기고, 서버가 주지 않은 번호의 기록은 서버가 전체 목록(`complete:true`, 저장소가 DB일 때)이라고 알릴 때 한 건씩 단건 조회(`GET /api/requests/{id}`)해서 400·404일 때만 지운다(아니면 그대로 둔다). 기기 쿠키 전에 접수한 요청(`device_id` 없음)은 단건 조회가 되므로 그 요청을 보낸 기기의 목록에 남고 상태·리뷰도 갱신된다(2026-11-18 이용자 결정: 이용자가 시험으로 보낸 요청은 남김). 그래서 끝난 요청은 `done_at` 7일 뒤, 만료는 생성 48시간 뒤 서버에서 지워지면 목록에서도 사라진다(2026-11-18 사람 판정 대기: 리뷰를 계속 보이게 할지). 접수 중에는 목록 병합을 미루고, 화면을 열 때 한 번 조회해 기기 쿠키를 먼저 받은 뒤 접수한다(쿠키 없는 새 기기의 접수와 조회가 겹쳐 서로 다른 쿠키를 받는 경합을 막는다) |
 | 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
 | (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
@@ -462,7 +463,7 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 - 접수 관문은 화면(`canRegister`)과 서버(`/api/live/chat`의 `gateLiveResult`. 예비 엔진에서 AI가 `done`이라고 답할 때 한 번 더 거른다) 두 곳에 있다. 확인 상태, 방금 읽어 준 요약, 그 뒤의 분명한 동의가 모두 있어야 한다. 접수 API(`POST /api/requests`)는 형식·길이·횟수만 검사하고 동의는 확인하지 않는다. "등록됐어요"는 `POST /api/requests`가 성공한 뒤에만 말한다.
 - 화면은 `session.update`를 보내지 않는다.
 
-**환경 변수 9개** (`liveConfig.ts`. `.env` 파일은 만들지 않는다)
+**환경 변수 13개** (`liveConfig.ts`. `.env` 파일은 만들지 않는다)
 
 | 환경 변수 | 기본 | 뜻 |
 |---|---|---|
@@ -475,8 +476,12 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 | `LIVE_DAILY_SESSION_CAP` | 10 | 하루 Realtime 세션 수. 첫 통화부터 재는 고정 24시간 창, 인스턴스별. 0~200 |
 | `LIVE_TRANSCRIBE_LANG` | `ko` | 전사 언어(ISO-639-1). `""`면 뺀다 |
 | `LIVE_REAL_CALL_BUDGET` | 없음(제한 없음) | 이 서버 프로세스가 OpenAI로 보낼 수 있는 유료 호출 수. 로컬 실호출 점검에서 남은 횟수를 넣는다. 프로세스 메모리라 서버를 다시 띄우면 0부터 센다 |
+| `LIVE_CALL_IP_LIMIT` | 3 | 주소 하나가 10분 동안 만들 수 있는 Realtime 통화 수. 1~60. 넘으면 예비 엔진으로 간다. 같은 와이파이에서 여러 명이 쓰는 QA 때는 올린다 |
+| `LIVE_ADVANCE` | `auto` | 차례를 누가 넘기나. `auto`는 말이 멎으면 앱이 AI에게 넘긴다. `manual`이면 이용자가 '다음'이라고 하거나 큰 단추를 누를 때만 넘긴다 |
+| `LIVE_LOG` | 끔 | `/live` 대화 기록. `on`이면 참가자 표지(주소의 `?p=`)가 있는 화면만, `all`이면 모든 화면의 대화를 `live_events`에 저장한다. 그 밖의 값은 끔 |
+| `LIVE_LOG_UNTIL` | 없음(끝 없음) | 대화 기록을 받는 마지막 날(`YYYY-MM-DD`, 한국 시간 그 날짜의 끝까지). 지나면 `LIVE_LOG`가 켜져 있어도 받지 않는다. 값이 있는데 모양이 틀리면 꺼짐으로 본다(오타로 약속한 날짜 뒤에도 저장되는 일을 막는다) |
 
-**라우트 4개** (모두 `runtime = "nodejs"`, `dynamic = "force-dynamic"`, 응답 `Cache-Control: no-store`)
+**라우트 5개** (모두 `runtime = "nodejs"`, `dynamic = "force-dynamic"`, 응답 `Cache-Control: no-store`)
 
 | 라우트 | 제한 | 요청 → 응답 |
 |---|---|---|
@@ -484,6 +489,7 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 | `POST /api/live/chat` | 20회/분(IP), 하루 600턴(인스턴스 전체), 본문 64KiB, `maxDuration` 30 | `{sessionId, message, history}` → 200 `{reply, status: "asking"\|"confirming"\|"done"\|"ended", slots}`. `history`에는 이번 말이 없고 서버가 한 번 붙인다. 오류는 `{error, code}`: 404 `disabled`, 429 `rate_limited`·`daily_cap`·`budget`, 413 `too_large`, 400 `bad_request`, 503 `not_configured`, 504 `timeout`, 502 `failed` |
 | `POST /api/live/call` | 3회/10분(IP), 본문 16,384바이트, `maxDuration` 300 | `Content-Type: application/sdp`, 본문 offer SDP(`?rate=slow\|normal\|fast`). 성공 200 `{engine:"realtime", sdp, callId, maxSessionSec, warnBeforeSec, maxTurns}`. 쓸 수 없으면 200 `{engine:"fallback", reason: "rate_limited"\|"disabled"\|"mock"\|"no_key"\|"daily_cap"\|"budget"\|"upstream"}`. 404 `disabled`, 415 `unsupported`, 403 `forbidden`(다른 출처), 413 `too_large`, 400 `invalid_sdp` |
 | `POST /api/live/hangup` | 10회/분(IP), 본문 1,024바이트, `maxDuration` 15 | `{callId, turns?}` → 언제나 204. 모양이 맞는 `callId`를 끊고 쓰지 않은 예산을 돌려준다 |
+| `POST /api/live/log` | 1,200회/분(IP), 120회/분(기기), 본문 32,768바이트, 줄 40개, `maxDuration` 10 | `{label, entries:[{cid, seq, kind, tag, body, phase, engine, atMs}]}` → 200 `{stored, reason: "saved"\|"off"\|"ended"\|"no_label"\|"no_device"\|"empty"\|"capped"\|"unavailable"\|"failed"}`. 잠깐의 저장 오류는 503, 횟수 제한은 429. 기기 ID는 쿠키 `lh_device`에서 읽기만 하고 새로 심지 않는다. 모양은 `liveLogWire.ts` |
 
 **서버 계약**
 - 글자 대화(`/api/live/chat`): OpenAI Responses API, 모델 `OPENAI_MODEL`(없으면 `gpt-4.1-mini`), `max_output_tokens` 500, JSON 모드, `store: false`, 25초 마감. 기록 검사는 `/api/voice/chat`의 `readVoiceBody`를 가져다 쓴다(`voiceChat.ts`는 고치지 않았다). 지시문은 `liveInstructions.ts`. `LLM_MODE=mock`이면 `mockLiveText`의 고정 대화다(호출 0회). AI 칸의 기록은 JSON 글(`encodeAiTurn`)로 주고받고, 전화번호는 칸과 답에서 가린다.
@@ -492,7 +498,15 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 - 세션 설정(`buildRealtimeSession`): GA 표기. 음성 `marin`, 출력 `["audio"]`, `create_response:false`·`interrupt_response:false`(응답은 앱이 `response.create`로 시킨다), 도구 `confirm_request`·`register_request`·`end_conversation`, `max_output_tokens` 400, `truncation:"auto"`. 출력 빠르기는 `rate`가 slow면 0.85, normal이면 1.0, fast면 1.2다.
 - 통화를 끊는 길(모두 최선 노력): 화면이 닫을 때 `/api/live/hangup`, 같은 인스턴스의 예약 끊기, `/api/live/call`이 불릴 때의 `sweepCalls`. 통화 장부와 하루 자리는 인스턴스 메모리라서, 인스턴스가 다르면 장부를 못 본다.
 - 실호출 예산: OpenAI로 가는 유료 호출 1번이 1회다. 통화 만들기 때 `1 + maxTurns`를 미리 쓰고, 화면이 hangup에서 알려 준 실제 턴 수만큼만 남기고 돌려준다(`maxTurns`는 `LIVE_MAX_TURNS` 30과 남은 예산 - 1 가운데 작은 쪽).
-- 로그는 `<METHOD> <경로> <상태> <ms>ms` 뒤에 `key=value` 꼬리표(`engine`, `reason`, `cap`, `budget`, `upstream`, `gate`)만 남긴다. 이용자 말, AI 답, SDP, `callId`, 기기 ID, 상품명은 남기지 않는다. 브라우저 콘솔에도 대화를 찍지 않는다.
+- 로그는 `<METHOD> <경로> <상태> <ms>ms` 뒤에 `key=value` 꼬리표(`engine`, `reason`, `cap`, `budget`, `upstream`, `gate`)만 남긴다. 이용자 말, AI 답, SDP, `callId`, 기기 ID, 상품명은 남기지 않는다. 브라우저 콘솔에도 대화를 찍지 않는다. 대화 글이 남는 곳은 `live_events` 표 하나뿐이다(아래 '대화 기록').
+
+**대화 기록(QA 분석용, 2026-11-24 이용자 결정)**
+- 2026-11-03 계획의 "통화 내용 저장은 하지 않음(QA 피드백 후 재판단)"을 QA 기간에 한해 바꿨다. 2026-12-03까지 저장하고 30일 보관한다.
+- Realtime의 대화 글자는 브라우저와 OpenAI 사이로만 오가므로 화면이 모아서 보낸다. 실행기 `liveRunner.ts`의 `step()`이 사건마다 선택 의존성 `record`를 부르고, `liveLog.ts`가 허용 목록에 있는 사건만 골라 대화(`cid`)별 순번을 붙여 2초 단위로 `POST /api/live/log`에 보낸다. 화면이 가려지거나 닫힐 때 남은 줄을 `keepalive`로 한 번 더 보낸다. 예비 엔진도 같은 길을 쓴다(`/api/live/chat`은 지금처럼 저장하지 않는다).
+- 참가자 표지: 주소 `/live?p=P01`. 한 번 읽으면 그 브라우저에 기억해(`localStorage` `lh-live-qa`) 다시 열어도 붙는다. `?p=off`면 지운다. `LIVE_LOG=on`에서는 표지가 있는 화면만 보내고, 표지가 없는 방문자의 대화는 서버로 가지 않는다.
+- 서버(`liveLogStore.ts`)는 줄마다 모양을 검사해 틀린 줄만 버리고, 글을 정리하고(NFKC, 제어 문자, 전화번호 가림, 1,000자) 기기 ID·환경(`VERCEL_ENV`)을 붙여 `live_events`에 덧붙인다(같은 `cid`·순번은 처음 것만). 서버 키에는 조회와 추가 권한만 있다. 표가 없으면 `unavailable`로 답하고 60초 동안 DB를 부르지 않는다. 안전판 둘: 표가 60만 줄을 넘거나(줄 수 어림을 60초마다 본다) 인스턴스 하나가 한국 날짜 하루에 10만 줄을 넘게 저장하면 받지 않는다(`capped`, 서버 로그 `store=capped`). Vercel 배포(운영·미리보기)에서 Supabase 연결이 없으면 `unavailable`이고, 메모리 저장은 로컬·시험에서만 쓴다.
+- 저장이 실패해도 대화는 끊기지 않고 화면에 알리지 않는다. 서버가 한 번이라도 저장했다고 답하면 화면 구석에 "기록 중 · <표지>"가 보인다(진행자 확인용).
+- 한계: 기기 ID는 브라우저 단위다(같은 폰의 Safari·앱 안 브라우저·홈 화면 앱은 서로 다른 ID). 끼어들기로 끊긴 AI 답은 그때까지의 글자가 `reply_cut`으로 남고, 그 답의 전체 글이 뒤늦게 오면 `reply_after_cut`으로 한 줄 더 남는다(이용자가 들은 것은 `reply_cut`까지다). 접수를 보낸 사실은 `REGISTER`, 결과는 `REGISTER_OK`·`REGISTER_FAIL:<종류>`로 남는다. 화면이 닫힌 뒤 끝난 접수는 결과 줄이 없으므로 `requests.client_request_id = cid`로 보되, `requests` 행은 만료 48시간·완료 7일 뒤 지워지니 QA 기간에는 그 전에 뽑아 둔다. 줄 순서는 도착 시각이 아니라 `cid`, `seq`로 읽는다. 전화번호 가림은 숫자 모양에만 듣는다(한글로 읽은 번호, 여러 토막으로 나뉜 번호는 남는다). 이름·주소·건강 이야기는 가리지 못한다. 설정 응답에 `log`가 없으면 화면은 기억해 둔 참가자 표지를 지운다. 참가자에게 알리고 동의받는 일은 QA 진행자가 한다(앱 안 음성 고지 없음).
 
 **돈과 보안**
 - 병합만으로 운영에 열리지 않는다. `LIVE_ENABLED`는 운영에서 `on`일 때만 켜지고, Realtime은 `LIVE_REALTIME=on`이어야 한다. 여는 것은 사람이 정한다.

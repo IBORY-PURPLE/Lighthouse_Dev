@@ -30,6 +30,7 @@ import {
   registerLive,
   startDeviceReady,
 } from "@/lib/liveRequest";
+import { createLiveLog, forgetLiveLogLabel, readLiveLogLabel } from "@/lib/liveLog";
 import { createLiveRunner, type LiveCaption, type LiveRunner } from "@/lib/liveRunner";
 import { errorScriptFor, readVisits, script } from "@/lib/liveScripts";
 import { createLiveSpeaker } from "@/lib/liveSpeaker";
@@ -251,6 +252,8 @@ export function LiveConversation() {
   const [statusText, setStatusText] = useState("");
   const [alertText, setAlertText] = useState("");
   const [typed, setTyped] = useState("");
+  /** 서버가 대화 기록을 받았다고 한 뒤의 표시(진행자 확인용). null이면 그리지 않는다. */
+  const [logMark, setLogMark] = useState<{ label: string } | null>(null);
 
   const mainRef = useRef<HTMLButtonElement>(null);
   const listLinkRef = useRef<HTMLAnchorElement>(null);
@@ -325,6 +328,21 @@ export function LiveConversation() {
       else queueMicrotask(() => get()?.focus());
     };
 
+    // 대화 기록(QA 분석용): 참가자 표지는 주소 ?p=에서. 서버가 켜 줄 때(설정 응답의 log)만 보낸다.
+    const deviceReady = startDeviceReady();
+    const label = readLiveLogLabel(win.location.search, storage);
+    const liveLog = createLiveLog({
+      fetch: (input, init) => win.fetch(input, init),
+      deviceReady,
+      timers: {
+        set: (fn, ms) => win.setTimeout(fn, ms),
+        clear: (h) => win.clearTimeout(h as number),
+      },
+      now: () => Date.now(),
+      label,
+      onStored: () => setLogMark((cur) => cur ?? { label }),
+    });
+
     const runner = createLiveRunner(
       {
         createEngine: (kind: EngineKind) => (kind === "realtime" ? createRealtimeEngine() : createFallbackEngine(win)),
@@ -335,7 +353,7 @@ export function LiveConversation() {
           clear: (h) => win.clearTimeout(h as number),
         },
         registerLive,
-        deviceReady: startDeviceReady(),
+        deviceReady,
         storage,
         requestStream: async () => {
           try {
@@ -360,6 +378,7 @@ export function LiveConversation() {
         wakeLock,
         waitSoundOn: readWaitSound,
         attachPush: (id) => { void attachPushIfOn(id, win); },
+        record: (e, s, fx) => liveLog.record(e, s, fx),
       },
       createInitialLive({
         cid: newConversationId(),
@@ -374,11 +393,17 @@ export function LiveConversation() {
 
     let cancelled = false;
     void fetch("/api/live/config", { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<{ realtime?: unknown; advance?: unknown } | null>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<{ realtime?: unknown; advance?: unknown; log?: unknown } | null>) : null))
       .then((data) => {
-        if (!cancelled && data) runner.dispatch({ type: "CONFIG", realtime: data.realtime === true, ...(data.advance === "manual" ? { advance: "manual" as const } : {}) });
+        if (cancelled) return;
+        liveLog.setMode(data?.log === "all" ? "all" : data?.log === "label" ? "label" : null);
+        // 서버가 200으로 답했는데 log가 없으면 기록이 꺼졌거나 기간이 끝난 것이다. 기억해 둔 표지를 지운다(네트워크 실패·200이 아닌 응답에서는 지우지 않는다).
+        if (data && typeof data === "object" && data.log !== "all" && data.log !== "label") forgetLiveLogLabel(storage);
+        if (data) runner.dispatch({ type: "CONFIG", realtime: data.realtime === true, ...(data.advance === "manual" ? { advance: "manual" as const } : {}) });
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) liveLog.setMode(null);
+      });
 
     const onPopState = () => {
       pushedRef.current = false;
@@ -386,6 +411,7 @@ export function LiveConversation() {
     };
     const onVisibility = () => {
       runner.dispatch({ type: doc.visibilityState === "hidden" ? "HIDDEN" : "VISIBLE" });
+      if (doc.visibilityState === "hidden") liveLog.flush(true);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -408,7 +434,10 @@ export function LiveConversation() {
       if (e.repeat) return;
       activateMain();
     };
-    const onPageHide = () => runner.dispose();
+    const onPageHide = () => {
+      liveLog.flush(true);
+      runner.dispose();
+    };
     const onPageShow = (e: PageTransitionEvent) => {
       // 뒤로 가기 캐시에서 되살아나면 실행기가 닫힌 상태라 새로 불러온다.
       if (e.persisted) win.location.reload();
@@ -432,6 +461,8 @@ export function LiveConversation() {
       if (holdTimerRef.current !== null) win.clearTimeout(holdTimerRef.current);
       store.detach();
       ctxRef.current = null;
+      liveLog.flush(true);
+      liveLog.dispose();
       runner.dispose();
     };
   }, [store, activateMain, exitNow]);
@@ -721,6 +752,12 @@ export function LiveConversation() {
       ) : (
         <button type="button" className={styles.small} onClick={exitNow}>{BUTTONS.exit}</button>
       )}
+
+      {logMark ? (
+        <p className={styles.logMark} data-testid="live-log-mark">
+          {logMark.label !== "" ? `기록 중 · ${logMark.label}` : "기록 중"}
+        </p>
+      ) : null}
 
       <div className={styles.srOnly}>
         <StatusRegion quiet message={statusText} />
