@@ -209,6 +209,8 @@ export interface LiveLogDeps {
   onStored?(count: number): void;
   /** 서버 답(off·ended·no_label·404)이나 설정 때문에 이 화면에서 보내기를 멈출 때 한 번 부른다(표시를 내리는 용도). */
   onStopped?(): void;
+  /** 서버가 받았지만 저장하지 못했다고 답할 때(capped·failed·unavailable) 부른다(표시를 내리는 용도). 다시 저장되면 onStored가 불린다. */
+  onNotStored?(): void;
 }
 
 export interface LiveLog {
@@ -471,6 +473,14 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
     onReply(batch, data, leaving);
   }
 
+  function notStored(): void {
+    try {
+      deps.onNotStored?.();
+    } catch {
+      // 표시 오류가 보내기를 멈추지 않게 한다.
+    }
+  }
+
   function onReply(batch: LiveLogEntry[], data: unknown, leaving: boolean): void {
     try {
       if (mode !== "on") return;
@@ -483,6 +493,7 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
       }
       if (reason === "unavailable") {
         // 표가 아직 없다. 대화 중에 생길 수 있으니 실패와 같이 되돌려 놓고 쉬었다 다시 보낸다(onStored는 부르지 않는다).
+        notStored();
         requeue(batch);
         fail(leaving);
         return;
@@ -510,6 +521,8 @@ export function createLiveLog(deps: LiveLogDeps): LiveLog {
         } catch {
           // 표시 오류가 보내기를 멈추지 않게 한다.
         }
+      } else if (reason === "capped" || reason === "failed") {
+        notStored();
       }
       afterDone();
     } catch {

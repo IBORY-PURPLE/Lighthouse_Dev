@@ -37,7 +37,7 @@ export interface LiveEventRow {
   env: string;
 }
 
-/** saved: 저장함 / unavailable: 표가 없거나 연결이 없음 / failed: 다시 보내도 안 되는 오류 / capped: 상한 / retry: 잠깐의 오류(나중에 다시) */
+/** saved: 저장함(묶음이 거부돼 줄마다 따로 넣어 일부만 들어간 경우 포함) / unavailable: 표가 없거나 연결이 없음 / failed: 어느 줄도 넣지 못한 영구 오류 / capped: 상한 / retry: 잠깐의 오류(나중에 다시) */
 export type SaveLiveEventsResult = "saved" | "unavailable" | "failed" | "capped" | "retry";
 
 const KINDS: ReadonlySet<string> = new Set<LiveLogKind>(["user", "ai", "app", "event"]);
@@ -48,6 +48,8 @@ const ENV_PATTERN = /^[a-z]{1,12}$/;
 
 export const MEMORY_MAX_ROWS = 2000;
 export const DB_TIMEOUT_MS = 3000;
+/** 묶음이 거부돼 줄마다 따로 넣을 때 쓰는 전체 시간 한도. */
+export const ONE_BY_ONE_BUDGET_MS = 5000;
 /** 표가 없다는 오류를 만나면 이 시간 동안 DB를 부르지 않는다. */
 export const UNAVAILABLE_COOLDOWN_MS = 60_000;
 /** 표의 줄 수 어림값을 다시 보는 간격. */
@@ -281,8 +283,31 @@ export async function saveLiveEvents(rows: LiveEventRow[]): Promise<SaveLiveEven
       current.unavailableUntil = Date.now() + UNAVAILABLE_COOLDOWN_MS;
       return "unavailable";
     }
-    return isPermanent(error) ? "failed" : "retry";
+    if (!isPermanent(error)) return "retry";
+    // 줄 하나 때문에 묶음 전체가 거부됐을 수 있다. 줄마다 따로 넣어 좋은 줄을 살린다.
+    const saved = await saveOneByOne(table, rows);
+    if (saved === 0) return "failed";
+    current.dayRows += saved;
+    return "saved";
   } catch {
     return "retry";
   }
+}
+
+/** 묶음이 영구 오류로 거부됐을 때 줄마다 따로 넣는다. 저장된 줄 수를 돌려준다. 전체 5초를 넘기면 그만둔다. */
+async function saveOneByOne(table: LogTable, rows: LiveEventRow[]): Promise<number> {
+  const startedAt = Date.now();
+  let saved = 0;
+  for (const row of rows) {
+    if (Date.now() - startedAt > ONE_BY_ONE_BUDGET_MS) break;
+    try {
+      const { error } = await withTimeout(
+        table.upsert([row], { onConflict: "cid,seq", ignoreDuplicates: true, defaultToNull: false }),
+      );
+      if (!error) saved += 1;
+    } catch {
+      // 이 줄은 넘어간다.
+    }
+  }
+  return saved;
 }

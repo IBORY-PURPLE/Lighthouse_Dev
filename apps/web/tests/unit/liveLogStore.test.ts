@@ -336,7 +336,21 @@ describe("saveLiveEvents (DB)", () => {
     expect(await saveLiveEvents(rows())).toBe("unavailable");
   });
 
-  it.each(["23514", "23502", "22001", "22P02"])("영구 오류 %s는 failed다", async (code) => {
+  it("묶음이 영구 오류로 거부되면 줄마다 따로 넣어 좋은 줄을 살리고 saved로 답한다", async () => {
+    let calls = 0;
+    const fake = fakeClient({
+      upsert: () => {
+        calls += 1;
+        // 1번째 = 묶음 전체(거부), 3번째 = 둘째 줄(거부), 나머지 = 저장
+        const bad = calls === 1 || calls === 3;
+        return Promise.resolve({ data: null, error: bad ? { code: "23514", message: "check" } : null });
+      },
+    });
+    expect(await saveLiveEvents(rows(3))).toBe("saved");
+    expect(fake.upserts.map((call) => call.rows.map((row) => row.seq))).toEqual([[0, 1, 2], [0], [1], [2]]);
+  });
+
+  it.each(["23514", "23502", "22001", "22P02"])("영구 오류 %s는(줄마다 따로 넣어도 모두 거부되면) failed다", async (code) => {
     fakeClient({ upsert: () => Promise.resolve({ data: null, error: { code, message: "check" } }) });
     expect(await saveLiveEvents(rows())).toBe("failed");
   });

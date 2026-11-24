@@ -376,6 +376,7 @@ function harness(opts: { label?: string; deviceReady?: Promise<void> } = {}) {
   const plan: Reply[] = [];
   const stored: number[] = [];
   const stops = { n: 0 };
+  const misses = { n: 0 };
   const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     urls.push(String(url));
     inits.push(init ?? {});
@@ -395,8 +396,11 @@ function harness(opts: { label?: string; deviceReady?: Promise<void> } = {}) {
     onStopped: () => {
       stops.n += 1;
     },
+    onNotStored: () => {
+      misses.n += 1;
+    },
   });
-  return { log, timers, sent, inits, urls, plan, stored, stops, fetchFn };
+  return { log, timers, sent, inits, urls, plan, stored, stops, misses, fetchFn };
 }
 
 const heard = (text: string): LiveEvent => ({ type: "USER_TURN_END", text, transcribed: true });
@@ -1113,6 +1117,30 @@ describe("createLiveLog: 실패 중 쉬기·시간 제한·묶음별 다시 보�
       await h.timers.advance(60_000);
       expect(h.stops.n, JSON.stringify(first)).toBe(1);
     }
+  });
+
+  it("onNotStored: capped·failed·unavailable 답이면 부르고, 다시 저장되면 onStored가 불린다", async () => {
+    for (const reason of ["capped", "failed", "unavailable"]) {
+      const h = harness();
+      h.plan.push({ json: { stored: 0, reason } });
+      h.log.setMode("label");
+      say(h.log, "말");
+      await h.timers.advance(LIVE_LOG_SEND_DELAY_MS);
+      expect(h.misses.n, reason).toBe(1);
+      expect(h.stored, reason).toEqual([]);
+      expect(h.stops.n, reason).toBe(0);
+      say(h.log, "다음 말");
+      await h.timers.advance(60_000);
+      expect(h.stored.length, reason).toBeGreaterThan(0);
+    }
+  });
+
+  it("onNotStored: 저장이 잘 되는 동안에는 부르지 않는다", async () => {
+    const h = harness();
+    h.log.setMode("label");
+    say(h.log, "말");
+    await h.timers.advance(LIVE_LOG_SEND_DELAY_MS);
+    expect(h.misses.n).toBe(0);
   });
 
   it("onStopped: 저장이 잘 되는 동안에는 부르지 않는다", async () => {
