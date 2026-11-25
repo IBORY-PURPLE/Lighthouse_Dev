@@ -49,10 +49,16 @@ describe("matchLocalCommand", () => {
     ["빠르게 해줘", "fast"],
     ["보통 속도로", "normal"],
     ["종료", "end"],
+    ["멈춰줘", "pause"],
+    ["멈춰 주세요", "pause"],
+    ["정지", "pause"],
+    ["끝내줘", "end"],
+    ["끝내 주세요", "end"],
+    ["끝내기", "end"],
   ])("%s → %s", (text, expected) => {
     expect(matchLocalCommand(text)).toBe(expected);
   });
-  it.each(["다시마 과자 찾아 줘", "다시 보내", "그만큼 큰 거", "끝이 둥근 가위", "", "전기밥솥", "도움말 알려 줘"])(
+  it.each(["다시마 과자 찾아 줘", "다시 보내", "그만큼 큰 거", "끝이 둥근 가위", "멈춤 기능 있는 선풍기", "끝내주는 이어폰 찾아 줘", "", "전기밥솥", "도움말 알려 줘"])(
     "%j는 명령이 아니다",
     (text) => {
       expect(matchLocalCommand(text)).toBeNull();

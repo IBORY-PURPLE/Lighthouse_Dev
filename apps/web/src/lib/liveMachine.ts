@@ -770,7 +770,11 @@ function onUtterance(c: Cx, raw: string, source: "voice" | "text", engineEnded: 
   // 3. 끝낼까요?에 대한 답
   if (s.ask === "end") {
     if (isClearConsent(text)) {
-      enterEnded(c);
+      // 말로 끝냈다. 보내는 중이 아니면 마침 안내 뒤 화면이 처음 상태로 돌아간다(화면이 이 대본 id를 보고 돌아간다).
+      if (s.sendPending) enterEnded(c);
+      else if (s.requestId !== null) enterEnded(c, { script: "endedHomeRegistered" });
+      else if (s.history.some((t) => t.role === "user")) enterEnded(c, { script: "endedHomeUnsent" });
+      else enterEnded(c, { script: "endedHome" });
       return;
     }
     s.ask = null;

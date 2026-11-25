@@ -89,12 +89,17 @@ describe("대본 표", () => {
   it("끼워 넣는 값이 들어간다", () => {
     expect(script("registered", { n: 7 })).toContain("접수 번호는 7번이에요");
     expect(script("rateLimited", { s: 12 })).toContain("12초 뒤에");
-    expect(script("confirmAgain", { summary: "제품은 TV." })).toBe("제품은 TV. 이 내용으로 봉사자에게 보낼까요?");
+    expect(script("confirmAgain", { summary: "제품은 TV." })).toBe("제품은 TV. 이 내용으로 봉사자에게 보낼까요? 이제 천천히 답변해 주세요.");
     expect(script("confirmRetell", { summary: "제품은 TV." })).toBe(
-      "요약을 다시 들려 드릴게요. 제품은 TV. 이 내용으로 봉사자에게 보낼까요?",
+      "요약을 다시 들려 드릴게요. 제품은 TV. 이 내용으로 봉사자에게 보낼까요? 이제 천천히 답변해 주세요.",
     );
   });
 
+  it("이용자가 말할 차례를 여는 안내는 끝말로 끝난다(띵 소리가 안 들릴 때도 말할 때를 알게)", () => {
+    expect(text("manualGuide").endsWith("이제 천천히 말씀해 주세요.")).toBe(true);
+    expect(script("confirmAgain", { summary: "제품은 TV." }).endsWith("이제 천천히 답변해 주세요.")).toBe(true);
+    expect(script("confirmRetell", { summary: "제품은 TV." }).endsWith("이제 천천히 답변해 주세요.")).toBe(true);
+  });
   it("단추 이름이 BUTTONS에서 온다", () => {
     expect(script("pausedByUser")).toContain(`'${BUTTONS.resume}'`);
     expect(script("registerRejected")).toContain(`'${BUTTONS.newRequest}'`);

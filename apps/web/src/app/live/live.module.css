@@ -11,6 +11,7 @@
   --card: #f1f4f8;
   --danger: #8a1c1c;
 
+  position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -296,4 +297,64 @@
   .root {
     padding: 1.5rem max(1.5rem, calc((100vw - 960px) / 2));
   }
+}
+
+/* 제목 뒤의 소개 글. 늘 보인다. */
+.intro {
+  margin: 0;
+  padding-right: 4rem;
+  color: var(--muted);
+  font-size: 1.125rem;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+/* 오른쪽 위 ? 단추: 말 명령 안내를 연다. */
+.help {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  box-sizing: border-box;
+  width: 56px;
+  height: 56px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--accent);
+  font: inherit;
+  font-size: 1.5rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.help:focus-visible {
+  outline: 4px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.guide {
+  margin: 0;
+  padding: 1rem;
+  border: 2px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--card);
+}
+
+.guide h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+}
+
+.guide p {
+  margin: 0 0 0.5rem;
+}
+
+.guide ul {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+}
+
+.guide li {
+  margin: 0.25rem 0;
+  word-break: keep-all;
 }

@@ -1917,6 +1917,23 @@ describe("확인 동의와 끝내기 답(A11·A36·A13)", () => {
     expect(other.state.phase).toBe("thinking");
     expect(other.state.ask).toBeNull();
   });
+  it("말로 끝내면('끝내 줘' → '네') 처음 화면으로 돌아간다는 마침 안내를 읽는다. 단추로 끝내면 예전 안내 그대로다", () => {
+    const home = new Set(["endedHome", "endedHomeRegistered", "endedHomeUnsent"]);
+    const ask = run(atArmed().state, { type: "USER_TURN_END", text: "끝내 줘", transcribed: true });
+    expect(spoken(ask.effects)).toEqual(["endAsk"]);
+    const open = run(run(ask.state, speakEnd(ask.state)).state, { type: "LISTEN_STARTED", late: false });
+    const end = run(open.state, { type: "USER_TURN_END", text: "네", transcribed: true });
+    expect(end.state.phase).toBe("ended");
+    expect(home.has(end.state.speaking as string)).toBe(true);
+    const button = run(atArmed().state, { type: "EXIT" });
+    expect(button.state.phase).toBe("ended");
+    expect(home.has(button.state.speaking as string)).toBe(false);
+  });
+  it("'멈춰 줘'라고 하면 멈춘다", () => {
+    const r = run(atArmed().state, { type: "USER_TURN_END", text: "멈춰 줘", transcribed: true });
+    expect(r.state.phase).toBe("paused");
+    expect(spoken(r.effects)).toEqual(["pausedByUser"]);
+  });
   it("확인 상태에서 '끝낼까요?'에 아니요라고 하면 요약을 다시 읽는다", () => {
     const c = atConfirming();
     const ask = run(c.state, { type: "USER_TURN_END", text: "그만", transcribed: true });

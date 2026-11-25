@@ -1,6 +1,6 @@
 // /live 안내 문구 대본, 음절 세기, 방문 횟수 읽기·쓰기. 설계서 10절.
 // 단추 이름과 말 명령은 BUTTONS, COMMANDS에서 끼워 넣는다. 모든 대본은 100음절 이하다.
-import { BUTTONS, COMMANDS, NEXT_WORD, type LocalCommand } from "@/lib/liveCommands";
+import { ANSWER_CUE, BUTTONS, COMMANDS, NEXT_WORD, SPEAK_CUE, type LocalCommand } from "@/lib/liveCommands";
 import type { InputMode, LiveErrorKind } from "@/lib/liveEngine";
 
 export const LIVE_VISITS_KEY = "lh.live.visits.v1";
@@ -65,7 +65,7 @@ const SCRIPTS = {
   helpMoreVoice: `VoiceOver를 쓰시면 ${B.talk} 단추를 찾아 두 번 탭해서 제 말을 멈출 수 있어요. VoiceOver를 쓰지 않으면 화면을 길게 눌러도 돼요. ${W.repeat}는 다시 듣기, ${W.slow}와 ${W.fast}는 말 빠르기, ${W.pause}은 멈춤, ${W.end}은 끝내기예요.`,
   helpText: `원하는 제품, 알고 싶은 정보, 원하는 옵션을 알려 주시면 봉사자에게 전달해 드려요. ${B.textInput} 칸에 쓰고 ${B.sendText} 단추를 누르세요. 제 말을 멈추려면 ${B.stopTalking} 단추를 누르세요. ${B.repeat}, ${B.pause}, ${B.exit} 단추와 말 빠르기 단추도 있어요.`,
   silence1: "천천히 말씀하셔도 돼요. 띵 소리가 나면 말씀하세요.",
-  manualGuide: `말씀하시다 쉬어도 계속 듣고 있어요. 다 말씀하신 뒤 ${q(NEXT_WORD)}이라고 하시면 넘어갈게요.`,
+  manualGuide: `말씀하시다 쉬어도 계속 듣고 있어요. 다 말씀하신 뒤 ${q(NEXT_WORD)}이라고 하시면 넘어갈게요. ${SPEAK_CUE}`,
   manualMore: `더 말씀하셔도 돼요. 다 말씀하셨으면 ${q(NEXT_WORD)}이라고 해 주세요.`,
   silence2: `무엇을 말할지 모르겠으면 ${W.help}이라고 해 보세요. 예를 들면 전기밥솥, 할인 혜택이 궁금해요, 이렇게 말씀하시면 돼요.`,
   extendAsk: "계속 들을까요? 아무 말씀이나 해 주세요. 20초 동안 조용하면 잠시 멈출게요.",
@@ -78,9 +78,9 @@ const SCRIPTS = {
   waiting2: "조금 더 걸리고 있어요.",
   editPrompt: "고칠 내용을 말씀해 주세요.",
   editPromptText: `고칠 내용을 ${B.textInput} 칸에 써 주세요.`,
-  confirmAgain: "{summary} 이 내용으로 봉사자에게 보낼까요?",
+  confirmAgain: `{summary} 이 내용으로 봉사자에게 보낼까요? ${ANSWER_CUE}`,
   confirmHint: `보내려면 ${q("네")}라고 하시거나 ${B.consent} 단추를 누르세요. 요약을 다시 들으려면 ${W.repeat}라고 하세요. 고칠 내용이 있으면 말씀해 주세요.`,
-  confirmRetell: "요약을 다시 들려 드릴게요. {summary} 이 내용으로 봉사자에게 보낼까요?",
+  confirmRetell: `요약을 다시 들려 드릴게요. {summary} 이 내용으로 봉사자에게 보낼까요? ${ANSWER_CUE}`,
   registering: "요청을 봉사자에게 보내고 있어요.",
   registered: `등록됐어요. 접수 번호는 {n}번이에요. 봉사자가 찾아보고 답을 보내면 요청 목록에서 들을 수 있어요. 목록은 ${B.list}, 다른 요청은 ${B.newRequest} 단추를 누르세요.`,
   registeredEnded: `등록됐어요. 접수 번호는 {n}번이에요. 봉사자가 찾아보고 답을 보내면 처음 화면의 요청 목록에서 들을 수 있어요. 다른 요청은 ${B.newRequest} 단추를 누르세요.`,
@@ -98,6 +98,10 @@ const SCRIPTS = {
   endedSending: "대화를 마쳤어요. 요청을 보내고 있어요. 결과가 오면 바로 알려 드릴게요.",
   endedSendFailed: `요청이 접수됐는지 확인하지 못했어요. ${B.continueTalk} 단추를 누르면 다시 보낼 수 있어요.`,
   endedEmpty: "대화를 마쳤어요.",
+  // 말로 끝냈을 때("끝내 줘" → "네"). 읽고 나면 화면이 /live 처음 상태로 돌아간다.
+  endedHome: "대화를 마쳤어요. 처음 화면으로 돌아갈게요.",
+  endedHomeRegistered: "대화를 마쳤어요. 요청은 등록돼 있어요. 처음 화면으로 돌아갈게요.",
+  endedHomeUnsent: "대화를 마쳤어요. 요청은 보내지 않았어요. 처음 화면으로 돌아갈게요.",
   rateSlow: "천천히 말할게요.",
   rateFast: "빠르게 말할게요.",
   rateNormal: "보통 빠르기로 말할게요.",

@@ -27,6 +27,12 @@ const tools = LIVE_TOOLS as Tool[];
 const tool = (name: string) => tools.find((t) => t.name === name)!;
 
 describe("공통 지시문", () => {
+  it("질문 끝에 '이제 천천히 답변해 주세요.'를 덧붙이고 '네,'로 시작해 되짚으라고 한다(띵 소리가 안 들릴 때도 말할 때와 들은 때를 알게)", () => {
+    for (const text of [LIVE_COMMON_INSTRUCTIONS, LIVE_CHAT_INSTRUCTIONS, LIVE_REALTIME_INSTRUCTIONS]) {
+      expect(text).toContain('맨 끝에 꼭 "이제 천천히 답변해 주세요."라고 그대로 덧붙입니다');
+      expect(text).toContain('"네,"로 시작해');
+    }
+  });
   it("모을 항목과 금지 낱말 규칙이 들어 있다", () => {
     for (const word of ["원하는 제품", "알고 싶은 정보", "원하는 옵션", "전화번호", "봉사자가 찾아서"]) {
       expect(LIVE_COMMON_INSTRUCTIONS).toContain(word);

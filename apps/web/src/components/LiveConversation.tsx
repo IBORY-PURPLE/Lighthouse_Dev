@@ -18,10 +18,11 @@ import {
 import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { StatusRegion } from "@/components/StatusRegion";
-import { BUTTONS } from "@/lib/liveCommands";
+import { BUTTONS, COMMAND_GUIDE, ENDED_HOME_SPEAKING } from "@/lib/liveCommands";
 import { createEarconPlayer } from "@/lib/liveEarcons";
 import type { EarconPlayer, EngineKind } from "@/lib/liveEngine";
 import { createFallbackEngine } from "@/lib/liveFallbackEngine";
+import { createHaptic } from "@/lib/liveHaptic";
 import { GESTURE_IDLE, HOLD_MS, gestureStep, type GestureOutput, type GestureState } from "@/lib/liveGesture";
 import { createInitialLive, type LiveEvent, type LiveState } from "@/lib/liveMachine";
 import { createRealtimeEngine } from "@/lib/liveRealtimeEngine";
@@ -41,6 +42,12 @@ import styles from "@/app/live/live.module.css";
 
 const WAIT_SOUND_KEY = "lh.live.waitSound.v1";
 const CONTROLS = "button,a,input,textarea,select,label,summary";
+
+/** 제목 바로 뒤에 늘 보이는 소개 글. 대화 중에도 바뀌지 않는다(화면 낭독기가 바뀐 글을 다시 읽지 않게). */
+const LIVE_INTRO = "사고 싶은 제품의 혜택과 정보를 대신 찾아 드리는 음성 도우미예요.";
+/** 화면에 들어오면 화면 낭독기가 한 번 읽는 알림. 브라우저는 첫 누름 전에 소리를 내지 못해 기기 목소리로는 읽지 않는다. */
+const LIVE_INTRO_ALERT = `${LIVE_INTRO} ${BUTTONS.start} 단추를 누르면 시작해요.`;
+const LIVE_INTRO_DELAY_MS = 700;
 
 // ---------------------------------------------------------------- 상태 저장소(실행기를 화면에 잇는다)
 
@@ -252,6 +259,11 @@ export function LiveConversation() {
   const [statusText, setStatusText] = useState("");
   const [alertText, setAlertText] = useState("");
   const [typed, setTyped] = useState("");
+  /** ? 단추로 여는 말 명령 안내. */
+  const [guideOpen, setGuideOpen] = useState(false);
+  /** 처음 상태에서 소개 알림을 띄울 때가 됐는가. */
+  const [introReady, setIntroReady] = useState(false);
+  const goHomeRef = useRef(false);            // 말로 끝낸 뒤 마침 안내를 읽는 중인가
   /** 서버가 대화 기록을 받았다고 한 뒤의 표시(진행자 확인용). null이면 그리지 않는다. */
   const [logMark, setLogMark] = useState<{ label: string } | null>(null);
 
@@ -320,7 +332,19 @@ export function LiveConversation() {
     const doc = document;
     const storage = pickStorage(win);
     const speaker = createLiveSpeaker(win);
-    const earcons = createEarconPlayer(doc, win);
+    const rawEarcons = createEarconPlayer(doc, win);
+    const haptic = createHaptic(doc, win);
+    // 말할 차례(띵)와 말이 넘어간 때에는 진동도 낸다. 신호음이 안 들릴 때가 있다.
+    const earcons: EarconPlayer = {
+      unlock: () => rawEarcons.unlock(),
+      play: (name) => {
+        if (name === "turn" || name === "confirm") haptic("turn");
+        else if (name === "sent") haptic("sent");
+        return rawEarcons.play(name);
+      },
+      startWait: () => rawEarcons.startWait(),
+      stopWait: () => rawEarcons.stopWait(),
+    };
     const wakeLock = createWakeLock();
     const focusLater = (get: () => HTMLElement | null) => {
       const el = get();
@@ -469,6 +493,36 @@ export function LiveConversation() {
     };
   }, [store, activateMain, exitNow]);
 
+  // 들어오면 화면 낭독기가 소개를 한 번 읽는다. 알림 칸은 화면이 뜬 뒤에 글이 들어와야 읽히므로 잠깐 뒤에 채운다.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIntroReady(true), LIVE_INTRO_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // 말로 끝냈으면("끝내 줘" → "네") 마침 안내를 다 읽은 뒤 /live 처음 상태로 돌아간다.
+  useEffect(() => {
+    if (state.phase !== "ended") {
+      goHomeRef.current = false;
+      return;
+    }
+    if (state.speaking !== null) {
+      if (ENDED_HOME_SPEAKING.has(state.speaking)) goHomeRef.current = true;
+      return;
+    }
+    if (!goHomeRef.current) return;
+    goHomeRef.current = false;
+    window.location.replace(`${window.location.pathname}${window.location.search}`);
+  }, [state.phase, state.speaking]);
+
+  /** ? 단추: 말 명령 안내를 열고 닫는다. 대화 중에 열면 대화를 멈춘다(낭독기가 읽는 명령 낱말이 마이크로 들어가지 않게). */
+  const toggleGuide = () => {
+    const next = !guideOpen;
+    setGuideOpen(next);
+    if (!next) return;
+    const ctx = ctxRef.current;
+    if (ctx && ACTIVE.has(ctx.runner.getState().phase)) ctx.runner.dispatch({ type: "PAUSE" });
+  };
+
   // ---------- 길게 누르기(8.1절) ----------
 
   const applyGesture = useCallback((out: GestureOutput) => {
@@ -580,7 +634,7 @@ export function LiveConversation() {
   const onSurfaceClick = (e: SyntheticEvent<HTMLElement>) => {
     // idle에서만 화면 아무 곳이나 짧게 눌러 시작한다. 단추·링크·입력 칸 위의 click은 그 요소의 것이다(22절 3).
     if (ctxRef.current?.runner.getState().phase !== "idle") return;
-    if (e.target instanceof Element && e.target.closest(CONTROLS)) return;
+    if (e.target instanceof Element && e.target.closest(`${CONTROLS},[data-live-guide]`)) return;
     activateMain();
   };
 
@@ -649,8 +703,13 @@ export function LiveConversation() {
       }}
     >
       <h1 className={styles.title}>음성 도우미</h1>
-      <p className={styles.headline}>{headlineOf(state, caption)}</p>
-      {state.phase === "listening" && caption.user !== "" ? <p className={styles.caption}>{caption.user}</p> : null}
+      <p className={styles.intro}>{LIVE_INTRO}</p>
+      {/* 대화 중의 큰 글자는 말마다 바뀐다. 화면 낭독기에는 바뀌지 않는 '대화 중'만 보여 준다(바뀐 글을 읽는 소리가 AI 목소리와 겹치지 않게). */}
+      <p className={styles.headline}>
+        <span aria-hidden={active ? "true" : undefined}>{headlineOf(state, caption)}</span>
+        {active ? <span className={styles.srOnly}>대화 중</span> : null}
+      </p>
+      {state.phase === "listening" && caption.user !== "" ? <p className={styles.caption} aria-hidden="true">{caption.user}</p> : null}
 
       <button
         ref={mainRef}
@@ -661,6 +720,28 @@ export function LiveConversation() {
       >
         {spec.label}
       </button>
+
+      <button
+        type="button"
+        className={styles.help}
+        aria-label={BUTTONS.commands}
+        aria-expanded={guideOpen}
+        onClick={toggleGuide}
+      >
+        ?
+      </button>
+      {guideOpen ? (
+        <section className={styles.guide} data-live-guide="" aria-label="말 명령어">
+          <h2>말 명령어</h2>
+          <p>띵 소리가 난 뒤에 이 말만 따로 하면 돼요. 도우미가 말하는 동안에는 {BUTTONS.talk} 단추를 눌러 끊을 수 있어요.</p>
+          <ul>
+            {COMMAND_GUIDE.map((g) => (
+              <li key={g.say}><strong>{g.say}</strong> {g.does}</li>
+            ))}
+          </ul>
+          <button type="button" className={styles.small} onClick={() => setGuideOpen(false)}>{BUTTONS.closeCommands}</button>
+        </section>
+      ) : null}
 
       {showInput ? (
         <form className={styles.form} onSubmit={onFormSubmit}>
@@ -763,7 +844,7 @@ export function LiveConversation() {
 
       <div className={styles.srOnly}>
         <StatusRegion quiet message={statusText} />
-        <p role="alert">{alertText}</p>
+        <p role="alert">{alertText !== "" ? alertText : state.phase === "idle" && introReady ? LIVE_INTRO_ALERT : ""}</p>
       </div>
     </main>
   );

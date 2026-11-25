@@ -25,7 +25,30 @@ export const BUTTONS = {
   home: "처음 화면",
   textInput: "답 입력",         // 글자 입력 칸의 label
   waitSound: "기다리는 동안 소리 내기",  // 체크 상자
+  commands: "명령어 안내",       // 오른쪽 위 ? 단추의 이름
+  closeCommands: "안내 닫기",
 } as const;
+
+/**
+ * 이용자가 말할 차례를 알리는 끝말. 띵 소리가 안 들릴 때가 있어(2026-11-25 이용자 실기기 확인) AI와 앱이 질문 끝에 이 말을 한다.
+ * 이용자는 이 말이 끝난 것을 듣고 답을 시작한다.
+ */
+export const ANSWER_CUE = "이제 천천히 답변해 주세요.";
+export const SPEAK_CUE = "이제 천천히 말씀해 주세요.";
+
+/** 말로 끝냈을 때의 마침 대본 id. 화면은 이 대본을 다 읽으면 /live 처음 상태로 돌아간다. */
+export const ENDED_HOME_SPEAKING: ReadonlySet<string> = new Set(["endedHome", "endedHomeRegistered", "endedHomeUnsent"]);
+
+/** ? 단추가 보여 주는 말 명령 목록. 화면 글이다(대본이 아니다). */
+export const COMMAND_GUIDE: { say: string; does: string }[] = [
+  { say: "다음", does: "다 말한 뒤 다음 질문으로 넘어가요" },
+  { say: "다시", does: "방금 들은 말을 다시 들어요" },
+  { say: "천천히, 빠르게, 보통", does: "말 빠르기를 바꿔요" },
+  { say: "도움말", does: "사용법을 들어요" },
+  { say: "멈춰 줘, 잠깐", does: "대화를 잠시 멈춰요. 이어서 하려면 계속하기 단추를 눌러요" },
+  { say: "끝내 줘, 그만", does: "대화를 끝내고 처음 화면으로 돌아가요. 끝낼지 한 번 물어봐요" },
+  { say: "네, 보내 줘", does: "요약을 들은 뒤 봉사자에게 보내요" },
+];
 
 export type LocalCommand = "help" | "repeat" | "slow" | "fast" | "normal" | "pause" | "end";
 export const COMMANDS: { command: LocalCommand; words: string[]; meaning: string }[] = [
@@ -34,8 +57,8 @@ export const COMMANDS: { command: LocalCommand; words: string[]; meaning: string
   { command: "slow",   words: ["천천히", "느리게"],           meaning: "말을 천천히 한다" },
   { command: "fast",   words: ["빠르게", "빨리"],             meaning: "말을 빠르게 한다" },
   { command: "normal", words: ["보통", "보통속도"],            meaning: "보통 빠르기로 돌아간다" },
-  { command: "pause",  words: ["잠깐", "잠깐만", "잠시만"],     meaning: "잠시 멈춘다" },
-  { command: "end",    words: ["그만", "끝", "끝내", "종료"],   meaning: "대화를 끝낼지 묻는다" },
+  { command: "pause",  words: ["잠깐", "잠깐만", "잠시만", "멈춰", "멈춤", "정지"],     meaning: "잠시 멈춘다" },
+  { command: "end",    words: ["그만", "끝", "끝내", "종료", "끝내기"],   meaning: "대화를 끝낼지 묻는다" },
 ];
 
 /** NFKC, 소문자, 공백·문장부호 제거. */

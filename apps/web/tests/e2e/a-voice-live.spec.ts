@@ -57,7 +57,7 @@ const test = base.extend<{ openai: string[] }>({
 test.describe.configure({ timeout: 120_000 });
 
 const ANSWERS = ["소니 헤드폰", "노이즈 캔슬링 성능", "검정색이면 좋겠어요"] as const;
-const CONFIRM_RE = /^제품은 .*보낼까요\?$/;
+const CONFIRM_RE = /^제품은 .*보낼까요\? 이제 천천히 답변해 주세요\.$/;
 const DONE_RE = /^등록됐어요\. 접수 번호는 \d+번이에요/;
 
 // ---------------------------------------------------------------- 준비
@@ -1105,7 +1105,8 @@ test.describe("/live 음성 도우미 화면", () => {
   // ---- 접근성 검토 뒤 화면 수정(A1, A3, A5, A6, A7, A8, A18, A22, A24, A26, A37) ----
 
   const listLink = (page: Page) => page.getByRole("link", { name: BUTTONS.list, exact: true });
-  const headlineOf = (page: Page) => surface(page).locator("h1 + p");
+  // 제목 뒤에 소개 글이 하나 있고 그다음이 큰 글자다. 큰 글자 안의 첫 칸이 화면에 보이는 글이다.
+  const headlineOf = (page: Page) => surface(page).locator("h1 + p + p > span").first();
 
   /** 접수를 마치고 done에서 접수 번호 읽기를 붙든 채로 둔다. */
   async function reachDoneReading(page: Page): Promise<void> {
