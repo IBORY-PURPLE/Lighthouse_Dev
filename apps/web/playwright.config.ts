@@ -52,6 +52,8 @@ export default defineConfig({
           EXTRACT_MODE: "mock",
           // 입장 코드가 아니라 봉사자 기기 쿠키(lh_vol) 서명 비밀이다.
           DEMO_ACCESS_CODE: "e2e-signing-secret",
+          // /live 화면 시험은 예전 화면(작은 단추, 요약 카드, 대화 기록)을 누르며 확인한다. 운영 기본은 메인 단추 하나(minimal)다.
+          LIVE_UI: "full",
         },
       },
 });

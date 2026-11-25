@@ -153,7 +153,8 @@ describe("문구가 실제 동작과 맞다", () => {
   it("확인 상태의 침묵 안내는 요약을 되풀이하지 않고 방법을 알린다(A13)", () => {
     const t = text("confirmHint");
     expect(t).toContain(`'네'`);
-    expect(t).toContain(`'${BUTTONS.consent}'`);
+    // 메인 단추만 남긴 화면에는 [이대로 보내기]가 없다. 없는 단추를 가리키지 않는다(2026-11-25 검토 지적).
+    expect(t).not.toContain(BUTTONS.consent);
     expect(t).toContain(`'${COMMANDS.find((c) => c.command === "repeat")!.words[0]}'`);
   });
 

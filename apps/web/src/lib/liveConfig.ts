@@ -69,6 +69,15 @@ export function liveVadMode(): "semantic" | "server" {
 }
 
 /**
+ * LIVE_UI: /live 화면 구성. 기본 "minimal"(메인 단추 하나만. 2026-11-25 이용자 결정 "메인 단추만 남기고 다른 컴포넌트를 다 삭제").
+ * "full"이면 예전 화면(큰 글자, 작은 단추 줄, 요약 카드, 대화 기록, 말 명령 안내)을 보여 준다. 화면 시험이 이 값을 쓴다.
+ * 주소의 ?ui=full, ?ui=minimal이 이 값보다 먼저다.
+ */
+export function liveUiMode(): "minimal" | "full" {
+  return process.env.LIVE_UI?.trim().toLowerCase() === "full" ? "full" : "minimal";
+}
+
+/**
  * LIVE_ADVANCE: 차례를 누가 넘기나. 기본 "auto"(말이 멎으면 앱이 AI에게 넘긴다).
  * "manual"이면 이용자가 '다음'이라고 하거나 큰 단추를 누를 때만 넘긴다(말이 잠깐 끊겨도 계속 듣는다).
  */

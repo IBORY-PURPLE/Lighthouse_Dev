@@ -388,6 +388,33 @@ test.describe("/live 음성 도우미 화면", () => {
     expect(live.register).toHaveLength(1);
   });
 
+  test("메인 단추만 남긴 화면(?ui=minimal, 운영 기본): 처음 상태에는 메인 단추 하나만 있고, 말로 접수까지 간다", async ({ page }) => {
+    const live = await openLive(page);
+    await page.goto("/live?ui=minimal");
+    await expect(surface(page)).toHaveAttribute("data-live-ui", "minimal");
+    // 단추는 메인 단추 하나, 링크·체크 상자·입력 칸·대화 기록은 없다. 제목은 낭독기용으로만 있다.
+    await expect(surface(page).getByRole("button")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: BUTTONS.start, exact: true })).toBeVisible();
+    await expect(surface(page).locator("a, input, textarea, [role=log]")).toHaveCount(0);
+    await expect(surface(page).getByRole("heading", { level: 1, name: "음성 도우미" })).toHaveCount(1);
+
+    // 대화 중에도 단추는 하나뿐이다.
+    await startAndListen(page);
+    await expect(surface(page).getByRole("button")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: BUTTONS.talk, exact: true })).toBeVisible();
+    for (const answer of ANSWERS) await sayLive(page, answer);
+    await heard(page, CONFIRM_RE);
+    await expectState(page, "confirming");
+    await expect(surface(page).getByRole("button")).toHaveCount(1);
+
+    // 요약 카드와 [이대로 보내기] 없이 말로 동의해 접수한다. 접수 뒤에는 목록 링크만 더 보인다.
+    await sayLive(page, "네");
+    await expectState(page, "done");
+    expect(live.register).toHaveLength(1);
+    await heard(page, DONE_RE);
+    await expect(page.getByRole("link", { name: BUTTONS.list, exact: true })).toBeVisible();
+  });
+
   test("사례 4 AI를 거친 접수", async ({ page }) => {
     const live = await openLive(page);
     await reachConfirm(page);
