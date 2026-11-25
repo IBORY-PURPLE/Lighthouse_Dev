@@ -756,6 +756,10 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
         </span>
         <span className={styles.mainLabel}>{spec.label}</span>
       </button>
+      {/* 메인 단추만 남긴 화면: 접수 번호와 오류 이유는 낭독기로 다시 읽을 수 있게 남긴다(저절로 읽히지는 않는다). */}
+      {!full && (state.phase === "done" || state.phase === "error") ? (
+        <p className={styles.srOnly}>{headlineOf(state, caption)}</p>
+      ) : null}
 
       {full ? (
         <button
