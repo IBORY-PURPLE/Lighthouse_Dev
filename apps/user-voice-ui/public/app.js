@@ -74,6 +74,7 @@ let recognitionSequence = 0;
 let requestSequence = 0;
 let activeSpeechUtterance = null;
 let pendingNextCommand = null;
+let pendingRecognitionRetry = false;
 
 /**
  * 사용자 및 AI 문자열을 HTML에 안전하게 표시합니다.
@@ -148,6 +149,7 @@ const stopConversationMedia = () => {
   recognitionSequence += 1;
   requestSequence += 1;
   pendingNextCommand = null;
+  pendingRecognitionRetry = false;
   window.speechSynthesis?.cancel();
   activeSpeechUtterance = null;
   if (recognition) {
@@ -261,12 +263,13 @@ const renderRequest = () => {
     <div class="screen">
       ${renderBackButton('home')}
       <p class="screen-title" data-screen-title>상품 요청</p>
-      <p class="lead">질문 시작하기를 선택하면 AI가 여섯 개의 질문을 차례로 합니다. 각 질문이 끝나면 자동으로 답변을 듣고 다음 질문으로 넘어갑니다.</p>
+      <p class="lead">질문 시작하기를 선택하면 AI가 여섯 개의 질문을 차례로 합니다. 답변한 뒤 ‘다음’이라고 말하면 다음 질문으로 넘어갑니다.</p>
       ${state.phase === 'intro' ? `
         <div class="guide-panel">
           <p class="guide-title">진행 안내 · 총 여섯 개의 질문</p>
           <p>AI는 매번 ‘첫 번째 질문입니다’처럼 현재 질문 순서를 먼저 말합니다.</p>
           <p>대화가 시작되면 별도의 버튼을 누르지 않고 자연스럽게 답변하세요.</p>
+          <p>답변과 ‘다음’을 따로 말해도 되며, 오래 기다리면 AI가 ‘다음’을 말해 달라고 다시 안내합니다.</p>
         </div>
         <button class="primary-button" type="button" data-action="start-conversation">질문 시작하기</button>
       ` : state.phase === 'error'
@@ -457,6 +460,14 @@ const speakRetryAndListen = (message = '잘 듣지 못했습니다. 다시 한 �
   window.speechSynthesis.speak(utterance);
 };
 
+const retryCurrentInput = () => {
+  if (state.inputMode === 'next') {
+    speakRetryAndListen(`아직 '다음'이라는 말을 듣지 못했습니다. 다음 질문으로 넘어가려면 '다음'이라고 말씀해 주세요.`);
+    return;
+  }
+  speakRetryAndListen();
+};
+
 const requestMicrophonePermission = async () => {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('마이크를 사용할 수 없습니다. HTTPS 주소로 접속했는지 확인해 주세요.');
@@ -499,7 +510,9 @@ const startRecognition = () => {
     const result = event.results?.[0];
     const answer = result?.[0]?.transcript?.trim() || '';
     if (!answer) {
-      speakRetryAndListen();
+      pendingRecognitionRetry = true;
+      state.phase = 'processing';
+      render();
       return;
     }
     if (state.inputMode === 'correction') {
@@ -525,7 +538,9 @@ const startRecognition = () => {
       failConversation('마이크 권한이 허용되지 않았습니다. 브라우저 설정에서 마이크를 허용한 뒤 대화를 다시 시작해 주세요.');
       return;
     }
-    speakRetryAndListen();
+    pendingRecognitionRetry = true;
+    state.phase = 'processing';
+    render();
   };
 
   recognition.onend = () => {
@@ -540,8 +555,12 @@ const startRecognition = () => {
       }, RECOGNITION_RELEASE_DELAY_MS);
       return;
     }
-    if (state.phase === 'listening') {
-      speakRetryAndListen();
+    if (pendingRecognitionRetry || state.phase === 'listening') {
+      pendingRecognitionRetry = false;
+      window.setTimeout(() => {
+        if (currentRecognitionSequence !== recognitionSequence || state.screen !== 'request') return;
+        retryCurrentInput();
+      }, RECOGNITION_RELEASE_DELAY_MS);
     }
   };
 
