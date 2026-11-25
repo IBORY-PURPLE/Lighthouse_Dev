@@ -96,10 +96,112 @@ export function unknownModelTokens(text: string, material: readonly string[]): s
   return modelTokens(text).filter((token) => !known.includes(compact(token)));
 }
 
+// ---- 값·이름이 자료에 근거하는지 ---------------------------------------------------------
+// AI가 낸 칸 값(봉사자 말 + evidence)과 검색 후보 이름(그 후보가 인용한 출처의 제목·주소)을 같은 방법으로 자료와 대조한다.
+// 낱말(핵심 토큰) 단위로 보고, 절반 이상이 자료에 있어야 한다. 말투가 바뀌어도(아프다고 → 아픔) 어간이 남으면 같은 말로 본다.
+
+const TOKEN_SPLIT = /[\s\p{P}\p{S}]+/u;
+const TOKEN_PARTICLE = /(?:이랑|에서|으로|랑|이|가|은|는|을|를|도|요|에|의|로|과|와)$/;
+const squash = (value: string) => value.normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+
+/** 핵심 토큰: 정규화(NFKC·소문자)해 낱말로 나누고 끝 조사를 뗀 뒤 두 글자 이상인 것. */
+export function coreTokens(value: string): string[] {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(TOKEN_SPLIT)
+    .map((word) => {
+      const stripped = word.replace(TOKEN_PARTICLE, "");
+      return [...stripped].length >= 2 ? stripped : word;
+    })
+    .filter((word) => [...word].length >= 2);
+}
+
+function tokenFound(token: string, haystack: readonly string[]): boolean {
+  if (haystack.some((part) => part.includes(token))) return true;
+  const chars = [...token];
+  if (chars.length < 3) return false;
+  const stem = chars.slice(0, -1).join("");
+  return haystack.some((part) => part.includes(stem));
+}
+
+/**
+ * value의 핵심 토큰 가운데 min 이상의 비율이 haystack 글들 안에 있나. 토큰이 하나도 없으면(한 글자 낱말뿐) 값 전체가 들어 있어야 한다.
+ * 값이 비어 있으면 false.
+ */
+export function tokensCovered(value: string, haystack: readonly string[], min = 0.5): boolean {
+  const parts = haystack.map(squash).filter((part) => part !== "");
+  const tokens = coreTokens(value);
+  if (tokens.length === 0) {
+    const whole = squash(value);
+    return whole !== "" && parts.some((part) => part.includes(whole));
+  }
+  const found = tokens.filter((token) => tokenFound(token, parts)).length;
+  return found / tokens.length >= min;
+}
+
+/** 한글·영문 두 표기를 같은 브랜드로 보는 작은 목록(소니·Sony). 이름에 든 브랜드는 그 자료에도 있어야 한다. */
+const BRAND_GROUPS: readonly (readonly string[])[] = [
+  ["sony", "소니", "쏘니"],
+  ["bose", "보스"],
+  ["samsung", "삼성"],
+  ["apple", "애플"],
+  ["lg", "엘지"],
+  ["jbl", "제이비엘"],
+  ["sennheiser", "젠하이저"],
+  ["logitech", "로지텍"],
+  ["anker", "앤커"],
+  ["philips", "필립스"],
+  ["marshall", "마샬"],
+  ["xiaomi", "샤오미"],
+  ["dyson", "다이슨"],
+  ["razer", "레이저"],
+  ["panasonic", "파나소닉"],
+];
+
+/** 브랜드 별칭을 모두 첫 표기(sony)로 바꾼다. 짧은 영문 별칭은 낱말 경계에서만 바꾼다. */
+function canonicalBrands(text: string): string {
+  let out = text.normalize("NFKC").toLowerCase();
+  for (const [canon, ...aliases] of BRAND_GROUPS) {
+    for (const word of [canon, ...aliases]) {
+      out = /^[a-z]+$/.test(word) ? out.replace(new RegExp(`(?<![a-z])${word}(?![a-z])`, "g"), canon) : out.split(word).join(canon);
+    }
+  }
+  return out;
+}
+
+/** 글자 종류가 바뀌는 곳에서 끊은 낱말: 영문·숫자 덩어리(wh, ch720n)와 한글 덩어리. 그 밖의 글자는 구분자다. */
+const wordRuns = (text: string): string[] => canonicalBrands(text).match(/[a-z0-9]+|[가-힣]+/g) ?? [];
+
+/**
+ * 이름 근거 규칙(단순·엄격): 이름의 모든 낱말이 자료에 있어야 한다. 브랜드 한영 표기는 같은 말로 본다(소니=Sony).
+ * 영문·숫자 낱말은 자료의 낱말과 똑같아야 하고, 한글 낱말은 자료의 한글 낱말 안에 들어 있으면 된다(조사가 붙은 소니는 → 소니).
+ * 하나라도 없으면 거부한다. 낱말이 하나도 없는 이름은 거부한다.
+ */
+function allWordsGrounded(name: string, material: readonly string[]): boolean {
+  const words = wordRuns(name);
+  if (words.length === 0) return false;
+  const have = material.flatMap(wordRuns);
+  const latin = new Set(have.filter((word) => /[a-z0-9]/.test(word)));
+  const hangul = have.filter((word) => /[가-힣]/.test(word));
+  return words.every((word) => (/[a-z0-9]/.test(word) ? latin.has(word) : hangul.some((part) => part.includes(word))));
+}
+
+/**
+ * 기종·대안 이름이 자료에 근거하나. 검색 후보는 자료가 그 후보가 인용한 출처 하나의 제목·주소 글이고(다른 출처나 요청 글로 모자란 낱말을 채우지 않는다),
+ * 턴의 기종 채움은 봉사자 말과 요청 글이다. 같은 함수를 쓴다. 이름의 모든 낱말(브랜드 포함)이 자료에 있어야 하고 하나라도 없으면 false.
+ */
+export function nameGrounded(name: string, material: readonly string[]): boolean {
+  return unknownModelTokens(name, material).length === 0 && allWordsGrounded(name, material);
+}
+
 const hasUnknownModel = (text: string, material: readonly string[] | undefined) =>
   material !== undefined && unknownModelTokens(text, material).length > 0;
 
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
+
+// 전화번호 모양: 휴대폰·지역번호(010-1234-5678, 02 123 4567, +82 10…), 대표번호(1588-1234).
+export const PHONE = /(?<!\d)0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|\+82[-\s.]?\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)|(?<!\d)1[5-9]\d{2}[-\s.]\d{4}(?!\d)/;
 
 export function clip(value: string, max: number): string {
   const chars = [...value];
@@ -160,8 +262,14 @@ export function countObjects(raw: unknown): number {
  * 화면에 보내는 주소는 검색 결과에 있던 주소다. 이미 앞 후보가 쓴 주소(분류 페이지 하나로 몰린 경우)는
  * 그 기종의 페이지가 아니므로 첫 후보만 주소를 갖고 나머지는 주소 없이(url null) 남긴다.
  * exclude는 후보에서 뺄 이름(대안 후보에서 이미 정한 기종).
+ * sources가 있으면 후보 이름이 그 후보가 쓴 출처 하나의 글(제목·주소, 비교 키 → 글 목록)에 근거하는 후보만 남긴다(nameGrounded).
  */
-export function cleanItems(raw: unknown, allowed: AllowedUrls, exclude?: string): ResearchItem[] {
+export function cleanItems(
+  raw: unknown,
+  allowed: AllowedUrls,
+  exclude?: string,
+  sources?: ReadonlyMap<string, readonly string[]>,
+): ResearchItem[] {
   const seen = new Set<string>(exclude ? [exclude.trim().toLowerCase()] : []);
   const usedUrls = new Set<string>();
   const items: ResearchItem[] = [];
@@ -172,6 +280,7 @@ export function cleanItems(raw: unknown, allowed: AllowedUrls, exclude?: string)
     if (name.length < 2 || [...name].length > RESEARCH_LIMITS.nameMax || hasForbidden(name)) continue;
     const source = key === null ? undefined : allowed.get(key);
     if (key === null || source === undefined || seen.has(name.toLowerCase())) continue;
+    if (sources !== undefined && !nameGrounded(name, sources.get(key) ?? [])) continue;
     seen.add(name.toLowerCase());
     const note = typeof entry.note === "string" ? oneLine(entry.note) : "";
     const shared = usedUrls.has(key);
@@ -250,4 +359,51 @@ export function cleanText(raw: unknown, max: number, material?: readonly string[
   if (typeof raw !== "string") return "";
   const kept = dropSentences(raw.trim(), (sentence) => hasForbidden(sentence) || hasUnknownModel(sentence, material));
   return clip(kept, max);
+}
+
+// 혜택 카드(제목·조건·비교)에는 금액·할인율·포인트 수량이 한 글자도 보이면 안 된다(design.md 4.9 "혜택은 금액 없이").
+// hasForbidden은 퍼센트를 돈 낱말이 6자 안에 있을 때만 걸어서 "20% 포인트 추가", "즉시 5%", "최대 3천 포인트"가 빠져나간다.
+// 혜택 글은 종류와 조건만 말하므로, 퍼센트 기호·퍼센트 글자·천/만 단위 수·포인트(P) 수량은 낱말과 상관없이 모두 버린다.
+// 한글 수사: 일·삼…십·백·천·만·억 조합(이십처럼 이로 시작하는 두 글자 이상 포함), 하나·둘·셋·한·두·세·네·열 등.
+// 한 글자 "이"는 "이 포인트로 결제해요"의 지시어일 수 있어 수사로 보지 않는다(프로 앞의 "이"는 아래에서 따로 건다).
+const HAN_DIGITS = "일이삼사오육칠팔구십백천만억";
+const HAN_NUMBER = `(?:[일삼사오육칠팔구십백천만억][${HAN_DIGITS}]*|이[${HAN_DIGITS}]+|하나|한|둘|두|셋|세|넷|네|다섯|여섯|일곱|여덟|아홉|열)`;
+const BENEFIT_STRICT: readonly RegExp[] = [
+  /%|퍼센트|percent/i,
+  // "10 프로 혜택", "이십 프로 적립"(프로모션·프로그램·프로젝트는 낱말이라 뺀다)
+  /(?:\d|(?<![가-힣])[일이삼사오육칠팔구]?[십백][일이삼사오육칠팔구]?)\s?프로(?!모|그|젝|필|세)/,
+  /\d\s*[천만]/,
+  /\d[\d,.]*\s*(?:P(?![A-Za-z])|포인트)|[천만]\s?(?:P(?![A-Za-z])|포인트)/i,
+  // 한글 수 포인트: 오백 포인트, 십만 P("이 포인트", "카드사 포인트"는 수가 아니라 낱말이라 십·백·천·만이 든 수만 건다)
+  /(?<![가-힣])[일이삼사오육칠팔구]?[십백천만][일이삼사오육칠팔구십백천만]*\s?(?:포인트|P(?![A-Za-z]))/i,
+  // 한글 수사 + 단위: 오 프로 혜택, 오 포인트 적립, 십 퍼, 일 원. 숫자 한 글자("오")도 단위 바로 앞이면 수량이다.
+  // 한글 글자가 앞에 붙은 낱말(카드사 포인트, 당일 포인트)과 프로모션·프로그램·프로젝트 같은 낱말은 뺀다.
+  new RegExp(
+    `(?<![가-힣])${HAN_NUMBER}\\s?(?:프로(?!모|그|젝|필|세)|퍼센트|퍼(?![가-힣])|포인트|P(?![A-Za-z])|원(?:(?![가-힣])|(?=이|짜|대|정도|쯤|씩|에|을|를|은|는|도|입|안|밖|내|부터|까지|으로|가|선)))`,
+    "i",
+  ),
+  // 수량이 포인트 뒤에 오는 글: 포인트 500 적립, 포인트 약 5천, 포인트 오백.
+  /포인트\s?(?:약\s?)?(?:\d|[일이삼사오육칠팔구]?[십백천만억][일이삼사오육칠팔구십백천만억]*(?![가-힣]))/,
+  // "이 프로 혜택"(이=2)은 건다. 이 프로모션·이 프로그램은 낱말이라 뺀다.
+  /(?<![가-힣])이\s?프로(?!모|그|젝|필|세)/,
+];
+
+/** 혜택 글 전용 검사: hasForbidden에 더해 퍼센트 기호·천만 단위 수·포인트 수량이 있으면 참. */
+export function hasBenefitForbidden(text: string): boolean {
+  const normalized = text.normalize("NFKC");
+  return hasForbidden(normalized) || BENEFIT_STRICT.some((pattern) => pattern.test(normalized));
+}
+
+// 전화번호·이메일·메신저 연락처. 웹 페이지에 심어 둔 글이 혜택·제품 글로 흘러와 봉사자 화면에 연락처가 뜨지 않게 한다.
+const CONTACT: readonly RegExp[] = [
+  /(?<!\d)0\d{1,2}[\s.)-]+\d{3,4}[\s.-]+\d{4}(?!\d)/,
+  /(?<!\d)01\d[\s.-]?\d{7,8}(?!\d)/,
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}/,
+  /카카오\s?톡|카톡|오픈\s?채팅|오픈\s?카톡|텔레그램|위챗|왓츠\s?앱|라인\s?(?:아이디|id)|open\.kakao|t\.me\/|wa\.me\/|line\.me\//i,
+];
+
+/** 전화번호·이메일·메신저 연락처 모양이 있나. */
+export function hasContact(text: string): boolean {
+  const normalized = text.normalize("NFKC");
+  return CONTACT.some((pattern) => pattern.test(normalized));
 }

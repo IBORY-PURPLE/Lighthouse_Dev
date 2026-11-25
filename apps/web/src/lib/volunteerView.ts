@@ -53,6 +53,18 @@ export interface SentResult {
   candidates: SentCandidate[];
 }
 
+/** 이용자 음성 대화의 질문과 답 한 짝. */
+export interface RequestQa {
+  q: string;
+  a: string;
+}
+
+/** 이용자가 확인한 요약과 질문·답(봉사자 브리핑). 요청을 맡은 봉사자에게만 간다. */
+export interface RequestDetailsView {
+  summary: string;
+  qa: RequestQa[];
+}
+
 /** 요청 상세의 후보 카드 한 장(시연용 예시 후보). 가격·재고는 담지 않는다. */
 export interface CandidateView {
   id: string;
@@ -93,9 +105,10 @@ const CONDITION_LABEL: Record<ConditionKind, string> = {
   any: "새 제품·중고 상관없음",
 };
 
-/** 요청 상세의 구조화 줄. 품목을 모르면 "품목" 부분을 뺀다. */
+/** 요청 상세의 구조화 줄. 품목을 모르면 "품목" 부분을 뺀다. 브랜드가 있으면 품목 뒤에 붙는다. */
 export function structuredLine(request: {
   item: string | null;
+  brand?: string | null;
   budget: string;
   conditionKind: ConditionKind | null;
   condition: string;
@@ -105,10 +118,56 @@ export function structuredLine(request: {
     : request.condition;
   const parts = [
     ...(request.item ? [`품목 ${request.item}`] : []),
+    ...(request.brand ? [`브랜드 ${request.brand}`] : []),
     `예산 ${request.budget}`,
     condition,
   ];
   return parts.join(" · ");
+}
+
+/** 브리핑 카드 한 장. 장마다 제목 한 줄과 "이름: 글" 줄 몇 개, 있으면 안내 한 줄. */
+export interface BriefStep {
+  key: string;
+  title: string;
+  lines: { label: string; text: string }[];
+  note?: string;
+}
+
+/** 질문·답 기록이 없는 요청(/classic, DB 적용 전)의 안내. */
+export const BRIEF_EMPTY_NOTE = "질문·답 기록이 없는 요청이에요";
+
+/**
+ * 봉사자가 구매 여부를 고른 뒤 기종 질문 전에 한 장씩 확인하는 이용자 요청 카드.
+ * 1장은 이용자가 확인한 요약(없으면 요청 글)과 접수 정보, 2장부터 질문과 이용자 답 한 짝씩이다.
+ * details가 없으면 1장만, 질문·답 기록이 없다는 안내와 함께.
+ */
+export function briefSteps(
+  request: Parameters<typeof structuredLine>[0] & { product: string },
+  details: RequestDetailsView | null,
+): BriefStep[] {
+  const facts = structuredLine(request);
+  const summary = details?.summary.trim() ?? "";
+  const first: BriefStep = {
+    key: "summary",
+    title: "이용자가 확인한 요청",
+    lines: [
+      { label: summary ? "요약" : "요청", text: summary || request.product },
+      { label: "접수 정보", text: facts },
+    ],
+    ...(details && details.qa.length > 0 ? {} : { note: BRIEF_EMPTY_NOTE }),
+  };
+  const pairs = details?.qa ?? [];
+  return [
+    first,
+    ...pairs.map((pair, index) => ({
+      key: `qa-${index}`,
+      title: `질문 ${index + 1}/${pairs.length}`,
+      lines: [
+        { label: "질문", text: pair.q },
+        { label: "이용자 답", text: pair.a },
+      ],
+    })),
+  ];
 }
 
 /** 서울 날짜를 "일 수"로. 날짜끼리 빼서 오늘·어제를 가른다. */
@@ -138,6 +197,18 @@ export function formatSentAt(sentAt: string): string {
   });
 }
 
+/** 보낸 결과 중 이용자에게 읽히는 검증 리뷰 문단(첫 후보의 핵심 정리). 없으면 null. */
+export function sentReviewOf(result: SentResult): string | null {
+  const text = result.candidates.find((candidate) => candidate.guide.trim() !== "")?.guide.trim();
+  return text ? text : null;
+}
+
+/** 보낸 결과의 기종 이름(첫 후보 이름). 자르지 않고 그대로 준다. 없으면 null. */
+export function sentModelOf(result: SentResult): string | null {
+  const name = result.candidates[0]?.name.trim();
+  return name ? name : null;
+}
+
 /** 직전 목록에 없던 요청 id. 직전 목록이 없으면(첫 불러오기) 빈 집합. */
 export function newRequestIds(
   previous: readonly string[] | null,
@@ -157,9 +228,6 @@ export const VOLUNTEER_MESSAGES = {
   notYours: "이 요청은 내 담당이 아니에요",
   notFound: "요청을 찾지 못했어요",
   notYoursAnymore: "이 요청은 더 이상 내 담당이 아니에요",
-  invalidCode: "입장 코드가 올바르지 않습니다",
-  invalidNickname: "별명은 1~12자로 넣어 주세요",
-  enterTooMany: "시도가 너무 많습니다. 10분 뒤 다시 해 주세요.",
   tempStore:
     "임시 저장소를 쓰고 있습니다. 시연 요청과 맡은 상태가 갑자기 사라질 수 있습니다(DB 적용 전).",
 } as const;

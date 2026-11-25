@@ -4,7 +4,6 @@ import { APIConnectionTimeoutError, RateLimitError } from "openai";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maxDuration, POST, runtime } from "@/app/api/chat/route";
-import { ACCESS_COOKIE, hashAccessCode } from "@/lib/access";
 import {
   LLM_MODEL,
   LlmError,
@@ -55,11 +54,9 @@ let nextClient = 1;
 function chatRequest(
   body: unknown,
   {
-    cookie = true,
     client,
     headers = {},
   }: {
-    cookie?: boolean;
     client?: string;
     headers?: Record<string, string>;
   } = {},
@@ -69,9 +66,6 @@ function chatRequest(
     body: typeof body === "string" ? body : JSON.stringify(body),
     headers: {
       "x-forwarded-for": client ?? `203.0.113.${(nextClient += 1)}`,
-      ...(cookie
-        ? { cookie: `${ACCESS_COOKIE}=${hashAccessCode("right-code")}` }
-        : {}),
       ...headers,
     },
   });
@@ -82,7 +76,6 @@ const errorOf = async (response: Response) =>
 
 describe("POST /api/chat", () => {
   beforeEach(() => {
-    vi.stubEnv("DEMO_ACCESS_CODE", "right-code");
     vi.stubEnv("OPENAI_API_KEY", "test-key");
     vi.stubEnv("GROQ_API_KEY", "");
     vi.stubEnv("LLM_MODE", "");
@@ -166,13 +159,6 @@ describe("POST /api/chat", () => {
     expect(await response.text()).toBe(`검색어:\n${TRUNCATED_NOTICE}`);
   });
 
-  it("쿠키가 없으면 내용을 보기 전에 401이고 OpenAI를 부르지 않는다", async () => {
-    const response = await POST(chatRequest("not json", { cookie: false }));
-    expect(response.status).toBe(401);
-    expect(await errorOf(response)).toBe("unauthorized");
-    expect(create).not.toHaveBeenCalled();
-  });
-
   it("질문 300자는 통과하고 301자는 400이다", async () => {
     const pass = await POST(
       chatRequest({ ...VALID, question: "가".repeat(300) }),
@@ -218,7 +204,6 @@ describe("POST /api/chat", () => {
       duplex: "half",
       headers: {
         "x-forwarded-for": `203.0.113.${(nextClient += 1)}`,
-        cookie: `${ACCESS_COOKIE}=${hashAccessCode("right-code")}`,
       },
     } as ConstructorParameters<typeof NextRequest>[1]);
 
@@ -506,7 +491,7 @@ describe("역할 분리", () => {
   it("이용자 화면 코드는 챗봇 호출을 가져오지 않는다", () => {
     const root = path.resolve(import.meta.dirname, "../../src");
     for (const file of [
-      "app/page.tsx",
+      "app/classic/page.tsx",
       "components/DemoHandoff.tsx",
       "components/SpeechInput.tsx",
       "lib/matchHandoff.ts",

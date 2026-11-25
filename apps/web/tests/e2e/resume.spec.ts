@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { E2E_ACCESS_CODE } from "../../playwright.config";
 import { installFakeSpeech } from "./helpers/fakeSpeech";
 import { completeFlowA, HANDOFF_NAME } from "./helpers/flowA";
 
@@ -19,12 +18,7 @@ async function openUserScreen(page: Page) {
   const context = page.context();
   await context.setExtraHTTPHeaders({ "x-forwarded-for": `test-${randomUUID()}` });
   await installFakeSpeech(page);
-  await page.goto(`/enter?code=${E2E_ACCESS_CODE}`);
-  await expect(page).toHaveURL(/\/$/);
-  // Windows WebKit은 Secure 쿠키를 http://localhost로 보내지 않는다(match.spec.ts 참고).
-  const access = (await context.cookies()).find((cookie) => cookie.name === "lh_access");
-  expect(access).toBeDefined();
-  if (access) await context.addCookies([{ ...access, secure: false }]);
+  await page.goto("/classic");
 }
 
 /** 기기 안 기록을 직접 넣고 다시 연다. */

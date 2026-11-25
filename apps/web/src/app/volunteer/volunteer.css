@@ -146,8 +146,6 @@
 }
 
 .vol-btn:focus-visible,
-.vol-tab:focus-visible,
-.vol-card-link:focus-visible,
 .vol-input:focus-visible,
 .vol-back:focus-visible {
   outline: 3px solid #2f6fed;
@@ -209,76 +207,6 @@
   overflow-wrap: anywhere;
 }
 
-/* ----- 카드 ----- */
-
-.vol-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.vol-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 15px;
-  border: 1.5px solid var(--vol-line);
-  border-radius: 12px;
-  background: var(--vol-bg);
-}
-
-.vol-card-link {
-  color: inherit;
-  text-decoration: none;
-}
-
-.vol-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.vol-chips {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.vol-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 1px 10px;
-  border: 1.5px solid var(--vol-ink);
-  border-radius: 999px;
-  background: var(--vol-ink);
-  color: #ffffff;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.vol-chip--outline {
-  background: var(--vol-bg);
-  color: var(--vol-ink);
-}
-
-.vol-meta {
-  color: var(--vol-ink);
-  font-size: 0.8125rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.vol-meta--sub {
-  color: var(--vol-sub);
-  font-weight: 400;
-}
-
 .vol-quote {
   margin: 0;
   font-size: 1.0625rem;
@@ -289,69 +217,10 @@
   overflow-wrap: anywhere;
 }
 
-.vol-sub {
-  margin: 0;
-  color: var(--vol-sub);
-  font-size: 0.875rem;
-}
-
 .vol-empty {
   margin: 0;
   padding: 18px 0;
   color: var(--vol-sub);
-}
-
-.vol-notice {
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border: 1.5px solid var(--vol-line);
-  border-radius: 8px;
-  color: var(--vol-ink);
-  font-size: 0.875rem;
-}
-
-.vol-demo {
-  margin-top: 28px;
-  padding-top: 16px;
-  border-top: 1px dashed var(--vol-line);
-}
-
-.vol-demo .vol-foot {
-  margin-top: 8px;
-}
-
-/* ----- 하단 탭 ----- */
-
-.vol-tabs {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  z-index: 10;
-  display: flex;
-  gap: 8px;
-  width: 100%;
-  max-width: 520px;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--vol-line);
-  background: var(--vol-bg);
-  transform: translateX(-50%);
-}
-
-.vol-tab {
-  flex: 1;
-  min-height: 48px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--vol-sub);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.vol-tab[aria-current="page"] {
-  background: var(--vol-ink);
-  color: #ffffff;
 }
 
 /* ----- 요청 요약 상자·버튼 줄 ----- */
@@ -407,926 +276,2458 @@
   flex: 1;
 }
 
-.vol-sent a:focus-visible {
-  outline: 3px solid #2f6fed;
+/*
+ * ===== 대화형 리서치 챗(D안, 노트북 크롬) =====
+ * 범위는 .vol-chat 안. 색은 Figma 변수 모드 "D 대화 중심", 움직임은 모션 명세 190:838의 값이다.
+ * 클래스는 vc-로 시작한다. 모션은 장식이고 상태는 글자로도 알린다.
+ */
+
+.vol-chat {
+  --c-bg: #fafaf9;
+  --c-surface: #ffffff;
+  --c-soft: #f2f3f5;
+  --c-ink: #111418;
+  --c-sub: #4e5661;
+  --c-line: #e4e7ec;
+  --c-linestrong: #8a939e;
+  --c-primary: #111418;
+  --c-onprimary: #ffffff;
+  --c-check: #fff4e5;
+  --c-oncheck: #8a4300;
+
+  --lh-motion-fast: 120ms;
+  --lh-motion-base: 200ms;
+  --lh-motion-card: 240ms;
+  --lh-motion-slow: 320ms;
+  --lh-motion-loop: 1200ms;
+  --lh-motion-stagger: 160ms;
+  --lh-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --lh-ease-enter: cubic-bezier(0, 0, 0, 1);
+  --lh-ease-exit: cubic-bezier(0.3, 0, 1, 1);
+
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  color-scheme: light;
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.vol-chat *,
+.vol-chat *::before,
+.vol-chat *::after {
+  box-sizing: border-box;
+}
+
+.vol-chat :is(button, a, input, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 3px solid var(--c-ink);
   outline-offset: 2px;
 }
 
-/* ----- 완료된 요청 ----- */
-
-.vol-status-title {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 700;
-}
-
-.vol-status-line {
-  margin: 0;
-  color: var(--vol-sub);
-  font-size: 0.9375rem;
-}
-
-.vol-status-line--strong {
-  color: var(--vol-ink);
-  font-weight: 700;
-}
-
-.vol-sent {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 14px 15px;
-  border: 1.5px solid var(--vol-line);
-  border-radius: 12px;
-}
-
-.vol-sent .vol-summary-label {
-  margin-top: 6px;
-}
-
-.vol-sent .vol-quote {
-  margin: 0;
-}
-
-.vol-sent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.vol-sent-item {
-  padding-top: 10px;
-  border-top: 1px solid var(--vol-line);
-}
-
-.vol-sent-name {
-  margin: 0;
-  font-weight: 700;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-
-.vol-sent-url,
-.vol-sent-text {
-  margin: 0;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-
-.vol-sent-url a {
-  color: var(--vol-ink);
-}
-
-/*
- * ----- 리서치 챗: 위(제목·배지·진행 점·현재 질문)와 아래(버튼)만 붙어 있고, 요청 상자·답 칸은 가운데에서 함께 스크롤 -----
- * 답을 쓰는 동안에도 현재 질문이 화면 위에 보여야 한다(이용자 기획 설계원칙 4). 두 띠 합이 화면 높이의 절반을 넘거나 둘을 뺀 남은 높이가 220px 미만이면(작은 화면, 글자 확대)
- * ResearchChat이 .rc-root--free를 붙여 위 띠를 일반 흐름으로 돌린다. 아래 띠 하나만으로 화면의 절반을 넘으면 .rc-root--free-bottom도 붙는다.
- */
-
-.rc-page {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  min-height: 100dvh;
-  padding: 0;
-  /* 한국어는 낱말 중간에서 끊지 않는다. 아주 긴 낱말(주소)만 끊는다. 리서치 챗의 모든 글자가 상속한다. */
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-
-.rc-top {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  padding: 4px 16px 8px;
-  border-bottom: 1px solid var(--vol-line);
-  background: var(--vol-bg);
-}
-
-/*
- * 초점을 받은 칸이 위·아래 띠 밑으로 들어가지 않게, 띠 높이만큼 스크롤 영역에 여백을 둔다.
- * --rc-top-h, --rc-bottom-h는 ResearchChat이 html에 건 잰 값(고정이 풀리면 0)이고, 재기 전에는 넉넉한 기본값이다.
- * 크롬은 focus()가 일으키는 스크롤에서 요소의 scroll-margin을 따르지 않아(시험으로 확인) 띠 높이는 html의 scroll-padding으로 주고,
- * 요소의 scroll-margin은 띠와 붙지 않게 하는 작은 여백만 둔다.
- */
-html:has(.rc-page) {
-  scroll-padding-top: calc(var(--rc-top-h, 9rem) + 12px);
-  scroll-padding-bottom: calc(var(--rc-bottom-h, 6rem) + 12px);
-}
-
-.rc-body :is(input, textarea, select, button, a, summary, [tabindex]) {
-  scroll-margin-block: 8px;
-}
-
-/* 고정을 푸는 기준은 화면 높이 미디어 쿼리가 아니라 ResearchChat의 잰 값 하나다(실제 아이폰 사파리는 보이는 높이가 548~664px라 쿼리로 풀면 질문이 안 붙는다). */
-.rc-root--free .rc-top,
-.rc-root--free-bottom .rc-bottom {
-  position: static;
-}
-
-.rc-body {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 14px;
-  padding: 14px 16px 24px;
-}
-
-.rc-bottom {
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--vol-line);
-  background: var(--vol-bg);
-}
-
-.rc-bottom .status-region:not(:empty) {
-  margin: 0 0 10px;
-  padding: 8px 12px;
-  font-size: 0.9375rem;
-}
-
-/* 화면에 이미 같은 정보가 있는 안내(찾았어요, 올렸어요)는 낭독기에만 읽힌다. */
-.vol-page .rc-bottom .status-region.status-region--quiet:not(:empty) {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.rc-buttons {
-  display: flex;
-  gap: 10px;
-}
-
-.rc-buttons .vol-btn {
-  flex: 1;
-}
-
-.rc-buttons .rc-primary {
-  flex: 2;
-}
-
-/* 보내기 전 확인: 완료 버튼을 위에 크게, 이전은 그 아래 */
-.rc-buttons--stack {
-  flex-direction: column;
-}
-
-.rc-buttons--stack .vol-btn {
-  flex: none;
-}
-
-.rc-badge-box {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  min-width: 0;
-}
-
-.rc-badge {
-  max-width: 100%;
-  white-space: normal;
-  text-align: center;
-}
-
-.rc-badge--before {
-  background: var(--vol-soft);
-  color: var(--vol-ink);
-}
-
-.rc-badge--research {
-  background: var(--vol-bg);
-  color: var(--vol-ink);
-}
-
-.rc-request {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: var(--vol-soft);
-}
-
-.rc-progress {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 4px 0 0;
-}
-
-.rc-dots {
-  display: inline-flex;
-  gap: 6px;
-}
-
-.rc-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--vol-line);
-}
-
-.rc-dot--on {
-  background: var(--vol-ink);
-}
-
-.rc-progress-text {
-  color: var(--vol-sub);
-  font-size: 0.9375rem;
-}
-
-/* 현재 질문: 위 띠 안에 작게 붙어 있다. 질문 글이 중심이고, 보조 문구는 스크롤 본문(.rc-question-helper)에 둔다. */
-.rc-question {
-  margin-top: 6px;
-  padding: 6px 12px 8px;
-  border: 1.5px solid var(--vol-ink);
-  border-radius: 10px;
-}
-
-.rc-question-kicker {
-  display: block;
-  color: var(--vol-sub);
-  font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.vol-page .rc-question-text {
-  margin: 2px 0 0;
-  color: var(--vol-ink);
-  font-size: 1rem;
-  line-height: 1.35;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-
-.rc-question-text:focus {
+/* 제목은 코드로만 초점을 받는 낭독 시작점이고, 입력 칸의 초점 테두리는 입력창 묶음이 그린다. */
+.vol-chat h1:focus,
+.vol-chat .vc-composer .vc-composer-input:focus-visible {
   outline: none;
 }
 
-.rc-question-helper,
-.rc-badge-note {
-  margin: 0;
-  color: var(--vol-sub);
-  font-size: 0.9375rem;
+.vol-chat [aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
 }
 
-/* AI 제안 상자: 봉사자 입력과 구분되는 회색 바탕 */
+.vol-chat .vc-btn--ink[aria-disabled="true"] {
+  opacity: 1;
+}
 
-.rc-ai {
+@keyframes lh-dot {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  25% {
+    opacity: 1;
+  }
+}
+
+@keyframes lh-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes lh-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.vol-chat .lh-thinking-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c-ink);
+  opacity: 0.3;
+  animation: lh-dot var(--lh-motion-loop) var(--lh-ease-standard) infinite;
+}
+
+.vol-chat .lh-thinking-dot:nth-child(2) {
+  animation-delay: var(--lh-motion-stagger);
+}
+
+.vol-chat .lh-thinking-dot:nth-child(3) {
+  animation-delay: calc(var(--lh-motion-stagger) * 2);
+}
+
+.vol-chat .vc-enter,
+.vol-chat .lh-enter {
+  animation: lh-enter var(--lh-motion-base) var(--lh-ease-enter);
+}
+
+/* ----- 위 바 ----- */
+
+.vc-topbar {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 12px;
-  background: var(--vol-soft);
-}
-
-.rc-ai-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.vol-page .rc-ai-title {
-  flex: 1 1 10em;
-  min-width: 0;
-  margin: 0;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-  color: var(--vol-ink);
-  font-size: 1rem;
-  line-height: 1.35;
-}
-
-.rc-ai-kicker {
-  display: block;
-  color: var(--vol-ink);
-  font-size: 0.875rem;
-  font-weight: 700;
-}
-
-.rc-ai-marks {
-  display: inline-flex;
-  flex-wrap: wrap;
+  flex: none;
   align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+  gap: 16px;
+  height: 72px;
+  padding: 0 24px 0 12px;
+  background: var(--c-surface);
+  border-bottom: 1px solid var(--c-line);
 }
 
-.rc-hint-note {
-  margin: 0;
-  color: var(--vol-sub);
-  font-size: 0.875rem;
-}
-
-.rc-ai-text {
-  margin: 0;
-}
-
-.rc-ai-sub {
-  margin: 0;
-  color: var(--vol-sub);
-  font-size: 0.875rem;
-}
-
-.rc-searching {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.rc-skeleton {
-  display: block;
-  width: 70%;
-  height: 36px;
-  border-radius: 18px;
-  background: var(--vol-lock);
-}
-
-.rc-skeleton--short {
-  width: 50%;
-}
-
-.rc-chips,
-.rc-links,
-.rc-picked,
-.rc-missing-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* 후보 한 줄: 이름 칩과 그 후보의 출처 링크가 나란히 */
-.rc-chip-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.rc-chip {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 8px;
-  min-width: 0;
-  min-height: 44px;
-  padding: 6px 14px;
-  border: 1.5px solid var(--vol-ink);
-  border-radius: 22px;
-  background: var(--vol-bg);
-  color: var(--vol-ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.rc-chip[aria-pressed="true"] {
-  background: var(--vol-ink);
-  color: #ffffff;
-}
-
-.rc-chip-name {
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.rc-chip-note {
-  font-size: 0.875rem;
-  overflow-wrap: anywhere;
-}
-
-.rc-source {
+.vc-back {
   display: inline-flex;
   flex: none;
   align-items: center;
-  min-height: 44px;
-  padding: 0 6px;
-  color: var(--vol-ink);
-  font-size: 0.875rem;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
 }
 
-.rc-hints {
+.vc-topbar-title {
   margin: 0;
-  padding-left: 20px;
-}
-
-.rc-hints li + li {
-  margin-top: 4px;
-}
-
-.rc-link {
-  padding-top: 10px;
-  border-top: 1px solid var(--vol-line);
-}
-
-.rc-link:first-child {
-  padding-top: 0;
-  border-top: 0;
-}
-
-.rc-link-title {
-  margin: 0;
+  flex: none;
+  font-size: 20px;
+  line-height: 30px;
   font-weight: 700;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
-.rc-link-site {
-  margin: 0 0 6px;
-  color: var(--vol-sub);
-  font-size: 0.875rem;
-  overflow-wrap: anywhere;
+.vc-topbar-rule {
+  flex: none;
+  width: 1px;
+  height: 32px;
+  background: var(--c-linestrong);
 }
 
-.rc-link-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
+.vc-request {
+  flex: 1;
+  min-width: 0;
 }
 
-.rc-check {
+.vc-request-title,
+.vc-request-detail {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vc-request-title {
+  font-size: 17px;
+  line-height: 26px;
+  font-weight: 700;
+}
+
+.vc-request-detail {
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--c-sub);
+}
+
+.vc-badge {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--c-soft);
+  color: var(--c-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.vc-panel-toggle {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  flex: none;
   min-height: 44px;
+  padding: 0 16px;
+  border: 1.5px solid var(--c-linestrong);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.rc-check input {
-  width: 24px;
-  height: 24px;
-  accent-color: var(--vol-ink);
+
+/* 위 막대 맨 왼쪽의 왼쪽 창 여닫기 아이콘 버튼(Figma "Side toggle"). 모든 폭에서 보인다. */
+.vc-side-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--c-ink);
+  cursor: pointer;
+  transition: background-color var(--lh-motion-fast) var(--lh-ease-standard);
 }
 
-.rc-shortcut-row {
+.vc-side-toggle:hover,
+.vc-side-toggle.is-open {
+  background: var(--c-soft);
+}
+
+/* 닫혀 있으면 아이콘 왼쪽 칸을 비운다(열림을 모양으로도 보인다). */
+.vc-side-toggle-fill {
+  opacity: 0;
+  transition: opacity var(--lh-motion-fast) var(--lh-ease-standard);
+}
+
+.vc-side-toggle.is-open .vc-side-toggle-fill {
+  opacity: 1;
+}
+
+/* 왼쪽 창 맨 위: [대기열 | 내 담당] 토글 + 창 닫기 아이콘. */
+.vc-mine-top {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
-.rc-shortcuts {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--vol-line);
-}
-
-.rc-retry {
-  min-height: 44px;
-}
-
-.rc-answer {
-  display: flex;
-  flex-direction: column;
-}
-
-.rc-label {
-  margin: 0 0 6px;
-}
-
-.rc-textarea--short {
-  min-height: 76px;
-}
-
-.rc-purchase {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.vc-mine-top .vc-seg {
+  flex: 1;
   min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
 }
 
-.rc-purchase .rc-label {
-  padding: 0;
+/* 창이 닫혀 있을 때의 [열기] 버튼: 위 막대 아래 본문 왼쪽 위(열렸을 때 창 안 버튼과 같은 높이). */
+.vc-side-open {
+  position: absolute;
+  top: 20px;
+  left: 16px;
+  z-index: 3;
 }
 
-.rc-purchase-btn {
-  width: 100%;
+/* 창 오른쪽 가장자리 손잡이(폭 조절). 창 바깥 형제라 목록을 스크롤해도 제자리다. */
+.vc-mine-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--mine-w, 300px) - 4px);
+  z-index: 5;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
 }
 
-.rc-kinds-box {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
+.vc-mine-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background-color var(--lh-motion-fast) var(--lh-ease-standard);
 }
 
-.rc-kinds-box .rc-label {
-  padding: 0;
+.vc-mine-resize:hover::after,
+.vc-mine-resize:focus-visible::after,
+:root[data-pane-resizing] .vc-mine-resize::after {
+  background: var(--c-linestrong);
 }
 
-.rc-kinds {
+.vc-mine-resize:focus-visible {
+  outline: none;
+}
+
+/* 끄는 동안에는 창과 대화 칸이 손을 바로 따라가게 미끄러짐 전환을 끄고, 글자 선택을 막는다. */
+:root[data-pane-resizing] .vc-mine,
+:root[data-pane-resizing] .vol-chat main.vc-main {
+  transition: none;
+}
+
+:root[data-pane-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+
+
+/* 왼쪽 창 맨 위 [대기열 | 내 담당] 토글. */
+.vc-seg {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--c-soft);
 }
 
-.rc-kind {
-  padding-inline: 8px;
+.vc-seg-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color var(--lh-motion-fast) var(--lh-ease-standard),
+    color var(--lh-motion-fast) var(--lh-ease-standard);
 }
 
-.rc-thumbs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.vc-seg-btn[aria-pressed="true"] {
+  background: var(--c-ink);
+  color: var(--c-surface);
 }
 
-.rc-thumb-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
+.vh-spacer {
+  flex: 1;
 }
 
-.rc-thumb {
+/* 새 칸이 채워졌다는 점(모은 정보 버튼). 글자로도 "새 정보 있음"을 읽힌다. */
+.vc-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--c-oncheck);
+}
+
+/* 위 막대 "…" 더 보기 */
+.vc-more-wrap {
   position: relative;
-  display: block;
-  aspect-ratio: 1;
-  overflow: hidden;
-  border: 1.5px solid var(--vol-line);
-  border-radius: 10px;
-  background: var(--vol-lock);
+  flex: none;
 }
 
-.rc-thumb-img {
+.vc-more-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1.5px solid var(--c-linestrong);
+  border-radius: 50%;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.vc-more {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 6;
+  width: min(300px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 16px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 28px rgba(18, 20, 23, 0.14);
+}
+
+.vc-more[hidden] {
+  display: none;
+}
+
+/* 모은 정보 칸 누르기: 칸 전체를 덮는 투명 버튼. */
+.vc-slot {
+  position: relative;
+}
+
+.vc-slot-jump {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-}
-
-.rc-thumb-tag {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  left: 6px;
-  width: fit-content;
-  padding: 2px 8px;
-  border-radius: 8px;
-  background: var(--vol-ink);
-  color: #ffffff;
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1.25;
-  word-break: keep-all;
-}
-
-.rc-thumb-remove {
-  min-height: 44px;
+  padding: 0;
   border: 0;
+  border-radius: inherit;
   background: transparent;
-  color: var(--vol-ink);
-  font: inherit;
-  font-weight: 700;
-  text-decoration: underline;
   cursor: pointer;
 }
 
-.rc-thumb--add {
-  border: 1.5px dashed var(--vol-sub);
-  background: var(--vol-bg);
+.vc-slot-jump:hover {
+  background: rgba(17, 20, 24, 0.04);
 }
 
-.rc-add-photo {
+.vol-chat .vc-slot-jump:focus-visible {
+  outline: 3px solid var(--c-ink);
+  outline-offset: -3px;
+}
+
+/* 칸 누르기로 찾아온 질문 말풍선. */
+.vol-chat .vc-row:focus {
+  outline: 3px solid var(--c-ink);
+  outline-offset: 4px;
+  border-radius: 14px;
+}
+
+/* ----- 본문 틀 ----- */
+
+.vc-body {
+  position: relative;
   display: flex;
-  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.vc-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.vc-backdrop::before,
+.vc-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity var(--lh-motion-slow) var(--lh-ease-standard);
+}
+
+.vc-backdrop::before {
+  background-image: url("/research/backdrop-hero.svg");
+  background-size: cover;
+  background-position: center;
+}
+
+.vc-backdrop::after {
+  background-image: url("/research/backdrop-chat.svg");
+  background-size: 100% 72%;
+  background-position: center bottom;
+}
+
+.vc-backdrop--hero::before,
+.vc-backdrop--chat::after {
+  opacity: 1;
+}
+
+/* ----- 불러오는 중 덮개(LoadingOverlay): 히어로 배경은 그대로, 가운데에 도는 아이콘 ----- */
+
+.vc-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  width: 100%;
-  min-height: 44px;
-  padding: 4px;
-  color: var(--vol-ink);
-  font: inherit;
-  font-size: 0.875rem;
-  font-weight: 700;
-  cursor: pointer;
+  padding: 16px;
+  background: color-mix(in srgb, var(--c-surface) 35%, transparent);
+  animation: lh-fade var(--lh-motion-base) var(--lh-ease-enter);
 }
 
-.rc-add-plus {
-  font-size: 1.5rem;
-  line-height: 1;
+.vc-loading--instant {
+  animation: none;
 }
 
-.rc-describe-list {
+.vc-loading-card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.rc-describe {
-  display: flex;
-  flex-direction: column;
-}
-
-.rc-describe-btn {
-  align-self: flex-start;
-}
-
-.rc-picked-item {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 48px;
-  padding: 0 6px 0 14px;
-  border: 1.5px solid var(--vol-line);
-  border-radius: 10px;
+  gap: 14px;
+  padding: 26px 36px 22px;
+  border: 1px solid var(--c-line);
+  border-radius: 22px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 28px rgba(18, 20, 23, 0.14);
 }
 
-.rc-picked-name {
-  font-weight: 700;
-  overflow-wrap: anywhere;
+.vc-loading-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--c-soft);
+  color: var(--c-ink);
 }
 
-.rc-picked-remove {
-  min-width: 44px;
-  min-height: 44px;
-  border: 0;
-  background: transparent;
-  color: var(--vol-ink);
-  font: inherit;
-  font-weight: 700;
-  text-decoration: underline;
-  cursor: pointer;
+/* 아이콘 뒤에서 숨 쉬듯 퍼지는 고리. 장식이다. */
+.vc-loading-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--c-linestrong);
+  opacity: 0;
+  animation: vc-loading-ring var(--lh-motion-loop) var(--lh-ease-standard) infinite;
 }
 
-.rc-add-form {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
+@keyframes vc-loading-ring {
+  from {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
 }
 
-.rc-add-field {
+.vc-loading-text {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vc-loading,
+  .vc-loading-badge::after {
+    animation: none;
+  }
+}
+
+.vol-chat main.vc-main {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  transition:
+    margin-right var(--lh-motion-card) var(--lh-ease-standard),
+    margin-left var(--lh-motion-card) var(--lh-ease-standard);
 }
 
-.rc-history {
+.vc-current,
+.vc-log {
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+
+.vc-current {
+  flex: none;
+  width: min(760px, calc(100% - 32px));
+  padding: 14px 0 0;
+  font-size: 14px;
+  color: var(--c-sub);
+}
+
+.vc-current-label {
+  margin-right: 8px;
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
+.vc-current-req {
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+.vc-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 16px calc(var(--vc-dock-h, 120px) + 40px);
+}
+
+/* ----- 히어로 ----- */
+
+.vc-hero-copy {
+  position: absolute;
+  right: 0;
+  bottom: calc(50% + 80px);
+  left: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--vol-line);
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  text-align: center;
+  animation: lh-fade var(--lh-motion-slow) var(--lh-ease-enter);
 }
 
-.rc-history-title {
+.vc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  background: var(--c-surface);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.vc-pill-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-oncheck);
+}
+
+.vc-hero-title {
+  margin: 0;
+  font-size: clamp(32px, 4.2vw, 48px);
+  line-height: 1.27;
+  font-weight: 700;
+}
+
+.vc-hero-sub {
+  margin: 0;
+  font-size: clamp(17px, 1.5vw, 21px);
+  color: var(--c-sub);
+}
+
+.vc-hero-note {
+  order: 3;
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--c-sub);
+}
+
+/* ----- 입력 묶음(같은 DOM, 위치만 바뀐다) ----- */
+
+.vc-dock {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(760px, calc(100% - 32px));
+  margin: 0 auto;
+}
+
+.is-chat .vc-dock {
+  bottom: 24px;
+}
+
+.is-hero .vc-dock {
+  top: calc(50% - 40px);
+}
+
+.vc-notice {
+  order: -1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-sub);
+}
+
+.vc-notice:empty {
+  display: block;
+  height: 0;
+}
+
+.vc-notice.is-loud {
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--c-check);
+  color: var(--c-oncheck);
+}
+
+.vc-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  order: 0;
+}
+
+.is-hero .vc-quick {
+  order: 1;
+}
+
+.vc-composer {
+  order: 1;
+  display: grid;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  box-shadow:
+    0 1px 1.5px rgba(18, 20, 23, 0.06),
+    0 12px 20px rgba(18, 20, 23, 0.08);
+}
+
+.is-hero .vc-composer {
+  order: 0;
+}
+
+.vc-composer:focus-within {
+  outline: 3px solid var(--c-ink);
+  outline-offset: 2px;
+}
+
+.vc-composer--hero {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 22px 16px 16px 24px;
+  border-radius: 28px;
+}
+
+.vc-composer--docked {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 24px;
+}
+
+.vc-composer-input {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.vc-composer--hero .vc-composer-input {
+  min-height: 78px;
+  font-size: 18px;
+}
+
+.vc-composer--docked .vc-composer-input {
+  grid-column: 2;
+  grid-row: 1;
+  padding: 0 4px;
+}
+
+.vc-composer-input::placeholder {
+  color: var(--c-sub);
+  opacity: 1;
+}
+
+.vc-composer-tools {
   display: flex;
   align-items: center;
-  min-height: 44px;
-  color: var(--vol-sub);
-  font-size: 0.9375rem;
-  font-weight: 700;
-  cursor: pointer;
-  list-style: none;
+  gap: 8px;
 }
 
-/* display:flex라 기본 펼침 표시가 사라지므로 직접 그린다(접힘 ▸, 펼침 ▾). 낭독기는 summary의 상태(펼쳐짐/접힘)로 읽는다. */
-.rc-history-title::-webkit-details-marker {
+.vc-composer--docked .vc-composer-tools {
+  display: contents;
+}
+
+.vc-composer-gap {
+  flex: 1;
+}
+
+.vc-composer--docked .vc-composer-gap {
   display: none;
 }
 
-.rc-history-title::before {
+.vc-icon-btn,
+.vc-send {
+  display: inline-flex;
   flex: none;
-  width: 1.25em;
-  content: "▸";
-  content: "▸" / "";
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform var(--lh-motion-fast) var(--lh-ease-standard);
 }
 
-.rc-history[open] > .rc-history-title::before {
-  content: "▾";
-  content: "▾" / "";
+.vc-icon-btn {
+  border: 1.5px solid var(--c-line);
+  background: var(--c-surface);
 }
 
-.rc-history[open] > .rc-bubble {
-  margin-top: 8px;
+.vc-send {
+  border: 0;
+  background: var(--c-primary);
 }
 
-.rc-bubble {
-  max-width: 85%;
+.vc-composer--docked .vc-icon-btn {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.vc-composer--docked .vc-send {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.vc-send:active,
+.vc-icon-btn:active,
+.vc-quick-btn:active,
+.vc-chip:active,
+.vc-btn:active {
+  transform: scale(0.96);
+}
+
+.vc-quick-btn,
+.vc-chip {
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1.5px solid var(--c-linestrong);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform var(--lh-motion-fast) var(--lh-ease-standard);
+}
+
+.vc-quick-btn--primary {
+  border-color: var(--c-ink);
+  background: var(--c-ink);
+  color: var(--c-onprimary);
+}
+
+.vc-chip--ai {
+  border-style: dashed;
+}
+
+/* ----- 사진 올리기 창 ----- */
+
+.vc-attach {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(420px, 100%);
+  margin-bottom: 10px;
+  padding: 16px;
+  border: 1px solid var(--c-line);
+  border-radius: 20px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 28px rgba(18, 20, 23, 0.14);
+  animation: lh-enter var(--lh-motion-card) var(--lh-ease-enter);
+}
+
+.vc-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  border: 1.5px dashed var(--c-linestrong);
+  border-radius: 14px;
+}
+
+.vc-drop--over {
+  background: var(--c-soft);
+  border-style: solid;
+  border-color: var(--c-ink);
+}
+
+.vc-drop-title {
   margin: 0;
-  padding: 9px 14px;
-  border-radius: 16px;
-  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-weight: 700;
 }
 
-.rc-bubble--ai {
-  align-self: flex-start;
-  background: var(--vol-soft);
+.vc-drop-note {
+  margin: 0;
+  font-size: 14px;
+  color: var(--c-sub);
 }
 
-.rc-bubble--me {
+.vc-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+/* ----- 버튼 ----- */
+
+.vol-chat .vc-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1.5px solid var(--c-linestrong);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform var(--lh-motion-fast) var(--lh-ease-standard);
+}
+
+.vol-chat .vc-btn:focus-within {
+  outline: 3px solid var(--c-ink);
+  outline-offset: 2px;
+}
+
+.vol-chat .vc-btn--small {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.vol-chat .vc-btn--ink {
+  border-color: var(--c-ink);
+  background: var(--c-ink);
+  color: var(--c-onprimary);
+}
+
+.vol-chat .vc-btn--ghost {
   align-self: flex-end;
-  background: var(--vol-ink);
-  color: #ffffff;
+  border-color: transparent;
 }
 
-.rc-release {
+.vol-chat .vc-btn--off {
+  opacity: 0.5;
+}
+
+.vc-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--c-soft);
+  color: var(--c-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.vc-tag--ink {
+  background: var(--c-ink);
+  color: var(--c-onprimary);
+}
+
+.vc-tag--check {
+  background: var(--c-check);
+  color: var(--c-oncheck);
+}
+
+.vc-tag-icon {
+  filter: invert(1);
+}
+
+/* ----- 대화 ----- */
+
+.vc-log {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.vc-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.vc-row--me {
+  align-items: flex-end;
+}
+
+.vc-aitag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vc-aitag-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--c-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.vc-aitag-note {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--c-sub);
+}
+
+.vc-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 16px;
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+  white-space: pre-wrap;
+}
+
+.vc-bubble img {
+  flex: none;
+  margin-top: 2px;
+}
+
+.vc-bubble--ai {
+  background: var(--c-soft);
+  color: var(--c-ink);
+  border-radius: 6px 18px 18px 18px;
+}
+
+.vc-bubble--notice {
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  color: var(--c-sub);
+}
+
+.vc-bubble--me {
+  max-width: 85%;
+  background: var(--c-ink);
+  color: var(--c-onprimary);
+  font-weight: 500;
+  border-radius: 18px 6px 18px 18px;
+}
+
+.vc-bubble--pending {
+  opacity: 0.7;
+}
+
+.vc-thinking {
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px 12px 16px;
+}
+
+.vc-dots {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-width: 42px;
+}
+
+.vc-thinking-text {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  animation: lh-fade var(--lh-motion-base) var(--lh-ease-standard);
+}
+
+.vc-folded {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-surface);
+}
+
+.vc-folded img {
+  flex: none;
+}
+
+.vc-folded-text {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 23px;
+  color: var(--c-sub);
+}
+
+.vc-folded-btn {
+  flex: none;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.vc-folded-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-left: 12px;
+}
+
+/* ----- 칩·카드 ----- */
+
+.vc-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.vc-chips-caption {
+  margin: 0;
+  font-size: 14px;
+  color: var(--c-sub);
+}
+
+.vc-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vc-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vc-products {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.vc-cards {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vc-card--product {
+  min-width: 0;
+}
+
+.vc-products .vc-cards {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+}
+
+.vc-cards--benefits {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1.5px dashed var(--c-linestrong);
+  border-radius: 16px;
+  background: var(--c-surface);
+}
+
+.vc-card.is-picked,
+.vc-card.is-done {
+  border-style: solid;
+  border-color: var(--c-ink);
+  border-width: 2px;
+}
+
+.vc-card.is-manual {
+  border-color: var(--c-oncheck);
+  background: var(--c-check);
+}
+
+.vc-card.is-manual.is-done {
+  border-color: var(--c-ink);
+  background: var(--c-surface);
+}
+
+.vc-card-photo {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  margin-top: 28px;
+  justify-content: center;
+  gap: 4px;
+  height: 110px;
+  padding-top: 26px;
+  border-radius: 12px;
+  background: var(--c-soft);
 }
 
-/* 요청을 포기하는 동작이라 선택지 버튼처럼 보이지 않게 낮춘다(터치 크기는 유지). */
-.rc-release-btn {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0 12px;
+.vc-card-photo .vc-tag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+}
+
+.vc-card-photo-note {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-sub);
+}
+
+.vc-card-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.vc-card-feature {
+  margin: 0;
+  font-size: 14px;
+  color: var(--c-sub);
+  word-break: keep-all;
+}
+
+.vc-card-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--c-sub);
+}
+
+.vc-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.vc-card-actions--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vc-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vc-source {
+  min-width: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--c-soft);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.is-manual .vc-source {
+  background: var(--c-surface);
+}
+
+.vc-compare {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--c-soft);
+  font-size: 14px;
+  word-break: keep-all;
+}
+
+.is-manual .vc-compare {
+  background: var(--c-surface);
+}
+
+.vc-compare-label {
+  font-weight: 700;
+}
+
+.vc-card--guide {
+  gap: 12px;
+  width: 100%;
+  border-style: solid;
+  border-width: 1px;
+  border-color: var(--c-line);
+}
+
+.vc-guide-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-sub);
+}
+
+.vc-guide-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 16px;
+}
+
+.vc-guide-list code {
+  font-family: inherit;
+  font-weight: 700;
+}
+
+/* ----- 사진 ----- */
+
+.vc-photo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.vc-photo-img {
+  display: block;
+  width: 160px;
+  height: 160px;
+  border: 1px solid var(--c-line);
+  border-radius: 16px;
+  object-fit: cover;
+  background: var(--c-soft);
+}
+
+.vc-photo-img--blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--c-sub);
+}
+
+.vc-photo-busy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: var(--c-surface);
+}
+
+.vc-photo-busy .lh-thinking-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.vc-photo-remove {
+  min-height: 36px;
+  padding: 0 6px;
   border: 0;
-  background: transparent;
-  color: var(--vol-sub);
+  background: none;
+  color: var(--c-sub);
   font: inherit;
-  font-size: 0.9375rem;
+  font-size: 14px;
+  font-weight: 600;
   text-decoration: underline;
   cursor: pointer;
 }
 
-/* 내려놓기 확인: 안내와 [취소] [내려놓기 확인]. 확인 쪽은 지우는 동작이라 글자색을 진하게만 하고 모양은 다른 버튼과 같다. */
-.rc-release-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* ----- 리뷰 ----- */
+
+.vc-card--review {
+  gap: 12px;
   width: 100%;
-  padding: 14px;
-  border: 1.5px solid var(--vol-ink);
-  border-radius: 12px;
+  padding: 16px;
+  border-style: solid;
+  border-width: 1px;
+  border-color: var(--c-line);
+  animation: lh-fade var(--lh-motion-base) var(--lh-ease-standard);
 }
 
-.rc-release-prompt {
-  margin: 0;
-  color: var(--vol-ink);
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.5;
+.vc-card--review.is-editing {
+  border-width: 2px;
+  border-color: var(--c-ink);
 }
 
-.rc-release-prompt:focus {
-  outline: 3px solid #2f6fed;
-  outline-offset: 2px;
-}
-
-.rc-release-btn[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.rc-release-btn:focus-visible,
-.rc-history-title:focus-visible,
-.rc-chip:focus-visible,
-.rc-source:focus-visible,
-.rc-thumb-remove:focus-visible,
-.rc-picked-remove:focus-visible,
-.rc-add-photo:focus-visible {
-  outline: 3px solid #2f6fed;
-  outline-offset: 2px;
-}
-
-/* 보내기 전 확인 */
-
-.vol-page .rc-summary-title {
-  margin: 4px 0 0;
-  color: var(--vol-ink);
-  font-size: 1.25rem;
-}
-
-.rc-summary-title:focus {
-  outline: none;
-}
-
-.rc-box,
-.rc-missing {
+.vc-review-tags {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 14px;
-  border: 1.5px solid var(--vol-line);
-  border-radius: 12px;
-}
-
-.rc-missing {
-  border-color: var(--vol-ink);
-  background: var(--vol-soft);
-}
-
-.rc-box-title {
-  margin: 0 0 4px;
-  font-size: 1rem;
-}
-
-.rc-box-name {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.rc-inline-chip {
-  margin-left: 8px;
-  vertical-align: middle;
-  white-space: normal;
-}
-
-.rc-sep {
-  margin-top: 8px;
-}
-
-.rc-box-list {
-  margin: 0;
-  padding-left: 20px;
-  overflow-wrap: anywhere;
-}
-
-.rc-box-alts {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.rc-missing-list {
-  flex-direction: row;
   flex-wrap: wrap;
-}
-
-/* 보내기 전 확인의 핵심 정리 칸: 봉사자가 끝까지 읽고 보내야 하므로 안 스크롤이 없게 한다. 최소 8줄, 글이 길면 칸이 늘어난다(ResearchSummary). */
-.rc-guide {
-  min-height: 13.5rem;
-  line-height: 1.5;
-}
-
-.rc-foot {
-  margin-top: 6px;
-}
-
-.rc-fact {
-  margin: 0;
-  color: var(--vol-sub);
-}
-
-.rc-fact--strong {
-  color: var(--vol-ink);
-  font-weight: 700;
-}
-
-/* 완료 화면의 핵심 정리(줄바꿈 유지)와 상세 요약 목록 */
-
-.vol-sent-text--lines {
-  white-space: pre-wrap;
-}
-
-.vol-sent-summary {
-  display: flex;
-  flex-direction: column;
   gap: 8px;
+}
+
+.vc-review-body {
   margin: 0;
-  padding: 0;
-  list-style: none;
-  overflow-wrap: anywhere;
-}
-
-/* 라벨은 작게 위에, 값은 그 아래에 둬서 둘이 이어져 읽히지 않게 한다 */
-.vol-sent-key {
-  display: block;
-  color: var(--vol-sub);
-  font-size: 0.875rem;
-  font-weight: 700;
-}
-
-.vol-sent-value {
-  display: block;
+  font-size: 17px;
+  line-height: 1.75;
+  white-space: pre-wrap;
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
 
-.vol-sent-host {
-  color: var(--vol-sub);
-  font-size: 0.875rem;
+.vc-review-hint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--c-sub);
+}
+
+.vc-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.vc-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vc-review-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.vc-review-count {
+  font-size: 13px;
+  color: var(--c-sub);
+}
+
+.vc-review-text {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--c-soft);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+.vc-alert {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--c-check);
+  color: var(--c-oncheck);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.vc-alert-title {
+  margin: 0 0 4px;
+  font-weight: 700;
+}
+
+.vc-alert ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+
+/* ----- 왼쪽 창(대기열 + 내 담당) ----- */
+
+.vc-mine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: var(--mine-w, 300px);
+  padding: 20px 16px;
+  overflow-y: auto;
+  /* 목록이 길어지면 아래로 이어지되 스크롤바(화살표 막대)는 그리지 않는다. 휠·터치·키보드 스크롤은 그대로다. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: var(--c-surface);
+  border-right: 1px solid var(--c-line);
+  visibility: hidden;
+  transform: translateX(-100%);
+  transition:
+    transform var(--lh-motion-card) var(--lh-ease-enter) var(--lh-motion-fast),
+    visibility 0s linear var(--lh-motion-card);
+}
+
+.vc-mine::-webkit-scrollbar {
+  display: none;
+}
+
+.vc-mine.is-open {
+  visibility: visible;
+  transform: none;
+  transition:
+    transform var(--lh-motion-card) var(--lh-ease-enter),
+    visibility 0s;
+}
+
+.vc-mine-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vc-mine-sec + .vc-mine-sec {
+  padding-top: 20px;
+  border-top: 1px solid var(--c-line);
+}
+
+.vc-mine-headrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vc-mine-title {
+  margin: 0;
+  font-size: 19px;
+  line-height: 29px;
+  font-weight: 700;
+}
+
+.vc-mine-sub {
+  margin: 4px 0 0;
+  font-size: 15px;
+  line-height: 23px;
+  font-weight: 700;
+  color: var(--c-sub);
+}
+
+.vc-mine-asof,
+.vc-mine-foot,
+.vc-mine-empty {
+  margin: 0;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--c-sub);
+}
+
+.vc-mine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vc-mine-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  text-decoration: none;
+}
+
+.vc-mine-card--link {
+  display: flex;
+}
+
+.vc-mine-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.vc-mine-meta {
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--c-sub);
+}
+
+.vc-mine-quote {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.vh-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vh-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--c-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.vh-chip--new {
+  background: var(--c-check);
+  color: var(--c-oncheck);
+}
+
+/* 첫 화면: 시연 초기화 확인과 "/" 명령 메뉴 */
+.vh-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: var(--c-surface);
+}
+
+.vh-confirm-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.vh-slash {
+  order: 0;
+}
+
+/* ----- 모은 정보 패널 ----- */
+
+.vc-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 360px;
+  padding: 20px 16px;
+  overflow-y: auto;
+  background: var(--c-surface);
+  border-left: 1px solid var(--c-line);
+  visibility: hidden;
+  transform: translateX(100%);
+  transition:
+    transform var(--lh-motion-card) var(--lh-ease-enter) var(--lh-motion-fast),
+    visibility 0s linear var(--lh-motion-card);
+}
+
+.vc-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vc-panel-title {
+  flex: 1;
+  margin: 0;
+  font-size: 19px;
+  line-height: 29px;
+  font-weight: 700;
+}
+
+.vc-count {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--c-soft);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 23px;
+}
+
+.vc-bars {
+  display: flex;
+  gap: 6px;
+}
+
+.vc-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--c-line);
+  transition: background-color var(--lh-motion-base) var(--lh-ease-standard);
+}
+
+.vc-bar.is-on {
+  background: var(--c-primary);
+}
+
+.vc-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vc-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+}
+
+.vc-slot--mine {
+  border: 1.5px solid var(--c-linestrong);
+}
+
+.vc-slot--ai {
+  border: 1.5px dashed var(--c-linestrong);
+}
+
+.vc-slot--now {
+  border: 2px solid var(--c-ink);
+}
+
+.vc-slot-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vc-slot-no {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--c-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.vc-slot-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 24px;
+}
+
+.vc-slot-req {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-sub);
+}
+
+.vc-slot-empty {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-sub);
+  white-space: nowrap;
+}
+
+.vc-slot-value {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  overflow-wrap: anywhere;
+}
+
+.vc-slot-value--wait {
+  color: var(--c-sub);
+}
+
+.vc-missing {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--c-check);
+  color: var(--c-oncheck);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 23px;
+}
+
+.vc-release {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.vc-release-btn {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--c-sub);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.vc-release-prompt {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--c-sub);
+}
+
+.vc-release-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* ----- 처음·오류 화면 ----- */
+
+.vol-chat.vc-plain {
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: auto;
+}
+
+.vol-chat main.vc-plain-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 32px 16px;
+}
+
+.vc-plain-title {
+  margin: 0;
+  font-size: 22px;
+}
+
+.vc-plain-note {
+  margin: 0;
+}
+
+/* ----- 폭에 따라 ----- */
+
+@media (min-width: 1180px) {
+  .vol-chat.has-mine main.vc-main {
+    margin-left: var(--mine-w, 300px);
+  }
+
+  /* 대화(is-chat)에서는 열린 창이 대화 옆에 붙고, 닫으면 대화가 넓어진다(오른쪽 여백 0). */
+  .is-chat .vc-panel.is-open {
+    visibility: visible;
+    transform: none;
+    transition:
+      transform var(--lh-motion-card) var(--lh-ease-enter) var(--lh-motion-fast),
+      visibility 0s;
+  }
+
+  .vol-chat.is-chat.has-slots main.vc-main {
+    margin-right: 360px;
+  }
+
+  /* 히어로(맡은 직후)는 겹쳐서 열고 닫는다. */
+  .is-hero .vc-panel.is-open {
+    visibility: visible;
+    transform: none;
+    box-shadow: -12px 0 28px rgba(18, 20, 23, 0.14);
+    transition:
+      transform var(--lh-motion-card) var(--lh-ease-enter),
+      visibility 0s;
+  }
+}
+
+@media (max-width: 1179px) {
+  .vc-mine.is-open {
+    box-shadow: 12px 0 28px rgba(18, 20, 23, 0.14);
+  }
+
+  .vc-panel.is-open {
+    visibility: visible;
+    transform: none;
+    box-shadow: -12px 0 28px rgba(18, 20, 23, 0.14);
+    transition:
+      transform var(--lh-motion-card) var(--lh-ease-enter),
+      visibility 0s;
+  }
+}
+
+@media (max-width: 760px) {
+  /* 좁은 폭에서는 위 막대를 줄로 나눈다: 뒤로·제목·구매 배지·더 보기 / 이용자 요청 / 두 창 버튼. */
+  .vc-topbar {
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    height: auto;
+    min-height: 64px;
+    padding: 8px 12px;
+  }
+
+  .vc-topbar .vc-back {
+    order: 0;
+  }
+
+  .vc-topbar .vc-topbar-title {
+    order: 1;
+    margin-right: auto;
+  }
+
+  /* 좁은 폭에서는 서비스 이름이 뒤로·창 버튼 바로 옆에 붙는다(빈칸은 쓰지 않는다). 완료 표시는 오른쪽. */
+  .vc-topbar .vh-spacer {
+    display: none;
+  }
+
+  /* 왼쪽 창이 닫혀 있으면 본문 왼쪽 위에 [열기] 버튼이 뜬다. 좁은 폭에서는 본문을 그만큼 내려 겹치지 않게 한다. */
+  .vol-chat.vc-stage:not(.has-mine) > .vc-body > main.vc-main {
+    padding-top: 64px;
+  }
+
+  /* 히어로는 제목·입력창이 가운데 기준으로 떠 있어(position:absolute) 위 여백이 먹지 않는다. 둘 다 아래로 내린다. */
+  /* 제목 묶음은 아래(입력창 위 24px+안내 한 줄 자리)에 붙이고, 위로는 [열기] 버튼(본문 위 72px까지) 아래로만 자란다. */
+  .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-copy {
+    top: 72px;
+    bottom: calc(50% + 32px);
+    justify-content: flex-end;
+  }
+
+  .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-dock {
+    top: calc(50% + 16px);
+  }
+
+  /* 화면이 낮으면(폰 Safari 659px 등) 보조 문장을 빼고 제목을 줄여 [열기] 버튼과 겹치지 않게 한다. */
+  @media (max-height: 720px) {
+    .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-copy {
+      gap: 10px;
+    }
+
+    .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-title {
+      font-size: 28px;
+    }
+
+    .vol-chat.is-hero.vc-stage:not(.has-mine) .vc-hero-sub {
+      display: none;
+    }
+  }
+
+  .vc-topbar .vc-tag {
+    order: 2;
+  }
+
+  .vc-topbar .vc-badge,
+  .vc-topbar .vc-more-wrap {
+    order: 2;
+  }
+
+  .vc-topbar .vc-request {
+    order: 3;
+    flex: 1 1 100%;
+  }
+
+  .vc-topbar .vc-panel-toggle {
+    order: 4;
+  }
+
+  .vc-topbar-rule,
+  .vc-request-detail {
+    display: none;
+  }
+
+  .vc-cards--benefits {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vc-panel {
+    width: min(360px, 100%);
+  }
+
+  .vc-mine {
+    width: min(var(--mine-w, 300px), 100%);
+  }
+}
+
+/* ----- 혜택 넘겨 보기: 카드 한 장, 아래 [‹] 2 / 3 [›]. 넘기면 다음 카드가 옆에서 밀려 들어온다. ----- */
+
+.vc-benefits {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(520px, 100%);
+}
+
+.vc-benefits-stage {
+  overflow: hidden;
+  border-radius: 24px;
+}
+
+.vc-benefits-slide {
+  animation: vc-slide-next var(--lh-motion-card, 280ms) var(--lh-ease-standard, ease-out) both;
+}
+
+.vc-benefits-slide--prev {
+  animation-name: vc-slide-prev;
+}
+
+@keyframes vc-slide-next {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes vc-slide-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.vc-benefits-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vc-benefits-arrow {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border: 1.5px solid var(--c-linestrong);
+  border-radius: 50%;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.vc-benefits-arrow--next:not([aria-disabled="true"]) {
+  background: var(--c-ink);
+  border-color: var(--c-ink);
+  color: var(--c-surface);
+}
+
+.vc-benefits-arrow[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.vc-benefits-arrow:focus-visible {
+  outline: 2px solid var(--c-ink);
+  outline-offset: 2px;
+}
+
+.vc-benefits-count {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* ----- 이용자 요청 브리핑(구매 여부 뒤, 기종 질문 앞) ----- */
+
+/* 제목 묶음을 위로 밀어 올리지 않게(위 막대에 가려진다) 제목 아래 빈 자리에 띄운다. */
+.vc-hero-hint {
+  position: absolute;
+  top: 100%;
+  right: 16px;
+  left: 16px;
+  margin: 4px auto 0;
+  max-width: 560px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  word-break: keep-all;
+  text-wrap: balance;
+  color: var(--c-ink);
+}
+
+.vc-brief-row {
+  align-items: stretch;
+  width: 100%;
+}
+
+.vc-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.vc-brief-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vc-brief-card {
+  gap: 10px;
+  padding: 16px;
+  border-style: solid;
+  border-width: 1px;
+  border-color: var(--c-line);
+}
+
+.vc-brief-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.vc-brief-title:focus-visible {
+  outline: 3px solid var(--c-ink);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.vc-brief-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.vc-brief-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vc-brief-line dt {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-sub);
+}
+
+.vc-brief-line dd {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.vc-brief-note {
+  margin: 0;
+  font-size: 15px;
+  color: var(--c-sub);
+}
+
+.vc-brief-count {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-sub);
+}
+
+.vc-brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ----- 움직임 줄이기: 이동·크기 변화를 없애고 투명도 전환만 120ms로 남긴다. 반복은 멈춘다. ----- */
+
+@media (prefers-reduced-motion: reduce) {
+  .vol-chat .lh-thinking-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .vol-chat .vc-enter,
+  .vol-chat .lh-enter,
+  .vol-chat .vc-attach,
+  .vol-chat .vc-thinking-text,
+  .vol-chat .vc-card--review,
+  .vol-chat .vc-hero-copy {
+    animation: lh-fade var(--lh-motion-fast) linear;
+  }
+
+  .vol-chat .vc-panel,
+  .vol-chat main.vc-main,
+  .vol-chat .vc-dock,
+  .vol-chat .vc-bar,
+  .vol-chat .vc-icon-btn,
+  .vol-chat .vc-send,
+  .vol-chat .vc-quick-btn,
+  .vol-chat .vc-chip,
+  .vol-chat .vc-btn {
+    transition: none !important;
+  }
+
+  .vol-chat .vc-backdrop::before,
+  .vol-chat .vc-backdrop::after {
+    transition: opacity var(--lh-motion-fast) linear;
+  }
+
+  .vol-chat .vc-send:active,
+  .vol-chat .vc-icon-btn:active,
+  .vol-chat .vc-quick-btn:active,
+  .vol-chat .vc-chip:active,
+  .vol-chat .vc-btn:active {
+    transform: none;
+  }
+}
+
+/* ----- 휴대폰 사진 QR 창(노트북)과 휴대폰 사진 페이지 ----- */
+
+.vol-chat .vc-qr {
+  width: min(360px, 100%);
+}
+
+.vol-chat .vc-qr:focus {
+  outline: none;
+}
+
+.vc-qr-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.vc-qr-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.vc-qr-code {
+  padding: 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: #ffffff;
+  line-height: 0;
+}
+
+.vc-qr-code--old {
+  opacity: 0.35;
+}
+
+.vc-qr-blank {
+  width: 240px;
+  height: 240px;
+  border-radius: 8px;
+  background: var(--c-soft);
+}
+
+.vc-qr-note,
+.vc-qr-time {
+  margin: 0;
+  font-size: 15px;
+  text-align: center;
+  word-break: keep-all;
+}
+
+.vc-qr-time {
+  color: var(--c-sub);
+  font-size: 14px;
+}
+
+.vc-qr-time strong {
+  color: var(--c-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.vc-qr-fallback {
+  align-self: stretch;
+  font-size: 14px;
+}
+
+.vc-qr-fallback summary {
+  cursor: pointer;
+  min-height: 32px;
+  color: var(--c-sub);
+}
+
+.vc-qr-link {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--c-linestrong);
+  border-radius: 8px;
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.vc-qr-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vol-chat .vc-qr-actions .vc-btn--ghost {
+  align-self: auto;
+}
+
+.vol-chat.vc-phone {
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: visible;
+}
+
+.vc-phone-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(480px, 100%);
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.vc-phone-title {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.3;
+}
+
+.vc-phone-lead {
+  margin: 0;
+  color: var(--c-sub);
+  font-size: 16px;
+  word-break: keep-all;
+}
+
+.vc-phone-note {
+  margin: 0;
+  min-height: 1.5em;
+  font-size: 16px;
+  word-break: keep-all;
+}
+
+.vc-phone-note--alert {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--c-check);
+  color: var(--c-oncheck);
+  font-weight: 600;
+}
+
+.vol-chat .vc-phone-btn {
+  min-height: 64px;
+  font-size: 18px;
+}
+
+.vc-phone-hint {
+  margin: 0;
+  color: var(--c-sub);
+  font-size: 14px;
+  word-break: keep-all;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vol-chat .vc-benefits-slide {
+    animation: lh-fade var(--lh-motion-fast) linear;
+  }
+
+  .vol-chat .vc-qr {
+    animation: lh-fade var(--lh-motion-fast) linear;
+  }
+}
+
+/* 위 막대 서비스 이름. 글자 대신 로고 그림(등대 + "Lighthouse")을 보인다. */
+.vc-brand {
+  display: inline-flex;
+  align-items: center;
+}
+
+.vc-brand-link {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.vc-brand-link:focus-visible {
+  outline: 2px solid var(--c-ink);
+  outline-offset: 4px;
+}
+
+.vc-brand-logo {
+  flex: none;
+  display: block;
+  width: auto;
+  height: 44px;
+}
+
+/* 완료 화면의 대화 이력(이 기기 보관, 30일). 리뷰 카드 아래에 버튼, 누르면 지난 말풍선이 읽기 전용으로 펼쳐진다. */
+.vc-history {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
+.vc-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--c-line);
 }

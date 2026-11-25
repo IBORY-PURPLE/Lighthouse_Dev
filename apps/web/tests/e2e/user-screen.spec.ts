@@ -105,7 +105,7 @@ async function hearSentence(page: Page, sentence: string) {
 test.describe("음성 API가 있을 때", () => {
   test.beforeEach(async ({ page }) => {
     await installFakeSpeech(page);
-    await page.goto("/");
+    await page.goto("/classic");
   });
 
   test("첫 화면: 제목에 초점, 안내와 시작하기만, 듣기는 시작하지 않음", async ({
@@ -505,7 +505,7 @@ test.describe("음성 API가 있을 때", () => {
 
 test("음성 API 없음 → 입력창 전환과 초점", async ({ page }) => {
   await removeSpeechApi(page);
-  await page.goto("/");
+  await page.goto("/classic");
   await startButton(page).click();
   await expectFellBackToInput(page);
   await expectNoBlockingAxe(page);

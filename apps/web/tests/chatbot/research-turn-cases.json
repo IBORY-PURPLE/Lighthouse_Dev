@@ -1,0 +1,932 @@
+[
+  {
+    "id": "ask-q01",
+    "group": "ask_back",
+    "note": "기존 q01 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {},
+      "asked": [
+        "model"
+      ],
+      "reasked": [],
+      "lastQuestion": "model",
+      "shownModels": []
+    },
+    "text": "sony 헤드셋 제품을 찾는 가이드 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q02",
+    "group": "ask_back",
+    "note": "기존 q02 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N"
+      },
+      "asked": [
+        "model",
+        "pros"
+      ],
+      "reasked": [],
+      "lastQuestion": "pros",
+      "shownModels": []
+    },
+    "text": "소니 헤드셋 찾는 방법 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q03",
+    "group": "ask_back",
+    "note": "기존 q03 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요",
+        "alts": "소니 WH-CH520"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts",
+        "altReason"
+      ],
+      "reasked": [],
+      "lastQuestion": "altReason",
+      "shownModels": []
+    },
+    "text": "SONY 헤드셋 어떻게 찾아?",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q04",
+    "group": "ask_back",
+    "note": "기존 q04 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts"
+      ],
+      "reasked": [],
+      "lastQuestion": "alts",
+      "shownModels": []
+    },
+    "text": "쏘니 헤드셋 찾는 순서 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q05",
+    "group": "ask_back",
+    "note": "기존 q05 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {},
+      "asked": [
+        "model"
+      ],
+      "reasked": [],
+      "lastQuestion": "model",
+      "shownModels": []
+    },
+    "text": "소니 헤드셋 지금 얼마야? 재고 있어?",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q06",
+    "group": "ask_back",
+    "note": "기존 q06 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N"
+      },
+      "asked": [
+        "model",
+        "pros"
+      ],
+      "reasked": [],
+      "lastQuestion": "pros",
+      "shownModels": []
+    },
+    "text": "제일 싼 거 가격이랑 모델명 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q07",
+    "group": "ask_back",
+    "note": "기존 q07 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요",
+        "alts": "소니 WH-CH520"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts",
+        "altReason"
+      ],
+      "reasked": [],
+      "lastQuestion": "altReason",
+      "shownModels": []
+    },
+    "text": "소니 헤드셋 재고 몇 개 남았는지 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q08",
+    "group": "ask_back",
+    "note": "기존 q08 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts"
+      ],
+      "reasked": [],
+      "lastQuestion": "alts",
+      "shownModels": []
+    },
+    "text": "이 헤드셋 십만 원 이하로 살 수 있어?",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q09",
+    "group": "ask_back",
+    "note": "기존 q09 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {},
+      "asked": [
+        "model"
+      ],
+      "reasked": [],
+      "lastQuestion": "model",
+      "shownModels": []
+    },
+    "text": "소니 헤드셋 지금 할인하는 곳 있어?",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q10",
+    "group": "ask_back",
+    "note": "기존 q10 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N"
+      },
+      "asked": [
+        "model",
+        "pros"
+      ],
+      "reasked": [],
+      "lastQuestion": "pros",
+      "shownModels": []
+    },
+    "text": "소니 헤드셋 중에 제일 좋은 모델 하나만 추천해줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q11",
+    "group": "ask_back",
+    "note": "기존 q11 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요",
+        "alts": "소니 WH-CH520"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts",
+        "altReason"
+      ],
+      "reasked": [],
+      "lastQuestion": "altReason",
+      "shownModels": []
+    },
+    "text": "WH-1000XM5 가격 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q12",
+    "group": "ask_back",
+    "note": "기존 q12 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts"
+      ],
+      "reasked": [],
+      "lastQuestion": "alts",
+      "shownModels": []
+    },
+    "text": "sony 무선 헤드셋 노이즈 캔슬링 되는 걸로 찾는 법 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q13",
+    "group": "ask_back",
+    "note": "기존 q13 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "헤드셋 찾아줘",
+      "brand": null,
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {},
+      "asked": [
+        "model"
+      ],
+      "reasked": [],
+      "lastQuestion": "model",
+      "shownModels": []
+    },
+    "text": "헤드셋 찾는 법 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q14",
+    "group": "ask_back",
+    "note": "기존 q14 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "애플 이어폰 찾아줘",
+      "brand": "Apple",
+      "item": "이어폰"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N"
+      },
+      "asked": [
+        "model",
+        "pros"
+      ],
+      "reasked": [],
+      "lastQuestion": "pros",
+      "shownModels": []
+    },
+    "text": "애플 이어폰 찾는 가이드 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q15",
+    "group": "ask_back",
+    "note": "기존 q15 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "나이키 운동화 찾아줘",
+      "brand": "Nike",
+      "item": "운동화"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요",
+        "alts": "소니 WH-CH520"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts",
+        "altReason"
+      ],
+      "reasked": [],
+      "lastQuestion": "altReason",
+      "shownModels": []
+    },
+    "text": "나이키 운동화 270 사이즈로 찾는 방법 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q16",
+    "group": "ask_back",
+    "note": "기존 q16 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts"
+      ],
+      "reasked": [],
+      "lastQuestion": "alts",
+      "shownModels": []
+    },
+    "text": "쿠팡에서 소니 헤드셋 찾으려면 어떻게 검색해?",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q17",
+    "group": "ask_back",
+    "note": "기존 q17 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {},
+      "asked": [
+        "model"
+      ],
+      "reasked": [],
+      "lastQuestion": "model",
+      "shownModels": []
+    },
+    "text": "이용자가 소니 헤드셋을 사고 싶대. 뭘 먼저 확인해야 해?",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q18",
+    "group": "ask_back",
+    "note": "기존 q18 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N"
+      },
+      "asked": [
+        "model",
+        "pros"
+      ],
+      "reasked": [],
+      "lastQuestion": "pros",
+      "shownModels": []
+    },
+    "text": "이용자에게 읽어 줄 조건만 알려줘",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q19",
+    "group": "ask_back",
+    "note": "기존 q19 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요",
+        "alts": "소니 WH-CH520"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts",
+        "altReason"
+      ],
+      "reasked": [],
+      "lastQuestion": "altReason",
+      "shownModels": []
+    },
+    "text": "소니 정품인지 어떻게 확인해?",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "ask-q20",
+    "group": "ask_back",
+    "note": "기존 q20 질문을 봉사자가 AI에게 묻는 경우: 칸을 지어내지 않고 찾는 방법만 준다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts"
+      ],
+      "reasked": [],
+      "lastQuestion": "alts",
+      "shownModels": []
+    },
+    "text": "소니 헤드셋이 품절이면 어떻게 해?",
+    "mode": "live",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "r1-bought-model",
+    "group": "r1",
+    "note": "R1: 구매 여부와 기종을 한 문장에서 읽는다",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "unset",
+      "slots": {},
+      "asked": [],
+      "reasked": [],
+      "lastQuestion": "purchase",
+      "shownModels": []
+    },
+    "text": "WH-CH720N 샀어요",
+    "mode": "live",
+    "expect": {
+      "purchase": "bought",
+      "fillSlot": "model",
+      "fillContains": "720N"
+    }
+  },
+  {
+    "id": "r1-spacing",
+    "group": "r1",
+    "note": "R1 변형: 소문자·띄어쓰기가 다른 기종 표기",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "unset",
+      "slots": {},
+      "asked": [],
+      "reasked": [],
+      "lastQuestion": "purchase",
+      "shownModels": []
+    },
+    "text": "소니 wh ch720n 쓰고 있어요. 가벼워요",
+    "mode": "live",
+    "expect": {
+      "purchase": "bought",
+      "fillSlot": "model",
+      "fillContains": "720"
+    }
+  },
+  {
+    "id": "r1-particle",
+    "group": "r1",
+    "note": "R1 변형: 조사가 붙은 문장",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "unset",
+      "slots": {},
+      "asked": [],
+      "reasked": [],
+      "lastQuestion": "purchase",
+      "shownModels": []
+    },
+    "text": "저는 720N 헤드셋을 샀고 만족해요",
+    "mode": "live",
+    "expect": {
+      "purchase": "bought",
+      "fillSlot": "model",
+      "fillContains": "720N"
+    }
+  },
+  {
+    "id": "r3-reason-light",
+    "group": "r3",
+    "note": "R3: 대안과 비교한 이유 답",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워요",
+        "alts": "소니 WH-CH520"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "photo",
+        "alts",
+        "altReason"
+      ],
+      "reasked": [],
+      "lastQuestion": "altReason",
+      "shownModels": []
+    },
+    "text": "노이즈캔슬링은 720N이 더 좋은데 520이 더 가벼워서 720N을 골랐어요",
+    "mode": "live",
+    "expect": {
+      "fillSlot": "altReason"
+    }
+  },
+  {
+    "id": "r3-reason-comfort",
+    "group": "r3",
+    "note": "R3: 대안 없이 이 기종을 고른 이유",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "research",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워 보여요",
+        "alts": ""
+      },
+      "asked": [
+        "model",
+        "pros",
+        "alts",
+        "altReason"
+      ],
+      "reasked": [],
+      "lastQuestion": "altReason",
+      "shownModels": []
+    },
+    "text": "리뷰에서 오래 써도 귀가 안 아프다고 해서 골랐어요",
+    "mode": "live",
+    "expect": {
+      "fillSlot": "altReason"
+    }
+  },
+  {
+    "id": "bait-price-in-answer",
+    "group": "bait",
+    "note": "유도: 장점 답에 최저가 질문이 섞임",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N"
+      },
+      "asked": [
+        "model",
+        "pros"
+      ],
+      "reasked": [],
+      "lastQuestion": "pros",
+      "shownModels": []
+    },
+    "text": "장점은 가볍다는 거예요. 그리고 지금 최저가가 얼마인지도 알려줘요",
+    "mode": "live",
+    "expect": {}
+  },
+  {
+    "id": "bait-stock",
+    "group": "bait",
+    "note": "유도: 재고 확인 요청",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {},
+      "asked": [
+        "model"
+      ],
+      "reasked": [],
+      "lastQuestion": "model",
+      "shownModels": [
+        "소니 WH-CH720N"
+      ]
+    },
+    "text": "재고 있는지 먼저 확인해 줘",
+    "mode": "live",
+    "expect": {
+      "noFill": true
+    }
+  },
+  {
+    "id": "bait-budget",
+    "group": "bait",
+    "note": "유도: 구매 전에 예산과 가격대를 말하며 추천 요청",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "unset",
+      "slots": {},
+      "asked": [],
+      "reasked": [],
+      "lastQuestion": "purchase",
+      "shownModels": []
+    },
+    "text": "10만 원 이하로 사고 싶은데 만원대 모델도 있어요? 제일 싼 거 알려줘",
+    "mode": "live",
+    "expect": {
+      "noFill": true
+    }
+  },
+  {
+    "id": "bait-soldout",
+    "group": "bait",
+    "note": "유도: 품절 질문",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "research",
+      "slots": {
+        "model": "WH-CH720N",
+        "pros": "가벼워 보여요"
+      },
+      "asked": [
+        "model",
+        "pros",
+        "alts"
+      ],
+      "reasked": [],
+      "lastQuestion": "alts",
+      "shownModels": []
+    },
+    "text": "품절이면 어떻게 해요? 다른 데서 사도 돼요?",
+    "mode": "live",
+    "expect": {
+      "noFill": true
+    }
+  },
+  {
+    "id": "fallback-ask",
+    "group": "fallback",
+    "note": "AI 없음(대체 동작): 묻는 말이면 기본 찾는 방법 카드와 같은 질문",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {},
+      "asked": [
+        "model"
+      ],
+      "reasked": [],
+      "lastQuestion": "model",
+      "shownModels": []
+    },
+    "text": "어디서 찾아요?",
+    "mode": "fallback",
+    "expect": {
+      "guide": true,
+      "noFill": true
+    }
+  },
+  {
+    "id": "r1-statement-suffix",
+    "group": "r1",
+    "note": "R1: '잘 나요' 같은 평서문 끝말이 묻는 말로 읽히지 않고, 구매 여부와 기종을 읽는다(리뷰 지적)",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "unset",
+      "slots": {},
+      "asked": [],
+      "reasked": [],
+      "lastQuestion": "purchase",
+      "shownModels": []
+    },
+    "text": "소니 WH-CH720N 샀어요. 소리가 잘 나요",
+    "mode": "live",
+    "expect": {
+      "purchase": "bought",
+      "fillSlot": "model",
+      "fillContains": "720N"
+    }
+  },
+{
+    "id": "r1-pros-statement",
+    "group": "r1",
+    "note": "R1: '오래가요' 같은 평서문 장점을 장점 칸으로 읽는다(리뷰 지적)",
+    "context": {
+      "product": "소니 헤드셋 찾아줘",
+      "brand": "Sony",
+      "item": "헤드셋"
+    },
+    "session": {
+      "purchase": "bought",
+      "slots": {
+        "model": "WH-CH720N"
+      },
+      "asked": [
+        "model",
+        "pros"
+      ],
+      "reasked": [],
+      "lastQuestion": "pros",
+      "shownModels": []
+    },
+    "text": "배터리가 오래가요",
+    "mode": "live",
+    "expect": {
+      "fillSlot": "pros"
+    }
+  }
+]
