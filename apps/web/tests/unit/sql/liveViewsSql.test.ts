@@ -28,6 +28,7 @@ const sql = (file: string) => readFileSync(path.join(ROOT, file), "utf8");
 const PHONE_A = `u-${"a".repeat(32)}`; // 통화 2번(접수 1번), 성함을 말함
 const PHONE_B = `u-${"b".repeat(32)}`; // 통화 1번, 성함을 듣기 전에 끝남
 const PHONE_C = `u-${"c".repeat(32)}`; // 화면만 열었다 닫음(이용자 말 없음)
+const PHONE_D = `u-${"d".repeat(32)}`; // 가장 먼저 화면을 열고 가장 늦게 말함
 const cid = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
 
 let db: PGlite;
@@ -226,6 +227,31 @@ describe("성함 고르기", () => {
   });
 });
 
+describe("사람 번호", () => {
+  it("화면을 먼저 열었어도 나중에 말한 기기는 뒤 번호다", async () => {
+    // 폰 D는 누구보다 먼저(15:00) 화면을 열었지만 말은 가장 늦게 했다.
+    await db.query(
+      `insert into public.live_events (cid, seq, device_id, kind, tag, body, engine, at_ms, env, created_at)
+       values ($1, 0, $2, 'event', 'START', '', 'realtime', 0, 'production', timestamptz '2026-11-25 15:00:00+09')`,
+      [cid(5), PHONE_D],
+    );
+    await line(PHONE_D, 5, 1, "user", "part", "마우스 찾아 주세요", 4000);
+    const got = await rows<{ device_id: string; person_no: number }>(
+      "select device_id, person_no::int from public.live_people order by person_no",
+    );
+    expect(got).toEqual([
+      { device_id: PHONE_A, person_no: 1 },
+      { device_id: PHONE_B, person_no: 2 },
+      { device_id: PHONE_D, person_no: 3 },
+    ]);
+    // 통화 목록의 시작 시각은 그 통화의 첫 줄(화면을 연 때) 그대로다.
+    const call = await rows<{ started_kst: string }>(
+      `select started_kst from public.live_calls where device_id = '${PHONE_D}'`,
+    );
+    expect(call).toEqual([{ started_kst: "11-25 15:00:00" }]);
+  });
+});
+
 describe("되돌리기", () => {
   it("보기 3개만 지우고 live_events의 줄은 그대로 둔다", async () => {
     const before = await rows<{ n: number }>("select count(*)::int as n from public.live_events");
@@ -240,6 +266,6 @@ describe("되돌리기", () => {
     // 되돌린 뒤 다시 적용할 수 있다.
     await db.exec(sql(VIEWS));
     const again = await rows<{ n: number }>("select count(*)::int as n from public.live_people");
-    expect(again[0].n).toBe(2);
+    expect(again[0].n).toBe(3);
   });
 });

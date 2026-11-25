@@ -19,6 +19,7 @@ with calls as (
   select device_id,
          cid,
          min(created_at)                       as started_at,
+         min(created_at) filter (where kind = 'user') as first_said_at,
          max(at_ms)                            as last_ms,
          count(*) filter (where kind = 'user') as user_lines,
          count(*) filter (where kind = 'ai')   as ai_lines,
@@ -32,7 +33,8 @@ with calls as (
   having count(*) filter (where kind = 'user') > 0
 ), people as (
   select device_id,
-         dense_rank() over (order by min(started_at), device_id) as person_no
+         -- 화면을 먼저 연 순서가 아니라 처음 말한 순서다(먼저 열어 두고 나중에 말한 기기가 앞 번호를 차지하지 않게).
+         dense_rank() over (order by min(first_said_at), device_id) as person_no
     from calls
    group by device_id
 ), asked as (
