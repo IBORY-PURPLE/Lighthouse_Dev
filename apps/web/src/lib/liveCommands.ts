@@ -46,19 +46,22 @@ export const COMMAND_GUIDE: { say: string; does: string }[] = [
   { say: "천천히, 빠르게, 보통", does: "말 빠르기를 바꿔요" },
   { say: "도움말", does: "사용법을 들어요" },
   { say: "멈춰 줘, 잠깐", does: "대화를 잠시 멈춰요. 이어서 하려면 계속하기 단추를 눌러요" },
-  { say: "끝내 줘, 그만", does: "대화를 끝내고 처음 화면으로 돌아가요. 끝낼지 한 번 물어봐요" },
+  { say: "끝내기", does: "대화를 끝내고 메인 화면으로 돌아가요" },
   { say: "네, 보내 줘", does: "요약을 들은 뒤 봉사자에게 보내요" },
 ];
 
-export type LocalCommand = "help" | "repeat" | "slow" | "fast" | "normal" | "pause" | "end";
+export type LocalCommand = "help" | "repeat" | "slow" | "fast" | "normal" | "pause" | "end" | "exit";
 export const COMMANDS: { command: LocalCommand; words: string[]; meaning: string }[] = [
   { command: "help",   words: ["도움말", "도움"],            meaning: "사용법을 다시 듣는다" },
   { command: "repeat", words: ["다시", "뭐라고", "다시말해"],   meaning: "방금 말을 다시 듣는다" },
   { command: "slow",   words: ["천천히", "느리게"],           meaning: "말을 천천히 한다" },
   { command: "fast",   words: ["빠르게", "빨리"],             meaning: "말을 빠르게 한다" },
   { command: "normal", words: ["보통", "보통속도"],            meaning: "보통 빠르기로 돌아간다" },
-  { command: "pause",  words: ["잠깐", "잠깐만", "잠시만", "멈춰", "멈춤", "정지"],     meaning: "잠시 멈춘다" },
-  { command: "end",    words: ["그만", "끝", "끝내", "종료", "끝내기"],   meaning: "대화를 끝낼지 묻는다" },
+  { command: "pause",  words: ["잠깐", "잠깐만", "잠시만", "멈춰", "정지"],     meaning: "잠시 멈춘다" },
+  // 끝내고 싶다는 말: 바로 끝내지 않고 '끝내기'라고 말하라고 알려 준다(잘못 알아들어 대화를 잃지 않게).
+  { command: "end",    words: ["그만", "끝", "끝내", "종료", "끝내고싶어", "끝내고싶어요", "그만하고싶어", "그만하고싶어요", "끝낼래", "그만할래", "나가고싶어", "나갈래"],   meaning: "끝내는 방법을 알려 준다" },
+  // 이 말을 하면 바로 끝내고 메인 화면(/live 처음 상태)으로 돌아간다.
+  { command: "exit",   words: ["끝내기"],                    meaning: "대화를 끝내고 메인 화면으로 돌아간다" },
 ];
 
 /** NFKC, 소문자, 공백·문장부호 제거. */
@@ -178,7 +181,7 @@ export function isDecline(text: string): boolean {
 }
 
 const ROLE_WORDS = ["흐리게표시됨", "선택됨", "머리말", "버튼", "단추", "링크"];
-const SCREEN_TEXTS = new Set([...Object.values(BUTTONS), "음성 도우미", "요청 요약"].map(normalizeSpeech));
+const SCREEN_TEXTS = new Set([...Object.values(BUTTONS), "음성 도우미", "요청 요약", "대화 중", "생각 중", "말 명령어"].map(normalizeSpeech));
 
 /** 화면 낭독(VoiceOver)이 단추 이름을 읽는 소리가 이용자 말로 들어온 것을 거른다. */
 export function isScreenReaderEcho(text: string): boolean {

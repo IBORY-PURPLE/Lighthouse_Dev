@@ -357,7 +357,7 @@ describe("POST /api/live/call 성공과 세션 설정", () => {
     expect(sent.tools).toEqual(JSON.parse(JSON.stringify(LIVE_TOOLS)));
     expect(sent.tools.map((t: { name: string }) => t.name)).toEqual(["confirm_request", "register_request", "end_conversation"]);
     expect(sent.tool_choice).toBe("auto");
-    expect(sent.max_output_tokens).toBe(400);
+    expect(sent.max_output_tokens).toBe(700);
     expect(sent.truncation).toBe("auto");
     expect(sent.audio.input.transcription).toEqual({ model: "gpt-transcribe", language: "ko" });
     expect(sent.audio.input.noise_reduction).toEqual({ type: "near_field" });

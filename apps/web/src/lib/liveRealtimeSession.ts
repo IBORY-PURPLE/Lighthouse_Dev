@@ -4,6 +4,7 @@ import { LIVE_TOOLS, liveRealtimeInstructions } from "@/lib/liveInstructions";
 import {
   LIVE_REALTIME_MODEL_DEFAULT,
   LIVE_VOICE,
+  liveAdvanceMode,
   liveAskName,
   liveDailySessionCap,
   liveMaxSessionSec,
@@ -26,6 +27,9 @@ const SCHEDULE_GRACE_SEC = 10;
 /** Location에서 꺼낸 call_id를 받아들이는 모양. hangup 라우트도 같은 모양을 쓴다. */
 export const CALL_ID_PATTERN = /^[A-Za-z0-9._~-]{1,200}$/;
 
+/** '다음' 방식에서 말 토막을 끊는 침묵 길이(ms). */
+const MANUAL_SILENCE_MS = 500;
+
 export type RealtimeRate = "slow" | "normal" | "fast";
 const SPEED: Record<RealtimeRate, number> = { slow: 0.85, normal: 1.0, fast: 1.2 };
 
@@ -40,7 +44,8 @@ export function buildRealtimeSession(o?: { rate?: RealtimeRate }): object {
           type: "server_vad",
           threshold: 0.5,
           prefix_padding_ms: 300,
-          silence_duration_ms: 1200,
+          // '다음' 방식은 말이 끊겨도 차례를 넘기지 않고 모으므로, 토막을 빨리 끊어 '다음'을 빨리 받아 적는다.
+          silence_duration_ms: liveAdvanceMode() === "manual" ? MANUAL_SILENCE_MS : 1200,
           create_response: false,
           interrupt_response: false,
         }
@@ -61,7 +66,7 @@ export function buildRealtimeSession(o?: { rate?: RealtimeRate }): object {
     },
     tools: LIVE_TOOLS,
     tool_choice: "auto",
-    max_output_tokens: 400,
+    max_output_tokens: 700,
     truncation: "auto",
   };
 }

@@ -127,7 +127,12 @@ function dropLeaked(text: string, userFlat: string): string {
  * 이용자 말에 낱말이 하나라도 있는 문장, 표지도 물음표도 없는 문장은 지우지 않는다(바꿔 말한 것일 수 있다).
  * 이용자 말이 너무 짧으면(전사를 못 받은 경우) 판단할 수 없어 그대로 돌려준다. 제품 칸이 통째로 비게 되면 원래 값을 둔다.
  */
-export function groundSlots(slots: LiveSlots, userTexts: string[]): LiveSlots {
+export function groundSlots(input: LiveSlots, userTexts: string[]): LiveSlots {
+  // AI가 자기 질문을 칸에 섞어 넣으면 질문 끝말("이제 천천히 답변해 주세요")이 남는다. 끝말은 언제나 먼저 지운다.
+  const cued = [input.product, input.info, input.options, input.budget].some((v) => CUE_RE.test(v));
+  const slots: LiveSlots = cued
+    ? { product: stripCue(input.product), info: stripCue(input.info), options: stripCue(input.options), budget: stripCue(input.budget) }
+    : input;
   const userFlat = flat(userTexts.join(" "));
   if (userFlat.length < 4) return slots;
   return {
@@ -137,6 +142,10 @@ export function groundSlots(slots: LiveSlots, userTexts: string[]): LiveSlots {
     budget: dropLeaked(slots.budget, userFlat),
   };
 }
+
+/** 질문 끝말(liveCommands의 ANSWER_CUE). 띄어쓰기와 마침표가 달라도 잡는다. */
+const CUE_RE = /이제\s*천천히\s*답변해\s*주세요[.!]?/;
+const stripCue = (v: string) => v.replace(new RegExp(CUE_RE.source, "g"), "").replace(/\s+/g, " ").trim();
 
 const stripEnd = (s: string) => s.replace(/[.,!?]+$/, "");
 

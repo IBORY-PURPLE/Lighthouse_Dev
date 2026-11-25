@@ -62,7 +62,7 @@ const SCRIPTS = {
   guideNewText: `새 요청을 시작할게요. ${B.textInput} 칸에 쓰고 ${B.sendText} 단추를 눌러 주세요.`,
   resumed: "이어서 할게요.",
   helpVoice: `원하는 제품, 알고 싶은 정보, 원하는 옵션을 말씀해 주시면 봉사자에게 전달해 드려요. 띵 소리가 난 뒤에 말씀하세요. 제 말을 끊으려면 ${B.talk} 단추를 누르세요. 더 들으려면 ${W.help}이라고 한 번 더 말씀하세요.`,
-  helpMoreVoice: `VoiceOver를 쓰시면 ${B.talk} 단추를 찾아 두 번 탭해서 제 말을 멈출 수 있어요. VoiceOver를 쓰지 않으면 화면을 길게 눌러도 돼요. ${W.repeat}는 다시 듣기, ${W.slow}와 ${W.fast}는 말 빠르기, ${W.pause}은 멈춤, ${W.end}은 끝내기예요.`,
+  helpMoreVoice: `VoiceOver를 쓰시면 ${B.talk} 단추를 찾아 두 번 탭해서 제 말을 멈출 수 있어요. VoiceOver를 쓰지 않으면 화면을 길게 눌러도 돼요. ${W.repeat}는 다시 듣기, ${W.slow}와 ${W.fast}는 말 빠르기, ${W.pause}은 멈춤, ${B.exit}는 대화 끝내기예요.`,
   helpText: `원하는 제품, 알고 싶은 정보, 원하는 옵션을 알려 주시면 봉사자에게 전달해 드려요. ${B.textInput} 칸에 쓰고 ${B.sendText} 단추를 누르세요. 제 말을 멈추려면 ${B.stopTalking} 단추를 누르세요. ${B.repeat}, ${B.pause}, ${B.exit} 단추와 말 빠르기 단추도 있어요.`,
   silence1: "천천히 말씀하셔도 돼요. 띵 소리가 나면 말씀하세요.",
   manualGuide: `말씀하시다 쉬어도 계속 듣고 있어요. 다 말씀하신 뒤 ${q(NEXT_WORD)}이라고 하시면 넘어갈게요. ${SPEAK_CUE}`,
@@ -99,9 +99,11 @@ const SCRIPTS = {
   endedSendFailed: `요청이 접수됐는지 확인하지 못했어요. ${B.continueTalk} 단추를 누르면 다시 보낼 수 있어요.`,
   endedEmpty: "대화를 마쳤어요.",
   // 말로 끝냈을 때("끝내 줘" → "네"). 읽고 나면 화면이 /live 처음 상태로 돌아간다.
-  endedHome: "대화를 마쳤어요. 처음 화면으로 돌아갈게요.",
-  endedHomeRegistered: "대화를 마쳤어요. 요청은 등록돼 있어요. 처음 화면으로 돌아갈게요.",
-  endedHomeUnsent: "대화를 마쳤어요. 요청은 보내지 않았어요. 처음 화면으로 돌아갈게요.",
+  endedHome: "대화를 마쳤어요. 메인 화면으로 돌아갈게요.",
+  endedHomeRegistered: "대화를 마쳤어요. 요청은 등록돼 있어요. 메인 화면으로 돌아갈게요.",
+  endedHomeUnsent: "대화를 마쳤어요. 요청은 보내지 않았어요. 메인 화면으로 돌아갈게요.",
+  // 끝내고 싶다는 말을 들었을 때: 바로 끝내지 않고 끝내는 말을 알려 준다.
+  endGuide: `대화를 끝내고 메인 화면으로 가시려면 ${B.exit}라고 말씀해 주세요.`,
   rateSlow: "천천히 말할게요.",
   rateFast: "빠르게 말할게요.",
   rateNormal: "보통 빠르기로 말할게요.",

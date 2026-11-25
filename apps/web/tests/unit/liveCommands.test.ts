@@ -26,7 +26,7 @@ describe("BUTTONS", () => {
 
 describe("COMMANDS", () => {
   it("일곱 명령이 모두 있다", () => {
-    expect(COMMANDS.map((c) => c.command).sort()).toEqual(["end", "fast", "help", "normal", "pause", "repeat", "slow"]);
+    expect(COMMANDS.map((c) => c.command).sort()).toEqual(["end", "exit", "fast", "help", "normal", "pause", "repeat", "slow"]);
   });
 });
 
@@ -54,7 +54,11 @@ describe("matchLocalCommand", () => {
     ["정지", "pause"],
     ["끝내줘", "end"],
     ["끝내 주세요", "end"],
-    ["끝내기", "end"],
+    ["끝내기", "exit"],
+    ["끝내기요", "exit"],
+    ["끝내고 싶어", "end"],
+    ["끝내고 싶어요", "end"],
+    ["그만할래요", "end"],
   ])("%s → %s", (text, expected) => {
     expect(matchLocalCommand(text)).toBe(expected);
   });

@@ -261,6 +261,11 @@ export function LiveConversation() {
   const [typed, setTyped] = useState("");
   /** ? 단추로 여는 말 명령 안내. */
   const [guideOpen, setGuideOpen] = useState(false);
+  const guideOpenRef = useRef(false);         // 초점 이동을 막을지 볼 때 쓴다(패널을 읽는 중에 큰 단추로 끌려가지 않게)
+  const setGuide = useCallback((open: boolean) => {
+    guideOpenRef.current = open;
+    setGuideOpen(open);
+  }, []);
   /** 처음 상태에서 소개 알림을 띄울 때가 됐는가. */
   const [introReady, setIntroReady] = useState(false);
   const goHomeRef = useRef(false);            // 말로 끝낸 뒤 마침 안내를 읽는 중인가
@@ -299,6 +304,8 @@ export function LiveConversation() {
     if (!ctx) return;
     const s = ctx.runner.getState();
     const spec = mainSpec(s);
+    // 대화를 시작하거나 이어 가면 말 명령 안내를 닫는다(낭독기가 읽는 명령 낱말이 열린 마이크로 들어가지 않게).
+    if (!spec.disabled && spec.kind !== "main" && spec.kind !== "none") setGuide(false);
     if (spec.disabled) {
       // 연결하는 동안의 누름은 받지 못했다는 신호음으로 알린다(눈을 감은 이용자가 눌렀는지 알게). 접수 번호를 읽는 중에는 읽는 소리가 이미 난다.
       if (s.phase === "connecting") void ctx.earcons.play("cancel");
@@ -314,7 +321,7 @@ export function LiveConversation() {
       case "home": router.push("/"); return;
       case "none": return;
     }
-  }, [startLike, router]);
+  }, [startLike, router, setGuide]);
 
   /** [끝내기]와 Escape: 기록에 우리 항목이 있으면 뒤로 가서 popstate가 EXIT를 보낸다. */
   const exitNow = useCallback(() => {
@@ -333,7 +340,7 @@ export function LiveConversation() {
     const storage = pickStorage(win);
     const speaker = createLiveSpeaker(win);
     const rawEarcons = createEarconPlayer(doc, win);
-    const haptic = createHaptic(doc, win);
+    const haptic = createHaptic(win);
     // 말할 차례(띵)와 말이 넘어간 때에는 진동도 낸다. 신호음이 안 들릴 때가 있다.
     const earcons: EarconPlayer = {
       unlock: () => rawEarcons.unlock(),
@@ -397,7 +404,10 @@ export function LiveConversation() {
           else set(text);
         },
         focus: (target) => {
-          if (target === "main") focusLater(() => mainRef.current);
+          if (target === "main") {
+            // 말 명령 안내를 읽는 중에는 초점을 큰 단추로 옮기지 않는다.
+            if (!guideOpenRef.current) focusLater(() => mainRef.current);
+          }
           else if (target === "listLink") focusLater(() => listLinkRef.current);
           else focusLater(() => textRef.current);
         },
@@ -516,8 +526,10 @@ export function LiveConversation() {
 
   /** ? 단추: 말 명령 안내를 열고 닫는다. 대화 중에 열면 대화를 멈춘다(낭독기가 읽는 명령 낱말이 마이크로 들어가지 않게). */
   const toggleGuide = () => {
-    const next = !guideOpen;
-    setGuideOpen(next);
+    // 대화가 이어지는 동안에는 안내가 보이지 않는다(guideShown). 그때의 누름은 여는 것이다.
+    const shown = guideOpen && !ACTIVE.has(state.phase);
+    const next = !shown;
+    setGuide(next);
     if (!next) return;
     const ctx = ctxRef.current;
     if (ctx && ACTIVE.has(ctx.runner.getState().phase)) ctx.runner.dispatch({ type: "PAUSE" });
@@ -635,6 +647,8 @@ export function LiveConversation() {
     // idle에서만 화면 아무 곳이나 짧게 눌러 시작한다. 단추·링크·입력 칸 위의 click은 그 요소의 것이다(22절 3).
     if (ctxRef.current?.runner.getState().phase !== "idle") return;
     if (e.target instanceof Element && e.target.closest(`${CONTROLS},[data-live-guide]`)) return;
+    // 낭독기 초점이 바뀌는 글 위에 남지 않게 큰 단추로 옮긴 뒤 시작한다.
+    mainRef.current?.focus();
     activateMain();
   };
 
@@ -682,6 +696,8 @@ export function LiveConversation() {
   const endedContinue = state.phase === "ended" && spec.kind === "continue";
   const homeLink = state.phase === "idle" || state.phase === "ended";
   const draft = state.draft;
+  // 말 명령 안내는 대화가 멈춰 있을 때만 보인다. 대화 중(마이크가 열릴 수 있는 때)에는 DOM에 두지 않는다.
+  const guideShown = guideOpen && !active;
 
   return (
     <main
@@ -707,7 +723,7 @@ export function LiveConversation() {
       {/* 대화 중의 큰 글자는 말마다 바뀐다. 화면 낭독기에는 바뀌지 않는 '대화 중'만 보여 준다(바뀐 글을 읽는 소리가 AI 목소리와 겹치지 않게). */}
       <p className={styles.headline}>
         <span aria-hidden={active ? "true" : undefined}>{headlineOf(state, caption)}</span>
-        {active ? <span className={styles.srOnly}>대화 중</span> : null}
+        {active ? <span className={styles.srOnly}>{state.phase === "thinking" ? "생각 중" : "대화 중"}</span> : null}
       </p>
       {state.phase === "listening" && caption.user !== "" ? <p className={styles.caption} aria-hidden="true">{caption.user}</p> : null}
 
@@ -718,19 +734,27 @@ export function LiveConversation() {
         aria-disabled={spec.disabled ? "true" : undefined}
         onClick={onMainClick}
       >
-        {spec.label}
+        {/* 음성 모션(오브). 장식이라 낭독기에는 숨긴다. 단추 이름은 뒤의 글자다. */}
+        <span className={styles.orb} aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+        </span>
+        <span className={styles.mainLabel}>{spec.label}</span>
       </button>
 
       <button
         type="button"
         className={styles.help}
         aria-label={BUTTONS.commands}
-        aria-expanded={guideOpen}
+        aria-expanded={guideShown}
         onClick={toggleGuide}
       >
         ?
       </button>
-      {guideOpen ? (
+      {guideShown ? (
         <section className={styles.guide} data-live-guide="" aria-label="말 명령어">
           <h2>말 명령어</h2>
           <p>띵 소리가 난 뒤에 이 말만 따로 하면 돼요. 도우미가 말하는 동안에는 {BUTTONS.talk} 단추를 눌러 끊을 수 있어요.</p>
@@ -739,7 +763,7 @@ export function LiveConversation() {
               <li key={g.say}><strong>{g.say}</strong> {g.does}</li>
             ))}
           </ul>
-          <button type="button" className={styles.small} onClick={() => setGuideOpen(false)}>{BUTTONS.closeCommands}</button>
+          <button type="button" className={styles.small} onClick={() => setGuide(false)}>{BUTTONS.closeCommands}</button>
         </section>
       ) : null}
 

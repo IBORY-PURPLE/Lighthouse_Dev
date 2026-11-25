@@ -809,11 +809,22 @@ test.describe("/live 음성 도우미 화면", () => {
     expect(await page.evaluate(() => window.__fakeLive.tts.rates.at(-1))).toBe(0.8);
     expect(live.chat).toHaveLength(1);
 
+    // 끝내고 싶다는 말에는 되묻지 않고 끝내는 말('끝내기')을 알려 준다. AI에게 보내지 않는다.
     await sayLive(page, "그만");
-    await heard(page, script("endAsk"));
-    await sayLive(page, "네");
-    await expectState(page, "ended");
+    await heard(page, script("endGuide"));
+    await expectState(page, "listening");
     expect(live.chat).toHaveLength(1);
+
+    // '끝내기'라고 하면 바로 끝내고, 마침 안내를 다 읽은 뒤 /live 처음 상태로 돌아간다.
+    await whenListening(page);
+    await holdTts(page);
+    await page.evaluate(() => window.__fakeLive.rec.say("끝내기"));
+    await expectState(page, "ended");
+    await heard(page, script("endedHomeUnsent"));
+    expect(live.chat).toHaveLength(1);
+    await releaseTts(page);
+    await expectState(page, "idle");
+    await expect(page.getByRole("button", { name: BUTTONS.start, exact: true })).toBeVisible();
   });
 
   // ---- 사례 11 글자 모드 ----

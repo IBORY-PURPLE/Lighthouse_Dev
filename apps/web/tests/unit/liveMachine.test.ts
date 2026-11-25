@@ -563,12 +563,13 @@ describe("이용자 말이 끝났을 때", () => {
     expect(other.state.phase).toBe("thinking");
     expect(other.state.silenceStep).toBe(0);
   });
-  it("ask end: 분명한 동의는 EXIT, 그 밖은 ask를 지우고 계속 판정한다", () => {
+  it("끝내고 싶다는 말은 되묻지 않고 끝내는 말('끝내기')을 알려 준다. '끝내기'는 바로 끝내고, 다른 말은 계속 판정한다", () => {
     const base = run(atArmed().state, { type: "USER_TURN_END", text: "그만해", transcribed: true });
-    expect(base.state.ask).toBe("end");
-    expect(spoken(base.effects)).toEqual(["endAsk"]);
-    const yes = run(base.state, speakEnd(base.state), { type: "USER_TURN_END", text: "네", transcribed: true });
-    expect(yes.state.phase).toBe("ended");
+    expect(base.state.ask).toBeNull();
+    expect(base.state.phase).toBe("listening");
+    expect(spoken(base.effects)).toEqual(["endGuide"]);
+    const exit = run(base.state, speakEnd(base.state), { type: "USER_TURN_END", text: "끝내기", transcribed: true });
+    expect(exit.state.phase).toBe("ended");
     const no = run(base.state, { type: "USER_TURN_END", text: "전기밥솥", transcribed: true });
     expect(no.state.ask).toBeNull();
     expect(no.state.phase).toBe("thinking");
@@ -686,11 +687,11 @@ describe("thinking", () => {
     expect(spoken(r.effects)).toEqual(["ai"]);
     expect(r.state.pendingConfirm).toBe(false);
   });
-  it("TURN_RESULT ended → 끝낼까요? 묻기", () => {
+  it("TURN_RESULT ended → 끝내는 말을 알려 준다", () => {
     const r = run(atThinking().state, { type: "TURN_RESULT", reply: "", status: "ended", slots: SLOTS });
     expect(r.state.phase).toBe("listening");
-    expect(r.state.ask).toBe("end");
-    expect(spoken(r.effects)).toEqual(["endAsk"]);
+    expect(r.state.ask).toBeNull();
+    expect(spoken(r.effects)).toEqual(["endGuide"]);
     expect(r.effects).toContainEqual({ type: "ENGINE_CANCEL_RESPONSE" });
   });
   it("TURN_RESULT done: 동의가 없으면 접수하지 않는다(draft 없음 → failed, draft 있음 → confirmRetell)", () => {
@@ -932,10 +933,10 @@ describe("Realtime 응답", () => {
     expect(spoken(r.effects)).toEqual(["failed"]);
     expect(r.effects).toContainEqual({ type: "ENGINE_TOOL_RESULT", callId: "c", output: { ok: false, error: "need_consent" }, respond: false });
   });
-  it("INTENT end → 끝낼까요? 묻고 도구 결과를 닫는다", () => {
+  it("INTENT end → 끝내는 말을 알려 주고 도구 결과를 닫는다", () => {
     const r = run(thinking().state, { type: "INTENT", kind: "end", callId: "e" });
-    expect(r.state.ask).toBe("end");
-    expect(spoken(r.effects)).toEqual(["endAsk"]);
+    expect(r.state.ask).toBeNull();
+    expect(spoken(r.effects)).toEqual(["endGuide"]);
     expect(r.effects).toContainEqual({ type: "ENGINE_TOOL_RESULT", callId: "e", output: { ok: true }, respond: false });
   });
 });
@@ -1893,38 +1894,32 @@ describe("확인 동의와 끝내기 답(A11·A36·A13)", () => {
       expect(canRegister(r.state, "model"), text).toBe(false);
     }
   });
-  it("'끝낼까요?'에 '아니요'·'계속할게요'라고 하면 끝내지 않고 AI에게도 보내지 않는다. 계속할게요와 함께 방금 말을 다시 읽는다", () => {
-    for (const no of ["아니요", "아니", "계속할게요", "아니요 계속할게요"]) {
-      const ask = run(atArmed().state, { type: "USER_TURN_END", text: "그만", transcribed: true });
-      expect(ask.state.ask).toBe("end");
-      expect(spoken(ask.effects)).toEqual(["endAsk"]);
-      const open = run(run(ask.state, speakEnd(ask.state)).state, { type: "LISTEN_STARTED", late: false });
-      const r = run(open.state, { type: "USER_TURN_END", text: no, transcribed: true });
-      expect(r.state.ask, no).toBeNull();
-      expect(r.state.phase, no).toBe("listening");
-      expect(types(r.effects), no).not.toContain("ENGINE_RESPOND");
-      expect(ofType(r.effects, "SPEAK")[0].text, no).toBe(`${script("endCancelled")} ${script("guideFirstVoice")}`);
-      expect(r.state.mic, no).toBe("off");
-      // 읽기가 끝나면 차례를 다시 연다
-      expect(types(run(r.state, speakEnd(r.state)).effects), no).toContain("OPEN_TURN");
+  it("끝내고 싶다는 말('그만', '끝내 줘', '끝내고 싶어')에는 끝내지 않고 끝내는 말을 알려 준다. AI에게 보내지 않고, 읽고 나면 차례를 다시 연다", () => {
+    for (const said of ["그만", "끝내 줘", "끝내고 싶어", "끝내고 싶어요", "그만할래요"]) {
+      const guide = run(atArmed().state, { type: "USER_TURN_END", text: said, transcribed: true });
+      expect(guide.state.ask, said).toBeNull();
+      expect(guide.state.phase, said).toBe("listening");
+      expect(spoken(guide.effects), said).toEqual(["endGuide"]);
+      expect(types(guide.effects), said).not.toContain("ENGINE_RESPOND");
+      expect(guide.state.mic, said).toBe("off");
+      expect(types(run(guide.state, speakEnd(guide.state)).effects), said).toContain("OPEN_TURN");
     }
   });
-  it("'끝낼까요?'에 '네'면 끝낸다. 다른 말이면 묻기를 거두고 AI에게 보낸다", () => {
-    const ask = run(atArmed().state, { type: "USER_TURN_END", text: "그만", transcribed: true });
-    const open = run(run(ask.state, speakEnd(ask.state)).state, { type: "LISTEN_STARTED", late: false });
-    expect(run(open.state, { type: "USER_TURN_END", text: "네", transcribed: true }).state.phase).toBe("ended");
+  it("안내 뒤 '끝내기'라고 하면 끝낸다. 다른 말이면 AI에게 보낸다", () => {
+    const guide = run(atArmed().state, { type: "USER_TURN_END", text: "그만", transcribed: true });
+    const open = run(run(guide.state, speakEnd(guide.state)).state, { type: "LISTEN_STARTED", late: false });
+    expect(run(open.state, { type: "USER_TURN_END", text: "끝내기", transcribed: true }).state.phase).toBe("ended");
     const other = run(open.state, { type: "USER_TURN_END", text: "전기밥솥 찾아 주세요", transcribed: true });
     expect(other.state.phase).toBe("thinking");
     expect(other.state.ask).toBeNull();
   });
-  it("말로 끝내면('끝내 줘' → '네') 처음 화면으로 돌아간다는 마침 안내를 읽는다. 단추로 끝내면 예전 안내 그대로다", () => {
+  it("'끝내기'라고 하면 되묻지 않고 바로 끝내고, 메인 화면으로 돌아간다는 마침 안내를 읽는다. 단추로 끝내면 예전 안내 그대로다", () => {
     const home = new Set(["endedHome", "endedHomeRegistered", "endedHomeUnsent"]);
-    const ask = run(atArmed().state, { type: "USER_TURN_END", text: "끝내 줘", transcribed: true });
-    expect(spoken(ask.effects)).toEqual(["endAsk"]);
-    const open = run(run(ask.state, speakEnd(ask.state)).state, { type: "LISTEN_STARTED", late: false });
-    const end = run(open.state, { type: "USER_TURN_END", text: "네", transcribed: true });
-    expect(end.state.phase).toBe("ended");
-    expect(home.has(end.state.speaking as string)).toBe(true);
+    for (const said of ["끝내기", "끝내기요"]) {
+      const end = run(atArmed().state, { type: "USER_TURN_END", text: said, transcribed: true });
+      expect(end.state.phase, said).toBe("ended");
+      expect(home.has(end.state.speaking as string), said).toBe(true);
+    }
     const button = run(atArmed().state, { type: "EXIT" });
     expect(button.state.phase).toBe("ended");
     expect(home.has(button.state.speaking as string)).toBe(false);
@@ -1934,15 +1929,14 @@ describe("확인 동의와 끝내기 답(A11·A36·A13)", () => {
     expect(r.state.phase).toBe("paused");
     expect(spoken(r.effects)).toEqual(["pausedByUser"]);
   });
-  it("확인 상태에서 '끝낼까요?'에 아니요라고 하면 요약을 다시 읽는다", () => {
+  it("확인 상태에서 끝내고 싶다는 말을 하면 끝내는 말을 알려 주고 확인 상태에 그대로 있다. '끝내기'면 끝낸다", () => {
     const c = atConfirming();
-    const ask = run(c.state, { type: "USER_TURN_END", text: "그만", transcribed: true });
-    expect(ask.state.phase).toBe("confirming");
-    const open = run(run(ask.state, speakEnd(ask.state)).state, { type: "LISTEN_STARTED", late: false });
-    const r = run(open.state, { type: "USER_TURN_END", text: "아니요", transcribed: true });
-    expect(ofType(r.effects, "SPEAK")[0].text).toBe(`${script("endCancelled")} ${CONFIRM}`);
-    expect(r.state.phase).toBe("confirming");
-    expect(r.state.awaitingConsent).toBe(true);
+    const guide = run(c.state, { type: "USER_TURN_END", text: "그만", transcribed: true });
+    expect(guide.state.phase).toBe("confirming");
+    expect(spoken(guide.effects)).toEqual(["endGuide"]);
+    const open = run(run(guide.state, speakEnd(guide.state)).state, { type: "LISTEN_STARTED", late: false });
+    expect(open.state.phase).toBe("confirming");
+    expect(run(open.state, { type: "USER_TURN_END", text: "끝내기", transcribed: true }).state.phase).toBe("ended");
   });
   it("확인 상태의 침묵 힌트는 두 번 모두 짧은 안내(confirmHint)다", () => {
     const a = run(atConfirming().state, { type: "LISTEN_STARTED", late: false });

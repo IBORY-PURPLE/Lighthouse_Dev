@@ -640,9 +640,10 @@ function onEndIntent(c: Cx, callId?: string): void {
   s.awaitingConsent = false;
   s.consentText = null;
   s.pendingConfirm = false;
-  s.ask = "end";
+  // 바로 끝내거나 되묻지 않고, 끝내는 말('끝내기')을 알려 준다.
+  s.ask = null;
   go(c, "listening");
-  sayScript(c, "endAsk");
+  sayScript(c, "endGuide");
   if (callId !== undefined) c.fx.push({ type: "ENGINE_TOOL_RESULT", callId, output: { ok: true }, respond: false });
 }
 
@@ -738,11 +739,24 @@ function runCommand(c: Cx, cmd: LocalCommand): void {
       applyRate(c, "normal");
       return;
     case "end":
+      // 끝내고 싶다는 말: 끝내는 말을 알려 주고 차례를 다시 연다.
       closeMic(c);
-      s.ask = "end";
-      sayScript(c, "endAsk");
+      s.ask = null;
+      sayScript(c, "endGuide");
+      return;
+    case "exit":
+      endToHome(c);
       return;
   }
+}
+
+/** 말로 끝냈다('끝내기'). 보내는 중이 아니면 마침 안내 뒤 화면이 /live 처음 상태로 돌아간다(화면이 이 대본 id를 보고 돌아간다). */
+function endToHome(c: Cx): void {
+  const s = c.s;
+  if (s.sendPending) enterEnded(c);
+  else if (s.requestId !== null) enterEnded(c, { script: "endedHomeRegistered" });
+  else if (s.history.some((t) => t.role === "user")) enterEnded(c, { script: "endedHomeUnsent" });
+  else enterEnded(c, { script: "endedHome" });
 }
 
 /** 이용자 말이 끝났을 때의 판정 순서(5.8절). */
@@ -770,11 +784,7 @@ function onUtterance(c: Cx, raw: string, source: "voice" | "text", engineEnded: 
   // 3. 끝낼까요?에 대한 답
   if (s.ask === "end") {
     if (isClearConsent(text)) {
-      // 말로 끝냈다. 보내는 중이 아니면 마침 안내 뒤 화면이 처음 상태로 돌아간다(화면이 이 대본 id를 보고 돌아간다).
-      if (s.sendPending) enterEnded(c);
-      else if (s.requestId !== null) enterEnded(c, { script: "endedHomeRegistered" });
-      else if (s.history.some((t) => t.role === "user")) enterEnded(c, { script: "endedHomeUnsent" });
-      else enterEnded(c, { script: "endedHome" });
+      endToHome(c);
       return;
     }
     s.ask = null;
