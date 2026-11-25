@@ -495,3 +495,15 @@
   margin: 0.25rem 0;
   word-break: keep-all;
 }
+
+/* 메인 단추만 남긴 화면(기본): 단추가 화면을 채운다. 입력 칸(글자 모드)이나 목록 링크(접수 뒤)가 있을 때만 줄인다. */
+.root[data-live-ui="minimal"] .main {
+  min-height: calc(100vh - 2rem);
+  min-height: calc(100dvh - 2rem);
+}
+
+.root[data-live-ui="minimal"][data-live-input="text"] .main,
+.root[data-live-ui="minimal"][data-live-state="done"] .main {
+  min-height: max(96px, 42vh);
+  min-height: max(96px, 42dvh);
+}

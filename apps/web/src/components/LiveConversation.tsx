@@ -249,7 +249,12 @@ interface Ctx {
   earcons: EarconPlayer;
 }
 
-export function LiveConversation() {
+/**
+ * full이 거짓(기본)이면 메인 단추(오브) 하나만 그린다. 남기는 것은 셋뿐이다: 글자 모드의 입력 칸(마이크를 못 쓸 때 유일한 길),
+ * 접수 뒤의 [요청 목록 보기] 링크(답을 들으러 가는 유일한 길), 작은 '기록 중' 표시(QA 진행자 확인용).
+ * full이 참이면 예전 화면 전체를 그린다(화면 시험과 진행자 점검용).
+ */
+export function LiveConversation({ full = false }: { full?: boolean }) {
   const router = useRouter();
   const [store] = useState(createStore);
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getServerState);
@@ -708,6 +713,7 @@ export function LiveConversation() {
       data-live-engine={state.engine ?? "none"}
       data-live-input={state.inputMode}
       data-live-mic={state.mic}
+      data-live-ui={full ? "full" : "minimal"}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={(e) => onPointerEnd(e, "up")}
@@ -719,14 +725,19 @@ export function LiveConversation() {
         if (!(e.target instanceof Element && e.target.closest("textarea,input"))) e.preventDefault();
       }}
     >
-      <h1 className={styles.title}>음성 도우미</h1>
-      <p className={styles.intro}>{LIVE_INTRO}</p>
-      {/* 대화 중의 큰 글자는 말마다 바뀐다. 화면 낭독기에는 바뀌지 않는 '대화 중'만 보여 준다(바뀐 글을 읽는 소리가 AI 목소리와 겹치지 않게). */}
-      <p className={styles.headline}>
-        <span aria-hidden={active ? "true" : undefined}>{headlineOf(state, caption)}</span>
-        {active ? <span className={styles.srOnly}>대화 중</span> : null}
-      </p>
-      {state.phase === "listening" && caption.user !== "" ? <p className={styles.caption} aria-hidden="true">{caption.user}</p> : null}
+      {/* 제목은 메인 단추만 남긴 화면에서도 낭독기용으로 둔다(화면에는 보이지 않는다). */}
+      <h1 className={full ? styles.title : styles.srOnly}>음성 도우미</h1>
+      {full ? (
+        <>
+          <p className={styles.intro}>{LIVE_INTRO}</p>
+          {/* 대화 중의 큰 글자는 말마다 바뀐다. 화면 낭독기에는 바뀌지 않는 '대화 중'만 보여 준다(바뀐 글을 읽는 소리가 AI 목소리와 겹치지 않게). */}
+          <p className={styles.headline}>
+            <span aria-hidden={active ? "true" : undefined}>{headlineOf(state, caption)}</span>
+            {active ? <span className={styles.srOnly}>대화 중</span> : null}
+          </p>
+          {state.phase === "listening" && caption.user !== "" ? <p className={styles.caption} aria-hidden="true">{caption.user}</p> : null}
+        </>
+      ) : null}
 
       <button
         ref={mainRef}
@@ -746,16 +757,18 @@ export function LiveConversation() {
         <span className={styles.mainLabel}>{spec.label}</span>
       </button>
 
-      <button
-        type="button"
-        className={styles.help}
-        aria-label={BUTTONS.commands}
-        aria-expanded={guideShown}
-        onClick={toggleGuide}
-      >
-        ?
-      </button>
-      {guideShown ? (
+      {full ? (
+        <button
+          type="button"
+          className={styles.help}
+          aria-label={BUTTONS.commands}
+          aria-expanded={guideShown}
+          onClick={toggleGuide}
+        >
+          ?
+        </button>
+      ) : null}
+      {full && guideShown ? (
         <section className={styles.guide} data-live-guide="" aria-label="말 명령어">
           <h2>말 명령어</h2>
           <p>띵 소리가 난 뒤에 이 말만 따로 하면 돼요. 도우미가 말하는 동안에는 {BUTTONS.talk} 단추를 눌러 끊을 수 있어요.</p>
@@ -785,7 +798,7 @@ export function LiveConversation() {
         </form>
       ) : null}
 
-      {showCard && draft ? (
+      {full && showCard && draft ? (
         <section className={styles.card} aria-label="요청 요약">
           <h2>요청 요약</h2>
           <dl>
@@ -805,7 +818,7 @@ export function LiveConversation() {
         </section>
       ) : null}
 
-      {active ? (
+      {full && active ? (
         <div className={styles.row}>
           <button type="button" className={styles.small} aria-disabled={connectingNow ? "true" : undefined} onClick={() => sendSmall({ type: "REPEAT" })}>{BUTTONS.repeat}</button>
           <button type="button" className={styles.small} onClick={() => sendSmall({ type: "PAUSE" })}>{BUTTONS.pause}</button>
@@ -828,7 +841,7 @@ export function LiveConversation() {
         </div>
       ) : null}
 
-      {endedContinue ? (
+      {full && endedContinue ? (
         <div className={styles.row}>
           <button
             type="button"
@@ -843,26 +856,30 @@ export function LiveConversation() {
         </div>
       ) : null}
 
-      <label className={styles.wait}>
-        <input type="checkbox" checked={waitSound} onChange={(e) => writeWaitSound(e.target.checked)} />
-        {BUTTONS.waitSound}
-      </label>
+      {full ? (
+        <>
+          <label className={styles.wait}>
+            <input type="checkbox" checked={waitSound} onChange={(e) => writeWaitSound(e.target.checked)} />
+            {BUTTONS.waitSound}
+          </label>
 
-      <div className={styles.log} role="log" aria-live="off" aria-label="대화 기록">
-        {state.history.map((turn, i) => {
-          if (turn.role === "user") {
-            return <p key={i} className={styles.me}><strong>나</strong>{turn.content}</p>;
-          }
-          const ai = decodeAiTurn(turn.content);
-          return <p key={i}><strong>도우미</strong>{ai ? ai.reply : turn.content}</p>;
-        })}
-      </div>
+          <div className={styles.log} role="log" aria-live="off" aria-label="대화 기록">
+            {state.history.map((turn, i) => {
+              if (turn.role === "user") {
+                return <p key={i} className={styles.me}><strong>나</strong>{turn.content}</p>;
+              }
+              const ai = decodeAiTurn(turn.content);
+              return <p key={i}><strong>도우미</strong>{ai ? ai.reply : turn.content}</p>;
+            })}
+          </div>
 
-      {homeLink ? (
-        <a className={styles.link} href="/">{BUTTONS.home}</a>
-      ) : (
-        <button type="button" className={styles.small} onClick={exitNow}>{BUTTONS.exit}</button>
-      )}
+          {homeLink ? (
+            <a className={styles.link} href="/">{BUTTONS.home}</a>
+          ) : (
+            <button type="button" className={styles.small} onClick={exitNow}>{BUTTONS.exit}</button>
+          )}
+        </>
+      ) : null}
 
       {logMark ? (
         <p className={styles.logMark} data-testid="live-log-mark">
