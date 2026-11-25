@@ -88,6 +88,7 @@ v2의 `/api/volunteer/extract-text`, `/api/volunteer/summarize`, `/api/volunteer
 | 리서치 챗 AI 호출 기록(대화 턴·추가 질문·리뷰 문단의 요청·응답 글) | OpenAI 대시보드 Logs(`store: true`, `metadata.feature` = research_turn·research_ask·research_review, `src/lib/openaiLog.ts`) | OpenAI 보관 기간을 따른다. `OPENAI_STORE_LOGS=off`면 남기지 않는다(이용자 요청 2026-11-17). 웹 검색·이용자 음성 대화는 `store: false` 그대로. 이용자 질문·답(`이용자조건`)이 든 리뷰 문단 호출은 `OPENAI_STORE_LOGS`와 상관없이 `store: false`(대화 턴 AI에는 넘기지 않는다) |
 | 이용자 리뷰 도착 알림 구독(웹 푸시 endpoint·p256dh·auth) | Supabase `push_subscriptions`(요청 하나에 하나, 마이그레이션 20261120000000) | 리뷰를 보내 알림을 한 번 보내면 지운다. 요청이 지워지면 같이 지워진다(A13 이용자 결정 2026-11-17). 키 `VAPID_PUBLIC_KEY`·`VAPID_PRIVATE_KEY`가 없으면 기능이 꺼진다 |
 | 이용자가 확인한 요약과 질문·답(봉사자 브리핑, 이용자가 말한 그대로. 요약 300자·질문 150자·답 200자·12짝 이하, 전화번호 모양은 "(전화번호 가림)") | Supabase `request_details`(요청 하나에 하나, 마이그레이션 20261122000000. 없으면 메모리) | 맡은 봉사자 1명에게만, 그 요청이 진행 중인 동안만 내보낸다. 요청이 `done`·`expired`가 되면 DB 트리거가 지우고 요청이 지워지면 함께 지워진다. 내려놓기·6시간 반환 때는 남긴다(다음 봉사자가 봐야 한다). 이용자 상태 조회·대기열·로그·봉사자 기기(`sentHistory`)에는 나가지 않는다. 이름·주소 같은 말은 가리지 못한다(이용자가 말한 그대로이므로 시연에서는 개인정보를 말하지 않는다) |
+| `/live` 대화 기록(QA 분석용, 2026-11-24 이용자 결정): 이용자 말·AI 말·앱이 읽어 준 글의 글자와 글 없는 사건(단추, 끼어들기, 오류, 예비 전환, 접수 결과). 줄마다 기기 ID, 대화 id(`cid` = 접수의 `client_request_id`), 순번, 단계, 엔진, 경과 ms, 참가자 표지, 환경. 전화번호 모양은 "(전화번호 가림)". 소리, SDP, `callId`, IP는 저장하지 않는다 | Supabase `live_events`(마이그레이션 20261125000000. `requests`와 묶지 않아 요청이 지워져도 남는다. 표가 없으면 저장하지 않고 대화는 그대로 이어진다) | 저장은 `LIVE_LOG`가 켜져 있고 `LIVE_LOG_UNTIL`(2026-12-03) 안일 때만. 줄마다 `delete_after`(넣은 날 + 30일)가 붙고, 사람이 그 날짜가 지난 줄을 SQL로 지운다(자동 삭제 없음). 봉사자 화면에는 보이지 않는다. 이름·주소·건강 이야기는 가리지 못한다 |
 | 이용자 기기의 요청 기록(대화 id·요청 번호·상태·리뷰) | 이용자 `localStorage` `lh-requests`, 알림 켬 여부 `lh-push` | 최근 20건의 캐시일 뿐이다. 서버가 이 기기(`lh_device`)에 준 목록(`GET /api/requests`)이 기준이고, 목록을 열면 그 응답으로 상태·리뷰를 갱신한다. 번호를 못 받은 기록(접수 중·실패)은 남기고, 서버가 주지 않은 번호의 기록은 서버가 전체 목록(`complete:true`, 저장소가 DB일 때)이라고 알릴 때 한 건씩 단건 조회(`GET /api/requests/{id}`)해서 400·404일 때만 지운다(아니면 그대로 둔다). 기기 쿠키 전에 접수한 요청(`device_id` 없음)은 단건 조회가 되므로 그 요청을 보낸 기기의 목록에 남고 상태·리뷰도 갱신된다(2026-11-18 이용자 결정: 이용자가 시험으로 보낸 요청은 남김). 그래서 끝난 요청은 `done_at` 7일 뒤, 만료는 생성 48시간 뒤 서버에서 지워지면 목록에서도 사라진다(2026-11-18 사람 판정 대기: 리뷰를 계속 보이게 할지). 접수 중에는 목록 병합을 미루고, 화면을 열 때 한 번 조회해 기기 쿠키를 먼저 받은 뒤 접수한다(쿠키 없는 새 기기의 접수와 조회가 겹쳐 서로 다른 쿠키를 받는 경합을 막는다) |
 | 요청당·하루 AI 사용 횟수 | Supabase `research_usage`·`ai_usage_daily`(v2.2 초안) | 사용량은 세션이 지워져도 남고, 요청이 지워질 때 함께 지워진다. 하루 표는 날짜 한 줄씩 |
 | (v2.1) 리서치 챗 진행 단계·카드별 답 | 봉사자 기기 `localStorage` `lh.vol.research.v1.<requestId>` | 대화형 화면(PR 5)이 들어가면 쓰지 않는다. 그때 대화 화면이 열 때 지운다 |
@@ -323,7 +324,7 @@ in_progress --release(맡은 봉사자, 선택 기능)--> waiting (release_count
 
 | 함수 | 하는 일 | 결과(`out_outcome`) |
 |---|---|---|
-| `register_request(..., p_device_id text default null)` | 플로우 A 접수. 같은 `client_request_id`면 기존 행(기기 ID는 덮어쓰지 않음), 아니면 날짜별 다음 번호로 삽입하며 기기 ID를 저장. 마지막 인자가 기본값이라 7개 인자 호출(마이그레이션 전 앱)도 된다. 앱은 마이그레이션 전에 8번째 인자를 모르는 DB를 만나면 빼고 다시 보내고, 60초 뒤 다시 8인자로 시도해 스스로 돌아온다. 같은 마이그레이션이 `claim_request`도 다시 정의한다(시연 요청은 24시간이 지나도 맡을 수 있다). **적용 순서: 원격 마이그레이션 `20261123000000`을 먼저 적용하고 그 뒤에 main에 병합·배포한다.** 앱이 먼저 나가면 그 사이 접수에는 기기 ID가 붙지 않고(목록에 안 나옴), 열이 없는 동안 목록은 503이다 | `created` / `existing` |
+| `register_request(..., p_device_id text default null)` | 플로우 A 접수. 같은 `client_request_id`면 기존 행(기기 ID는 덮어쓰지 않음), 아니면 날짜별 다음 번호로 삽입하며 기기 ID를 저장. 같은 순간에 들어온 접수는 트랜잭션 잠금(`pg_advisory_xact_lock`)으로 한 줄로 세워 번호가 겹치지 않게 하고, `created_at`은 잠금을 얻은 뒤의 시각이라 대기열 순서와 대기번호 순서가 같다(마이그레이션 `20261124000000_register_request_lock.sql`, 되돌리기 `supabase/rollback/20261124000000_register_request_lock_down.sql`. 잠금 전에는 10명이 같은 순간에 접수하면 번호 충돌 23505로 일부가 503이 됐다). 마지막 인자가 기본값이라 7개 인자 호출(마이그레이션 전 앱)도 된다. 앱은 마이그레이션 전에 8번째 인자를 모르는 DB를 만나면 빼고 다시 보내고, 60초 뒤 다시 8인자로 시도해 스스로 돌아온다. 같은 마이그레이션이 `claim_request`도 다시 정의한다(시연 요청은 24시간이 지나도 맡을 수 있다). **적용 순서: 원격 마이그레이션 `20261123000000`을 먼저 적용하고 그 뒤에 main에 병합·배포한다.** 앱이 먼저 나가면 그 사이 접수에는 기기 ID가 붙지 않고(목록에 안 나옴), 열이 없는 동안 목록은 503이다 | `created` / `existing` |
 | `claim_request(p_request_id, p_volunteer_id)` | `update ... set status='in_progress' ... where id=$1 and status='waiting' returning ...` 한 문장. 실패하면 현재 상태를 보고 판정 | `claimed` / `already_mine` / `taken` / `done` / `expired` / `not_found` |
 | `release_request(p_request_id, p_volunteer_id)` | 맡은 본인일 때만 `waiting`으로, `volunteer_id`·`claimed_at` null, `release_count+1` | `released` / `not_yours` / `not_in_progress` / `not_found` |
 | `complete_request(p_request_id, p_volunteer_id, 결과 필드)` | 한 트랜잭션에서 `results` 삽입과 `status='done', done_at=now()`. 이미 `done`이고 본인 결과면 기존 행을 돌려줌(재전송해도 같은 결과) | `completed` / `existing` / `not_yours` / `not_in_progress` / `not_found` |
@@ -449,6 +450,83 @@ v2의 §8.7 `POST /api/volunteer/extract-text`(이미지 조각 하나의 글자
 - 이 서버 계약에는 가격·재고·모델명 금지 검사가 없다(원본 지시문에 맡긴다). 봉사자 챗봇의 `answerRules`와 달리 이 화면의 AI 답은 검사하지 않는다.
 - 로그에는 상태 코드와 소요 시간, 오류 종류만 남긴다(이용자 문장·AI 답 제외).
 - 확인하지 못한 것: 실제 `gpt-4.1-mini` 호출 결과, 실기기 음성 인식·읽어 주기·VoiceOver 동작.
+
+### 8.10 실시간 음성 도우미(`/live`)와 `/api/live/*`
+
+설계 기준은 `docs/plans/2026-11-23-voice-live/ai.md`다. 기존 `/`(§8.9)는 그대로 두고, 새 경로 `/live`에 "차례를 소리로 알려 주는" 음성 대화를 더했다. 이용자가 처음 안내를 듣고 원하는 제품·알고 싶은 정보·옵션(·예산)을 여러 번 주고받으며 말하면, 앱이 요약을 읽어 주고 분명한 동의를 받은 뒤 `POST /api/requests`로 대기열에 접수한다.
+
+**엔진 둘, 상태 기계 하나**
+- 상태 기계(`liveMachine.ts`의 `liveStep`)는 순수 함수이고 실행기(`liveRunner.ts`)가 효과(타이머, 엔진, 읽기, 신호음, 접수)를 실행한다. 두 엔진이 같은 상태 기계·신호음·대본·접수 코드를 쓴다.
+- fallback 엔진(`liveFallbackEngine.ts`, 본체): 브라우저 음성 인식과 기기 목소리(`speechSynthesis`) + 글자 LLM 라우트 `POST /api/live/chat`.
+- Realtime 엔진(`liveRealtimeEngine.ts`, 기본 꺼짐): OpenAI Realtime API를 WebRTC로 쓴다. 서버는 SDP만 중계하고(`POST /api/live/call`) 소리는 브라우저와 OpenAI 사이를 직접 오간다. Realtime이 꺼져 있거나 통화를 못 만들면 fallback으로 간다.
+- 차례제다. 앱이나 AI가 말하는 동안 마이크를 닫고, 말로 끼어들기는 끈다(끼어들기는 '말하기' 단추나 길게 누르기). 고정 대본과 확인 문장은 기기 목소리로 읽는다. 확인 문장은 AI가 아니라 앱이 칸(제품, 알고 싶은 정보, 옵션, 예산)으로 만들어서, 이용자가 들은 내용과 접수되는 내용이 같다.
+- 접수 관문은 화면(`canRegister`)과 서버(`/api/live/chat`의 `gateLiveResult`. 예비 엔진에서 AI가 `done`이라고 답할 때 한 번 더 거른다) 두 곳에 있다. 확인 상태, 방금 읽어 준 요약, 그 뒤의 분명한 동의가 모두 있어야 한다. 접수 API(`POST /api/requests`)는 형식·길이·횟수만 검사하고 동의는 확인하지 않는다. "등록됐어요"는 `POST /api/requests`가 성공한 뒤에만 말한다.
+- 화면은 `session.update`를 보내지 않는다.
+
+**환경 변수 14개** (`liveConfig.ts`. `.env` 파일은 만들지 않는다)
+
+| 환경 변수 | 기본 | 뜻 |
+|---|---|---|
+| `LIVE_ENABLED` | 운영(`VERCEL_ENV=production`)은 끔, 그 밖은 켬 | 운영에서는 `on`일 때만 연다. 그 밖에서는 `off`가 아니면 연다. 꺼져 있으면 페이지는 안내만 보이고 `/api/live/*`는 404 `{ok:false,error:"disabled"}` |
+| `LIVE_REALTIME` | 끔 | `on`이고, mock이 아니고, `OPENAI_API_KEY`가 있을 때만 OpenAI Realtime을 부른다 |
+| `LIVE_REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Realtime 모델 |
+| `LIVE_REALTIME_VAD` | `server` | 말 끝 판정. 기본은 `server_vad`(침묵 1.2초 뒤에 차례를 넘긴다). `semantic`이면 `semantic_vad`다. 2026-11-24 로컬 실호출에서 `semantic_vad`가 두 문장 사이의 쉼에서 차례를 끊어 뒷말이 버려진 일이 있어 기본값을 바꿨다 |
+| `LIVE_REALTIME_REASONING` | `minimal` | `reasoning.effort` 값. `off`면 필드를 뺀다 |
+| `LIVE_MAX_SESSION_SEC` | 270 | 세션 길이 상한. 60~280으로 자른다 |
+| `LIVE_DAILY_SESSION_CAP` | 10 | 하루 Realtime 세션 수. 첫 통화부터 재는 고정 24시간 창, 인스턴스별. 0~200 |
+| `LIVE_TRANSCRIBE_LANG` | `ko` | 전사 언어(ISO-639-1). `""`면 뺀다 |
+| `LIVE_REAL_CALL_BUDGET` | 없음(제한 없음) | 이 서버 프로세스가 OpenAI로 보낼 수 있는 유료 호출 수. 로컬 실호출 점검에서 남은 횟수를 넣는다. 프로세스 메모리라 서버를 다시 띄우면 0부터 센다 |
+| `LIVE_CALL_IP_LIMIT` | 3 | 주소 하나가 10분 동안 만들 수 있는 Realtime 통화 수. 1~60. 넘으면 예비 엔진으로 간다. 같은 와이파이에서 여러 명이 쓰는 QA 때는 올린다 |
+| `LIVE_ADVANCE` | `auto` | 차례를 누가 넘기나. `auto`는 말이 멎으면 앱이 AI에게 넘긴다. `manual`이면 이용자가 '다음'이라고 하거나 큰 단추를 누를 때만 넘긴다 |
+| `LIVE_LOG` | 끔 | `/live` 대화 기록. `on`이면 참가자 표지(주소의 `?p=`)가 있는 화면만, `all`이면 모든 화면의 대화를 `live_events`에 저장한다. 그 밖의 값은 끔 |
+| `LIVE_LOG_UNTIL` | 없음(끝 없음) | 대화 기록을 받는 마지막 날(`YYYY-MM-DD`, 한국 시간 그 날짜의 끝까지). 지나면 `LIVE_LOG`가 켜져 있어도 받지 않는다. 변수가 있는데 빈 값이거나 모양이 틀리면 꺼짐으로 본다(오타로 약속한 날짜 뒤에도 저장되는 일을 막는다) |
+| `LIVE_ASK_NAME` | 끔 | `on`이면 AI 지시문 끝에 성함 여쭙기(`liveInstructions.ts`의 `LIVE_NAME_BLOCK`)를 붙인다. AI가 대화 첫 답에서 저장 사실을 알리고 성함을 한 번 묻는다. 성함은 대화 기록에만 남는다. QA 기간에만 켠다 |
+
+**라우트 5개** (모두 `runtime = "nodejs"`, `dynamic = "force-dynamic"`, 응답 `Cache-Control: no-store`)
+
+| 라우트 | 제한 | 요청 → 응답 |
+|---|---|---|
+| `GET /api/live/config` | 60회/분(IP) | → 200 `{enabled:true, realtime, reason?: "disabled"\|"mock"\|"no_key", maxSessionSec, warnBeforeSec}`. 돈이 들지 않고 통화 장부나 하루 상한을 보지 않는다. 화면이 열릴 때 한 번 부른다 |
+| `POST /api/live/chat` | 20회/분(IP), 하루 600턴(인스턴스 전체), 본문 64KiB, `maxDuration` 30 | `{sessionId, message, history}` → 200 `{reply, status: "asking"\|"confirming"\|"done"\|"ended", slots}`. `history`에는 이번 말이 없고 서버가 한 번 붙인다. 오류는 `{error, code}`: 404 `disabled`, 429 `rate_limited`·`daily_cap`·`budget`, 413 `too_large`, 400 `bad_request`, 503 `not_configured`, 504 `timeout`, 502 `failed` |
+| `POST /api/live/call` | 3회/10분(IP), 본문 16,384바이트, `maxDuration` 300 | `Content-Type: application/sdp`, 본문 offer SDP(`?rate=slow\|normal\|fast`). 성공 200 `{engine:"realtime", sdp, callId, maxSessionSec, warnBeforeSec, maxTurns}`. 쓸 수 없으면 200 `{engine:"fallback", reason: "rate_limited"\|"disabled"\|"mock"\|"no_key"\|"daily_cap"\|"budget"\|"upstream"}`. 404 `disabled`, 415 `unsupported`, 403 `forbidden`(다른 출처), 413 `too_large`, 400 `invalid_sdp` |
+| `POST /api/live/hangup` | 10회/분(IP), 본문 1,024바이트, `maxDuration` 15 | `{callId, turns?}` → 언제나 204. 모양이 맞는 `callId`를 끊고 쓰지 않은 예산을 돌려준다 |
+| `POST /api/live/log` | 1,200회/분(IP), 120회/분(기기), 본문 32,768바이트, 줄 40개, `maxDuration` 10 | `{label, entries:[{cid, seq, kind, tag, body, phase, engine, atMs}]}` → 200 `{stored, reason: "saved"\|"off"\|"ended"\|"no_label"\|"no_device"\|"empty"\|"capped"\|"unavailable"\|"failed"}`. 잠깐의 저장 오류는 503, 횟수 제한은 429. 기기 ID는 쿠키 `lh_device`에서 읽기만 하고 새로 심지 않는다. 모양은 `liveLogWire.ts` |
+
+**서버 계약**
+- 글자 대화(`/api/live/chat`): OpenAI Responses API, 모델 `OPENAI_MODEL`(없으면 `gpt-4.1-mini`), `max_output_tokens` 500, JSON 모드, `store: false`, 25초 마감. 기록 검사는 `/api/voice/chat`의 `readVoiceBody`를 가져다 쓴다(`voiceChat.ts`는 고치지 않았다). 지시문은 `liveInstructions.ts`. `LLM_MODE=mock`이면 `mockLiveText`의 고정 대화다(호출 0회). AI 칸의 기록은 JSON 글(`encodeAiTurn`)로 주고받고, 전화번호는 칸과 답에서 가린다.
+- 서버 관문(`gateLiveResult`): AI가 `done`이라 해도 직전 AI 칸이 `confirming`이 아니거나, 이용자 말에 물음표가 있거나 화면 낭독 메아리이거나 분명한 동의가 아니면 `confirming`(제품이 없으면 `asking`)으로 낮춘다. 로그 꼬리표 `gate=downgraded`.
+- Realtime 통화(`/api/live/call`) 검사 순서: 기능 켜짐 → 콘텐츠 타입 → 출처 → IP 제한 → 본문 크기·모양 → `realtimeGate` → 하루 자리 잡기(OpenAI를 부르기 전, `await` 없이) → 실호출 예산(`1 + maxTurns`) → OpenAI 호출(8초 마감, `POST /v1/realtime/calls`) → `call_id` 확인. `call_id`를 얻지 못하면 answer SDP를 넘기지 않는다. 성공하면 통화 장부에 적고(`rememberCall`) 응답 뒤 `LIVE_MAX_SESSION_SEC + 10`초에 끊는 예약을 건다(`scheduleHangup`).
+- 세션 설정(`buildRealtimeSession`): GA 표기. 음성 `marin`, 출력 `["audio"]`, `create_response:false`·`interrupt_response:false`(응답은 앱이 `response.create`로 시킨다), 도구 `confirm_request`·`register_request`·`end_conversation`, `max_output_tokens` 400, `truncation:"auto"`. 출력 빠르기는 `rate`가 slow면 0.85, normal이면 1.0, fast면 1.2다.
+- 통화를 끊는 길(모두 최선 노력): 화면이 닫을 때 `/api/live/hangup`, 같은 인스턴스의 예약 끊기, `/api/live/call`이 불릴 때의 `sweepCalls`. 통화 장부와 하루 자리는 인스턴스 메모리라서, 인스턴스가 다르면 장부를 못 본다.
+- 실호출 예산: OpenAI로 가는 유료 호출 1번이 1회다. 통화 만들기 때 `1 + maxTurns`를 미리 쓰고, 화면이 hangup에서 알려 준 실제 턴 수만큼만 남기고 돌려준다(`maxTurns`는 `LIVE_MAX_TURNS` 30과 남은 예산 - 1 가운데 작은 쪽).
+- 로그는 `<METHOD> <경로> <상태> <ms>ms` 뒤에 `key=value` 꼬리표(`engine`, `reason`, `cap`, `budget`, `upstream`, `gate`)만 남긴다. 이용자 말, AI 답, SDP, `callId`, 기기 ID, 상품명은 남기지 않는다. 브라우저 콘솔에도 대화를 찍지 않는다. 대화 글이 남는 곳은 `live_events` 표 하나뿐이다(아래 '대화 기록').
+
+**대화 기록(QA 분석용, 2026-11-24 이용자 결정)**
+- 2026-11-03 계획의 "통화 내용 저장은 하지 않음(QA 피드백 후 재판단)"을 QA 기간에 한해 바꿨다. 2026-12-03까지 저장하고 30일 보관한다.
+- Realtime의 대화 글자는 브라우저와 OpenAI 사이로만 오가므로 화면이 모아서 보낸다. 실행기 `liveRunner.ts`의 `step()`이 사건마다 선택 의존성 `record`를 부르고, `liveLog.ts`가 허용 목록에 있는 사건만 골라 대화(`cid`)별 순번을 붙여 2초 단위로 `POST /api/live/log`에 보낸다. 화면이 가려지거나 닫힐 때 남은 줄을 `keepalive`로 한 번 더 보낸다. 예비 엔진도 같은 길을 쓴다(`/api/live/chat`은 지금처럼 저장하지 않는다).
+- 참가자 표지: 주소 `/live?p=P01`. 한 번 읽으면 그 브라우저에 기억해(`localStorage` `lh-live-qa`) 다시 열어도 붙는다. `?p=off`면 지운다. `LIVE_LOG=on`에서는 표지가 있는 화면만 보내고, 표지가 없는 방문자의 대화는 서버로 가지 않는다.
+- 서버(`liveLogStore.ts`)는 줄마다 모양을 검사해 틀린 줄만 버리고, 글을 정리하고(NFKC, 제어 문자, 전화번호 가림, 1,000자) 기기 ID·환경(`VERCEL_ENV`)을 붙여 `live_events`에 덧붙인다(같은 `cid`·순번은 처음 것만). 서버 키에는 조회와 추가 권한만 있다. 표가 없으면 `unavailable`로 답하고 60초 동안 DB를 부르지 않는다(화면은 그 묶음을 쥐고 쉬었다가 다시 보낸다). 안전판 둘: 표가 60만 줄을 넘거나(줄 수 어림을 60초마다 본다) 인스턴스 하나가 한국 날짜 하루에 10만 줄을 넘게 저장하면 받지 않는다(`capped`, 서버 로그 `store=capped`). Vercel 배포(운영·미리보기)에서 Supabase 연결이 없으면 `unavailable`이고, 메모리 저장은 로컬·시험에서만 쓴다.
+- 저장이 실패해도 대화는 끊기지 않고 화면에 알리지 않는다. 서버가 한 번이라도 저장했다고 답하면 화면 구석에 "기록 중 · <표지>"가 보인다(진행자 확인용).
+- 한계: 기기 ID는 브라우저 단위다(같은 폰의 Safari·앱 안 브라우저·홈 화면 앱은 서로 다른 ID). 끼어들기로 끊긴 AI 답은 그때까지의 글자가 `reply_cut`으로 남고, 그 답의 전체 글이 뒤늦게 오면 `reply_after_cut`으로 한 줄 더 남는다(이용자가 들은 것은 `reply_cut`까지다). 접수를 보낸 사실은 `REGISTER`, 결과는 `REGISTER_OK`·`REGISTER_FAIL:<종류>`로 남는다. 화면이 닫힌 뒤 끝난 접수는 결과 줄이 없으므로 `requests.client_request_id = cid`로 보되, `requests` 행은 만료 48시간·완료 7일 뒤 지워지니 QA 기간에는 그 전에 뽑아 둔다. 화면을 떠날 때는 브라우저 keepalive 한도(약 64KB)를 통화 끊기 요청과 나눠 쓰므로 약 32KB까지만 보낸다. 서버 실패로 밀린 줄이 그보다 많은 채 화면을 닫으면 넘는 줄은 잃는다(평소에는 2초마다 보내 밀린 줄이 거의 없다). 묶음이 DB에서 거부되면 서버가 줄마다 따로 넣어 좋은 줄을 살린다. 서버가 저장하지 못했다고 답하면 "기록 중" 표시가 내려간다. 줄 순서는 도착 시각이 아니라 `cid`, `seq`로 읽는다. 전화번호 가림은 숫자 모양에만 듣는다(한글로 읽은 번호, 여러 토막으로 나뉜 번호는 남는다). 이름·주소·건강 이야기는 가리지 못한다. 설정 응답에 `log`가 없으면 화면은 기억해 둔 참가자 표지를 지운다. 참가자에게 알리고 동의받는 일은 QA 진행자가 한다. `LIVE_ASK_NAME=on`이면 AI가 첫 답에서 "이 대화는 서비스 개선을 위해 글자로 저장돼요. 성함을 말씀해 주시겠어요?"라고 말해 저장 사실을 알리고 성함을 한 번 여쭙는다(2026-11-25 이용자 결정: QA 기간에 대화 기록을 사람별로 가르려는 것). 성함은 대화 기록의 이용자 말 줄로만 남고 요청 항목(`request_details`)에는 들어가지 않는다. 음성 인식이 성함을 틀리게 적을 수 있다. 이 스위치가 꺼져 있으면 지시문은 지금처럼 이름을 묻지 않는다.
+
+**돈과 보안**
+- 병합만으로 운영에 열리지 않는다. `LIVE_ENABLED`는 운영에서 `on`일 때만 켜지고, Realtime은 `LIVE_REALTIME=on`이어야 한다. 여는 것은 사람이 정한다.
+- `/api/live/chat`은 `/api/voice/chat`과 제한기가 따로다. 두 경로를 합치면 IP 하나가 분당 40회까지 유료 글자 LLM을 부를 수 있다.
+- 표준 키(`OPENAI_API_KEY`)는 서버에만 있다. 임시 키(`client_secrets`)를 쓰지 않는 이유는 서버가 세션 설정을 고정하고 `call_id`를 쥐어 끊을 수 있게 하려는 것이다.
+- 브라우저는 데이터 채널로 `session.update`를 보내 세션 설정을 바꿀 수 있다. 우리 화면은 보내지 않지만 조작한 화면은 할 수 있어서, 돈은 통화 끊기(270초), 하루 상한(10세션), OpenAI 쪽 프로젝트 예산 한도로 묶고 접수는 화면 관문과 서버 검사를 거친다. 통화당 턴 상한(30)은 우리 화면이 스스로 지키는 장치일 뿐 서버가 강제하지 못한다(응답 요청은 브라우저와 OpenAI 사이에서 오간다). 그래서 비용 방어선으로 세지 않는다. 서버가 통화를 지켜보며 끊는 장치(서버 감시)는 아직 없고, 운영에서 Realtime을 켜기 전에 정해야 한다. 서버가 실제로 기대할 수 있는 끊기는 "화면 hangup"과 "같은 인스턴스의 예약 끊기" 둘뿐이다.
+- 비용 어림(추정, 1달러 = 1,400원): Realtime mini는 말하는 1분에 약 0.035달러, 한 세션 4.5분에 약 220원이다. 서버 끊기가 동작하지 않는 최악(세션 하나가 OpenAI 상한 60분)이면 세션당 약 2.1달러, 하루 10세션이면 약 2.9만 원이다.
+- 운영에서 Realtime을 켜는 조건: 사람이 켜기로 정했다, OpenAI 프로젝트 예산 한도가 실제로 막는지 확인했다, 서버 끊기가 배포 환경에서 동작함을 확인했다(`maxDuration = 300`과 예약 끊기), 로컬 실호출 점검을 통과했다.
+- 동의 관문의 위협 모델: 화면 쪽 관문과 `/api/live/chat`의 서버 관문은 **모델의 실수와 잘못 알아들은 말**로 접수되는 일을 막는 장치다. 서버는 대화를 저장하지 않고 화면이 보낸 기록을 믿으므로, 조작한 화면이 기록을 꾸미는 것은 막지 못한다. 접수 API(`POST /api/requests`)가 원래 로그인 없이 열려 있어 이 관문을 위조 방어선으로 세지 않는다.
+- 요약의 근거 검사(`liveText.ts`의 `groundSlots`, `tidySlots`, `summaryOf`): 이용자가 요약을 눈으로 확인할 수 없어서 앱이 칸을 한 번 거른 뒤 요약을 만든다. 원칙은 "이용자가 한 말일 수 있는 것은 지우지 않는다"이다.
+  - 빼는 것: 이용자 말에 낱말이 하나도 없으면서 지시문 표지가 있거나 물음표로 끝나는 문장, 이용자에게 되묻는 말투의 물음("…원하세요?", "더 필요한 조건이 있나요?". 이용자가 거의 그대로 말했을 때만 남긴다), 예산 칸이 있을 때 다른 칸의 "예산만 말하는 마디"(금액이 예산 칸과 같거나 금액이 없을 때만 뺀다. 금액이 다르면 남겨서 확인 때 두 금액을 모두 읽는다).
+  - 남기는 것: 표지도 물음표도 없는 문장, 이용자가 알고 싶은 것을 적은 물음("방수가 되나요?").
+  - 읽어 준 것과 보내는 것: 접수 본문의 예산은 예산 칸의 값이다. 요약은 그 값이 옵션·정보 글에 그대로 들어 있을 때만 예산 문장을 생략하고, 값이 다르면 반드시 "예산은 …"을 읽는다.
+- 확인 상태의 메아리 거르기(`liveCommands.ts`의 `isCardEcho`): VoiceOver가 카드 글을 읽는 소리가 이용자 말로 들어온 것을 버린다. 이용자 말을 버리는 판정이라, 말한 낱말이 모두 요약 글의 이어진 한 구간과 차례대로 같을 때만 메아리로 본다. 낱말이 하나라도 다르거나(다른 금액, 다른 제품, 고치는 말) 중간을 건너뛰거나 순서가 다르면("무선 말고 유선") 이용자 말로 받는다. 물음과 동의로 읽히는 말도 메아리가 아니다. 잘못 받아 적힌 낭독은 거르지 못하고 AI로 간다.
+- 기기 목소리가 읽지 못했을 때(`liveSpeaker.ts`, `liveMachine.ts`의 `onSpeakEnd`): 낭독 오류와 끝남 신호 없음(감시 시간: 글자 수 × 250ms ÷ 빠르기 + 3초)은 "끝까지 읽음"과 구별한다. 확인 요약은 한 번 더 읽어 보고, 또 실패하면 취소음을 낸 뒤 같은 글을 화면 낭독기 알림으로 전하고 그 길이만큼 기다린 다음에야 동의를 받는다. 다른 글은 바로 알림으로 전한다.
+- 기기 목소리 빠르기: 보통 0.95, 천천히 0.8, 빠르게 1.15. Windows의 Chrome 계열은 빠르기를 정수 단계 trunc(10 × log10(값))로 넘겨 이 세 값이 모두 같은 속도가 된다(실측 2026-11-24). 그 환경에서는 0.62, 1, 1.3을 쓴다(`SPEAK_RATES_SAPI`). Edge와 iOS는 그대로다.
+- 실제 Chrome 기기 목소리 측정(2026-11-24, Windows, Microsoft Heami, 음량 0으로 실행): 끊고 바로 읽기(`cancel` 뒤 `speak`)가 0.5~1초 안에 시작되고, 137자 안내는 22초, 287자 글은 55초에 끝남 신호가 왔다(글자당 156~190ms). 한국어 기기 목소리는 Heami 하나였다.
+- 로컬 실호출 결과(2026-11-24, 누적 86회, `docs/plans/2026-11-23-voice-live/progress.md`): 세션 설정(`reasoning.effort`, `server_vad`·`semantic_vad`, 전사 `ko`, 도구 3개)을 모델이 받는다. `call_id`는 `Location`에서 얻는다. 살아 있는 통화의 hangup은 200이고 브라우저의 데이터 채널이 바로 닫힌다. 이미 끝난 통화의 hangup은 5초 뒤 시간 초과로 끝난다. 응답 `max_output_tokens` 400에 닿으면 `incomplete`로 잘리고 화면은 다시 듣는다. 세션 상한에서 연결을 새로 하고 앞 대화를 이어 간다. `gpt-realtime-2.1-mini`는 긴 말을 들으면 말이 길어지고 지시를 어길 때가 있었고, `gpt-realtime-2.1`은 같은 대화에서 지시를 그대로 따랐다(토큰 단가 3.2배).
+- 확인하지 못한 것: 실기기 iOS·VoiceOver 동작, 사람 목소리와 소음이 있는 환경의 인식 품질(실호출은 음성 합성으로 만든 말소리로 했다), 서버리스에서 예약 끊기가 끝까지 도는지.
 
 ### 리서치 챗 사진 축소(브라우저)
 
