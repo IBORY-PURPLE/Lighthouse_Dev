@@ -1,24 +1,14 @@
-import {
-  emptyResearchState,
-  isResearchResponse,
-  parseStoredState,
-  researchStorageKey,
-  type ResearchRequestBody,
-  type ResearchResponse,
-  type ResearchState,
-} from "./research";
 import { STATUS } from "./speech";
 import {
   VOLUNTEER_MESSAGES,
   type QueueData,
-  type SentCandidate,
+  type RequestDetailsView,
   type SentResult,
   type VolunteerRequestView,
 } from "./volunteerView";
 
 // 봉사자 화면이 서버 함수를 부르는 브라우저 쪽 도우미와 기기 저장소 접근. 서버 코드를 가져오지 않는다.
 
-export const NICKNAME_KEY = "lh.vol.nickname.v1";
 export const SEEN_KEY = "lh.vol.seen.v1";
 export const FLASH_KEY = "lh.vol.flash.v1";
 
@@ -34,12 +24,13 @@ export interface QueueResponse extends QueueData {
 
 export interface MeResponse {
   entered: boolean;
-  needsCode: boolean;
 }
 
 export interface DetailResponse {
   request: VolunteerRequestView;
   result: SentResult | null;
+  /** 이용자가 확인한 요약과 질문·답. 맡은(진행 중) 요청에만 오고, 없거나 DB 적용 전이면 null. */
+  details: RequestDetailsView | null;
 }
 
 /** 실패 상태 코드에 맞는 안내 글자. 429는 이용자 화면과 같은 문구. */
@@ -91,28 +82,6 @@ export function fetchRequest(requestId: string): Promise<ApiOutcome<DetailRespon
   return call<DetailResponse>(`/api/volunteer/requests/${requestId}`);
 }
 
-export type ResearchOutcome =
-  | { kind: "ok"; response: ResearchResponse }
-  | { kind: "unauthorized" }
-  | { kind: "failed"; status: number };
-
-/**
- * 리서치 챗의 AI 도움 한 번. 4xx·5xx·네트워크 오류·모양이 틀린 응답은 모두 failed다.
- * 화면은 failed여도 카드를 진행한다(기본 질문·바로가기).
- */
-export async function requestResearch(body: ResearchRequestBody): Promise<ResearchOutcome> {
-  const result = await call<unknown>("/api/volunteer/research", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (result.kind === "unauthorized") return result;
-  if (result.kind === "failed") return { kind: "failed", status: result.status };
-  return isResearchResponse(result.data)
-    ? { kind: "ok", response: result.data }
-    : { kind: "failed", status: 200 };
-}
-
 export type ClaimResult =
   | { kind: "claimed"; requestId: string }
   | { kind: "taken" }
@@ -152,31 +121,6 @@ export async function releaseRequest(requestId: string): Promise<ReleaseResult> 
   return { kind: "failed", message: result.message };
 }
 
-export type SendResult =
-  | { kind: "sent"; sentAt: string }
-  | { kind: "invalid" }
-  | { kind: "not_yours" }
-  | { kind: "unauthorized" }
-  | { kind: "failed"; message: string };
-
-/** 확인한 후보를 보낸다(요청이 완료된다). 같은 봉사자가 다시 보내도 같은 결과(200)다. */
-export async function sendResult(
-  requestId: string,
-  candidates: SentCandidate[],
-): Promise<SendResult> {
-  const result = await call<{ sentAt: string }>(`/api/volunteer/requests/${requestId}/result`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ candidates }),
-  });
-  if (result.kind === "ok") return { kind: "sent", sentAt: result.data.sentAt };
-  if (result.kind === "unauthorized") return result;
-  if (result.status === 403 || result.status === 404) return { kind: "not_yours" };
-  // 400(주소·길이·모양)은 몇 번을 다시 눌러도 같다. 5xx·네트워크 실패와 다르게 알린다.
-  if (result.status === 400) return { kind: "invalid" };
-  return { kind: "failed", message: result.message };
-}
-
 export function resetDemoRequests(): Promise<ApiOutcome<{ ok: true; waiting: number }>> {
   return call("/api/volunteer/demo/reset", { method: "POST" });
 }
@@ -185,56 +129,19 @@ export type EnterOutcome =
   | { kind: "ok" }
   | { kind: "error"; message: string };
 
-/** 입장. 코드는 lh_access가 없는 기기에서만 보낸다. */
-export async function enterVolunteer(
-  code: string | null,
-  nickname: string,
-): Promise<EnterOutcome> {
-  let response: Response;
+/** 입장. 코드와 별명 없이 기기 쿠키(lh_vol)만 받는다. 이미 받은 기기는 같은 ID를 유지한다. */
+export async function enterVolunteer(): Promise<EnterOutcome> {
   try {
-    response = await fetch("/api/volunteer/enter", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(code === null ? { nickname } : { code, nickname }),
-      cache: "no-store",
-    });
+    const response = await fetch("/api/volunteer/enter", { method: "POST", cache: "no-store" });
+    return response.ok
+      ? { kind: "ok" }
+      : { kind: "error", message: VOLUNTEER_MESSAGES.connectFailed };
   } catch {
     return { kind: "error", message: VOLUNTEER_MESSAGES.connectFailed };
   }
-  if (response.ok) return { kind: "ok" };
-  const body = await readJson(response);
-  const error = typeof body?.error === "string" ? body.error : "";
-  if (response.status === 401 || error === "invalid_code") {
-    return { kind: "error", message: VOLUNTEER_MESSAGES.invalidCode };
-  }
-  if (error === "invalid_nickname") {
-    return { kind: "error", message: VOLUNTEER_MESSAGES.invalidNickname };
-  }
-  if (response.status === 429) {
-    return { kind: "error", message: VOLUNTEER_MESSAGES.enterTooMany };
-  }
-  return { kind: "error", message: VOLUNTEER_MESSAGES.connectFailed };
 }
 
 // ----- 기기 저장소(실패해도 화면은 돌아가야 한다) -----
-
-function readLocal(key: string): string | null {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeLocal(key: string, value: string): boolean {
-  try {
-    window.localStorage.setItem(key, value);
-    return true;
-  } catch {
-    // 저장하지 못해도 다음에 다시 물을 뿐이다.
-    return false;
-  }
-}
 
 function readSession(key: string): string | null {
   try {
@@ -253,41 +160,22 @@ function writeSession(key: string, value: string | null) {
   }
 }
 
-/** 이 기기에 남긴 리서치 챗 진행 상태. 없거나 깨졌으면 처음 상태. */
-export function readResearchState(requestId: string): ResearchState {
-  return parseStoredState(readLocal(researchStorageKey(requestId))) ?? emptyResearchState();
-}
-
-/** 저장에 성공했나. 가득 찼거나 막힌 저장소면 false(화면이 한 번 알린다). */
-export function writeResearchState(requestId: string, state: ResearchState): boolean {
-  return writeLocal(researchStorageKey(requestId), JSON.stringify(state));
-}
-
-/** 보내기·내려놓기에 성공하면 지운다. */
-export function clearResearchState(requestId: string) {
-  try {
-    window.localStorage.removeItem(researchStorageKey(requestId));
-  } catch {
-    // 지우지 못해도 다음에 열 때 이 요청은 이미 끝난 상태다.
-  }
-}
-
-/** 옛 요약 화면이 남긴 초안(lh.vol.draft.v1.<id>)은 읽는 코드가 없어졌다. 저장 공간만 차지하므로 지운다. */
+/**
+ * 옛 화면이 기기에 남긴 글(요약 초안 lh.vol.draft.v1.<id>, 카드형 리서치 진행 상태 lh.vol.research.v1.<id>)은 읽는 코드가 없어졌다.
+ * 저장 공간만 차지하므로(사진 썸네일 포함) 지운다.
+ */
 export function clearLegacyDrafts() {
   try {
     const stale: string[] = [];
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index);
-      if (key?.startsWith("lh.vol.draft.v1.")) stale.push(key);
+      if (key?.startsWith("lh.vol.draft.v1.") || key?.startsWith("lh.vol.research.v1.")) stale.push(key);
     }
     for (const key of stale) window.localStorage.removeItem(key);
   } catch {
     // 지우지 못해도 화면은 돌아간다.
   }
 }
-
-export const readNickname = () => readLocal(NICKNAME_KEY) ?? "";
-export const saveNickname = (nickname: string) => writeLocal(NICKNAME_KEY, nickname);
 
 /** 직전 목록의 대기 요청 id. 없으면 첫 불러오기다. */
 export function readSeen(): string[] | null {

@@ -14,12 +14,16 @@ const VERSION = "v1";
 const KEY_LENGTH = 43;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
-/** 입장 코드에서 서명 비밀을 만든다. 코드가 설정되지 않았으면 null(늘 무효). */
-function signingSecret(): Buffer | null {
+/**
+ * 서명 비밀을 DEMO_ACCESS_CODE에서 만든다. QA 기간에는 이 값을 입력받거나 검사하지 않고 서명용으로만 쓴다.
+ * 값을 바꾸면 모든 기기 쿠키가 무효가 된다. 설정되지 않았으면 null(늘 무효).
+ * purpose마다 비밀이 달라, 한 쿠키를 다른 쿠키 자리에 넣어도 통하지 않는다(봉사자 lh_vol과 이용자 lh_device).
+ */
+function signingSecret(purpose: string): Buffer | null {
   const code = process.env.DEMO_ACCESS_CODE?.trim();
   if (!code) return null;
   return createHash("sha256")
-    .update(`lighthouse/volunteer-device/${VERSION}|${code}`)
+    .update(`lighthouse/${purpose}/${VERSION}|${code}`)
     .digest();
 }
 
@@ -33,17 +37,17 @@ function constantTimeEqual(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** 새 기기 열쇠가 든 쿠키 값. 입장 코드가 설정되지 않았으면 null. */
-export function issueDeviceCookie(): string | null {
-  const secret = signingSecret();
+/** 새 기기 열쇠가 든 서명 쿠키 값. 서명 비밀이 설정되지 않았으면 null. */
+export function issueSignedKey(purpose: string): string | null {
+  const secret = signingSecret(purpose);
   if (!secret) return null;
   const payload = `${VERSION}.${randomBytes(32).toString("base64url")}`;
   return `${payload}.${sign(secret, payload)}`;
 }
 
-/** 쿠키 값이 맞으면 봉사자 ID, 아니면 null. */
-export function readVolunteerId(value: string | null | undefined): string | null {
-  const secret = signingSecret();
+/** 쿠키 값의 서명이 맞으면 그 안의 열쇠, 아니면 null. */
+export function readSignedKey(purpose: string, value: string | null | undefined): string | null {
+  const secret = signingSecret(purpose);
   if (!secret || !value) return null;
   const parts = value.split(".");
   if (parts.length !== 3) return null;
@@ -51,7 +55,25 @@ export function readVolunteerId(value: string | null | undefined): string | null
   if (version !== VERSION || key.length !== KEY_LENGTH) return null;
   if (!BASE64URL.test(key) || !BASE64URL.test(signature)) return null;
   if (!constantTimeEqual(sign(secret, `${version}.${key}`), signature)) return null;
-  return `d-${createHash("sha256").update(key).digest("hex").slice(0, 16)}`;
+  return key;
+}
+
+/** 열쇠에서 DB·로그에 남길 ID를 뽑는다. 열쇠 자체는 저장하지 않는다. */
+export function hashedKeyId(key: string, length: number): string {
+  return createHash("sha256").update(key).digest("hex").slice(0, length);
+}
+
+const VOLUNTEER_PURPOSE = "volunteer-device";
+
+/** 새 봉사자 기기 열쇠가 든 쿠키 값. 입장 코드가 설정되지 않았으면 null. */
+export function issueDeviceCookie(): string | null {
+  return issueSignedKey(VOLUNTEER_PURPOSE);
+}
+
+/** 쿠키 값이 맞으면 봉사자 ID, 아니면 null. */
+export function readVolunteerId(value: string | null | undefined): string | null {
+  const key = readSignedKey(VOLUNTEER_PURPOSE, value);
+  return key ? `d-${hashedKeyId(key, 16)}` : null;
 }
 
 /** 쿠키 Secure 값. Vercel(HTTPS)과 https 주소에서만 켠다. 로컬 http 시험에서는 끈다. */

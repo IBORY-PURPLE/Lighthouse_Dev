@@ -25,6 +25,21 @@ describe("createRateLimiter", () => {
     expect(check("a")).toEqual({ allowed: false, retryAfterSeconds: 45 });
   });
 
+  it("peek은 센 횟수를 올리지 않고 한도에 닿았는지만 알려 준다", () => {
+    let time = 1_000_000;
+    const check = createRateLimiter({ limit: 2, windowMs: 60_000, now: () => time });
+    expect(check.peek("a").allowed).toBe(true);
+    expect(check.peek("a").allowed).toBe(true);
+    expect(check("a").allowed).toBe(true);
+    expect(check.peek("a").allowed).toBe(true);
+    expect(check("a").allowed).toBe(true);
+    time += 20_000;
+    expect(check.peek("a")).toEqual({ allowed: false, retryAfterSeconds: 40 });
+    expect(check.peek("a")).toEqual({ allowed: false, retryAfterSeconds: 40 });
+    time += 41_000;
+    expect(check.peek("a").allowed).toBe(true);
+  });
+
   it("창이 지나면 다시 허용한다", () => {
     const { check, advance } = limiter(1);
     expect(check("a").allowed).toBe(true);

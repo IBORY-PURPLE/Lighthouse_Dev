@@ -1,18 +1,11 @@
 import { RESULT_LIMITS } from "./resultInput";
-import {
-  guideSource,
-  isVerified,
-  missingRequiredCards,
-  type LinkRef,
-  type ResearchState,
-} from "./research";
+import { siteNameOf } from "./research";
+import { purchaseBadge, type ResearchView } from "./researchSession";
 import { candidateSearchUrl } from "./shopLinks";
 import type { SentCandidate } from "./volunteerView";
 
-// 리서치 챗 상태 → 기존 POST /api/volunteer/requests/[id]/result 본문(설계 지침 7절). 스키마는 그대로다.
+// 리서치 챗 대화 상태 → 결과 후보(보내기 research_send가 저장한다). 스키마는 그대로다.
 // 서버는 한도를 넘으면 400으로 거부하므로, 여기서 코드포인트 단위로 먼저 자른다.
-
-export type ResultBody = { candidates: SentCandidate[] };
 
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim();
 
@@ -36,7 +29,7 @@ function item(label: string, value: string): Item | null {
  * 링크 줄. "제목 주소" 모양이고 값 한도(200자) 안에서 제목을 줄여 맞춘다.
  * 제목 자리가 1자도 없으면 주소만 넣고, 주소 자체가 한도를 넘으면 이 링크는 뺀다(주소를 자르면 못 쓰는 주소가 된다).
  */
-function linkItem(label: string, link: LinkRef): Item | null {
+function linkItem(label: string, link: { title: string; url: string }): Item | null {
   const url = link.url.trim();
   const urlLength = [...url].length;
   if (!url.startsWith("https://") || urlLength > RESULT_LIMITS.valueMax) return null;
@@ -45,7 +38,7 @@ function linkItem(label: string, link: LinkRef): Item | null {
   return { label, value: title === "" ? url : `${title} ${url}` };
 }
 
-function withLinks(prefix: string, links: readonly LinkRef[]): Item[] {
+function withLinks(prefix: string, links: readonly { title: string; url: string }[]): Item[] {
   const items: Item[] = [];
   for (const link of links) {
     if (items.length >= 2) break;
@@ -55,51 +48,70 @@ function withLinks(prefix: string, links: readonly LinkRef[]): Item[] {
   return items;
 }
 
+// ---- 대화형 세션 → 결과(design.md 4.11) -------------------------------------------------
+
+type SessionResultView = Pick<ResearchView, "purchase" | "slots" | "pending" | "photos" | "review">;
+
+function slotValue(view: SessionResultView, key: keyof ResearchView["slots"]): string {
+  const slot = view.slots[key];
+  return slot && slot.status !== "skipped" ? oneLine(slot.value) : "";
+}
+
+/** [확인했어요]를 누른 주소(slot.links)만 링크 줄로 만든다. 제목은 주소의 도메인 이름이다. */
+function checkedLinks(view: SessionResultView, key: "benefits" | "refs", prefix: string): Item[] {
+  const links = (view.slots[key]?.links ?? []).map((url) => ({ title: siteNameOf(url), url }));
+  return withLinks(prefix, links);
+}
+
 /**
- * 후보 1 = 추천 기종(핵심 정리·요약 최대 12개), 후보 2~3 = 같이 고민한 제품.
- * 필수 카드가 비었으면 null. 결과에는 "구매 인증됨"과 "리서치만" 중 하나만 든다.
+ * 대화형 세션(검수를 마친 리뷰) → 결과 후보. 스키마는 그대로다(resultInput.ts 한도 안).
+ * 후보 1 = 기종: guide는 리뷰 최종 문단(1,000자 이하), summary는 기존 항목(최대 12개), 링크는 [확인했어요]한 주소만.
+ * 후보 2~3 = 같이 고민한 제품(이름과 고른 이유만). 기종이 비었으면 빈 목록(저장소가 missing_required로 막는다).
  */
-export function buildResultBody(state: ResearchState): ResultBody | null {
-  if (missingRequiredCards(state).length > 0) return null;
+export function buildResultFromSession(view: SessionResultView): SentCandidate[] {
+  const name = clip(slotValue(view, "model"), RESULT_LIMITS.nameMax);
+  if (name === "") return [];
 
-  const photoCount = state.photos.length;
-  const descriptions = state.photos.map((photo) => oneLine(photo.description)).filter((text) => text !== "");
-  const photoValue = photoCount === 0 ? "" : `${photoCount}장${descriptions.length ? ` · ${descriptions.join(" / ")}` : ""}`;
-
+  const alts = slotValue(view, "alts")
+    .split(/[,，]/)
+    .map((entry) => clip(oneLine(entry), RESULT_LIMITS.nameMax))
+    .filter(Boolean);
+  // 구매했어요일 때만 사진 줄을 넣는다(리서치만으로 바꿔도 사진 행이 남아 있을 수 있다).
+  const refLinks = checkedLinks(view, "refs", "참고 링크");
+  const refs = slotValue(view, "refs");
+  const refsText = (view.slots.refs?.links ?? []).some((url) => url === refs) ? "" : refs;
+  const photoCount = view.purchase === "bought" ? view.photos.length : 0;
+  const badge = purchaseBadge(view);
   const summary = [
     item("구분", "추천 기종"),
-    item("구매 인증", isVerified(state) ? "구매 인증됨" : "리서치만"),
-    item("장점", state.pros),
-    item("사진", photoValue),
-    item("같이 고민한 제품", state.alts.join(", ")),
-    item("고민한 이유", state.altReason),
-    item("혜택", state.benefits),
-    ...withLinks("혜택 링크", state.checked.benefits),
-    item("참고 글", state.refs),
-    ...withLinks("참고 링크", state.checked.refs),
+    item("구매 인증", badge === "verified" ? "구매 인증됨" : badge === "bought_no_photo" ? "구매했지만 사진 인증 안 됨" : "리서치만"),
+    item("장점", slotValue(view, "pros")),
+    item("사진", photoCount === 0 ? "" : `${photoCount}장`),
+    item("같이 고민한 제품", alts.join(", ")),
+    item("고민한 이유", slotValue(view, "altReason")),
+    item("혜택", slotValue(view, "benefits")),
+    ...checkedLinks(view, "benefits", "혜택 링크"),
+    // 링크를 확인하면 칸 값이 그 주소가 되므로, 같은 주소를 "참고 링크"에서 또 보여 주지 않게 뺀다.
+    item("참고 글", refsText),
+    ...refLinks,
   ].filter((entry): entry is Item => entry !== null);
-
-  const name = clip(oneLine(state.model), RESULT_LIMITS.nameMax);
 
   const candidates: SentCandidate[] = [
     {
       name,
       url: candidateSearchUrl(name),
-      guide: clip(guideSource(state), RESULT_LIMITS.guideMax),
+      guide: clip(oneLine(view.review.text ?? ""), RESULT_LIMITS.guideMax),
       summary: summary.slice(0, RESULT_LIMITS.summaryMax),
     },
   ];
-
-  const reason = item("고민한 이유", state.altReason);
-  for (const alt of state.alts.slice(0, RESULT_LIMITS.maxCandidates - 1)) {
-    const altName = clip(oneLine(alt), RESULT_LIMITS.nameMax);
-    if (altName === "") continue;
+  const reason = item("고민한 이유", slotValue(view, "altReason"));
+  for (const alt of alts.slice(0, RESULT_LIMITS.maxCandidates - 1)) {
     candidates.push({
-      name: altName,
-      url: candidateSearchUrl(altName),
+      name: alt,
+      url: candidateSearchUrl(alt),
       guide: "",
       summary: [{ label: "구분", value: "같이 고민한 제품" }, ...(reason ? [reason] : [])],
     });
   }
-  return { candidates };
+  return candidates;
 }

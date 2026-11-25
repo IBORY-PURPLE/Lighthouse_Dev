@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
-import { ACCESS_COOKIE, hasAccess } from "@/lib/access";
 import type { MatchResponse } from "@/lib/matchHandoff";
 import { parseRequest } from "@/lib/parseRequest";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
@@ -36,10 +35,6 @@ async function readText(request: NextRequest): Promise<string | null> {
 }
 
 async function handleMatch(request: NextRequest): Promise<NextResponse> {
-  if (!hasAccess(request.cookies.get(ACCESS_COOKIE)?.value)) {
-    return failure(401, "unauthorized");
-  }
-
   const limit = checkRateLimit(clientKey(request.headers));
   if (!limit.allowed) {
     return failure(429, "rate_limited", {
