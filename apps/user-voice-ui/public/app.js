@@ -269,7 +269,7 @@ const renderRequest = () => {
           <p class="guide-title">진행 안내 · 총 여섯 개의 질문</p>
           <p>AI는 매번 ‘첫 번째 질문입니다’처럼 현재 질문 순서를 먼저 말합니다.</p>
           <p>대화가 시작되면 별도의 버튼을 누르지 않고 자연스럽게 답변하세요.</p>
-          <p>답변과 ‘다음’을 따로 말해도 되며, 오래 기다리면 AI가 ‘다음’을 말해 달라고 다시 안내합니다.</p>
+          <p>질문에 답한 뒤 다음 질문을 듣고 싶으면 ‘다음’이라고 말씀해 주세요.</p>
         </div>
         <button class="primary-button" type="button" data-action="start-conversation">질문 시작하기</button>
       ` : state.phase === 'error'
