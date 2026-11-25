@@ -27,8 +27,11 @@ const SCHEDULE_GRACE_SEC = 10;
 /** Location에서 꺼낸 call_id를 받아들이는 모양. hangup 라우트도 같은 모양을 쓴다. */
 export const CALL_ID_PATTERN = /^[A-Za-z0-9._~-]{1,200}$/;
 
-/** '다음' 방식에서 말 토막을 끊는 침묵 길이(ms). */
-const MANUAL_SILENCE_MS = 500;
+/**
+ * '다음' 방식에서 말 토막을 끊는 침묵 길이(ms). 짧을수록 '다음'을 빨리 받아 적지만, 확인 단계("네, … 근데")에서는
+ * 이 침묵이 그대로 차례 끝이라 너무 짧으면 고치는 말이 잘린 채 접수된다(2026-11-25 검토 지적). 그래서 500이 아니라 800으로 둔다.
+ */
+const MANUAL_SILENCE_MS = 800;
 
 export type RealtimeRate = "slow" | "normal" | "fast";
 const SPEED: Record<RealtimeRate, number> = { slow: 0.85, normal: 1.0, fast: 1.2 };

@@ -1934,6 +1934,8 @@ describe("확인 동의와 끝내기 답(A11·A36·A13)", () => {
     const guide = run(c.state, { type: "USER_TURN_END", text: "그만", transcribed: true });
     expect(guide.state.phase).toBe("confirming");
     expect(spoken(guide.effects)).toEqual(["endGuide"]);
+    // 안내 뒤에 요약과 "보낼까요?"를 다시 읽는다. 그 뒤의 "네"는 방금 다시 들은 요약에 대한 동의다.
+    expect(ofType(guide.effects, "SPEAK")[0].text).toBe(`${script("endGuide")} ${CONFIRM}`);
     const open = run(run(guide.state, speakEnd(guide.state)).state, { type: "LISTEN_STARTED", late: false });
     expect(open.state.phase).toBe("confirming");
     expect(run(open.state, { type: "USER_TURN_END", text: "끝내기", transcribed: true }).state.phase).toBe("ended");

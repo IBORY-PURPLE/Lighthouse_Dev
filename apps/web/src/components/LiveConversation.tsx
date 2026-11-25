@@ -541,13 +541,14 @@ export function LiveConversation() {
     const ctx = ctxRef.current;
     if (!ctx || out === "none" || out === "latch") return;
     if (out === "activate") {
+      setGuide(false); // 길게 눌러 이어 갈 때도 말 명령 안내를 닫는다
       // 다시 시작하는 길(멈춤에서 이어 가기)도 소리를 낼 수 있게 신호음과 audioSession을 준비한다.
       ctx.earcons.unlock();
       setAudioSession("playback");
       ctx.runner.dispatch({ type: "HOLD_ACTIVATE" });
     } else if (out === "submit") ctx.runner.dispatch({ type: "HOLD_SUBMIT" });
     else ctx.runner.dispatch({ type: "HOLD_CANCEL" });
-  }, []);
+  }, [setGuide]);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
     const ctx = ctxRef.current;
@@ -723,7 +724,7 @@ export function LiveConversation() {
       {/* 대화 중의 큰 글자는 말마다 바뀐다. 화면 낭독기에는 바뀌지 않는 '대화 중'만 보여 준다(바뀐 글을 읽는 소리가 AI 목소리와 겹치지 않게). */}
       <p className={styles.headline}>
         <span aria-hidden={active ? "true" : undefined}>{headlineOf(state, caption)}</span>
-        {active ? <span className={styles.srOnly}>{state.phase === "thinking" ? "생각 중" : "대화 중"}</span> : null}
+        {active ? <span className={styles.srOnly}>대화 중</span> : null}
       </p>
       {state.phase === "listening" && caption.user !== "" ? <p className={styles.caption} aria-hidden="true">{caption.user}</p> : null}
 
@@ -832,7 +833,10 @@ export function LiveConversation() {
           <button
             type="button"
             className={styles.small}
-            onClick={() => startLike({ type: "NEW_REQUEST", cid: newConversationId() })}
+            onClick={() => {
+              setGuide(false);
+              startLike({ type: "NEW_REQUEST", cid: newConversationId() });
+            }}
           >
             {BUTTONS.newRequest}
           </button>

@@ -98,6 +98,16 @@
   user-select: none;
 }
 
+/* 다른 조작 요소(요약 카드와 [이대로 보내기], 글자 입력 칸, 말 명령 안내, 접수 뒤 링크)가 필요한 때는 큰 단추를 줄여 첫 화면에 함께 보이게 한다. */
+.root[data-live-state="confirming"] .main,
+.root[data-live-state="paused"] .main,
+.root[data-live-state="done"] .main,
+.root[data-live-state="error"] .main,
+.root[data-live-input="text"] .main {
+  min-height: max(96px, 42vh);
+  min-height: max(96px, 42dvh);
+}
+
 /* 음성 모션(오브). 동료 앱(apps/user-voice-ui)의 voice-orb를 옮겼다. 장식이다. */
 .orb {
   position: relative;

@@ -742,7 +742,10 @@ function runCommand(c: Cx, cmd: LocalCommand): void {
       // 끝내고 싶다는 말: 끝내는 말을 알려 주고 차례를 다시 연다.
       closeMic(c);
       s.ask = null;
-      sayScript(c, "endGuide");
+      // 확인 단계에서는 안내 뒤에 요약과 "보낼까요?"를 다시 읽는다. 안내만 읽으면 그 뒤의 "네"가
+      // 끝내겠다는 대답인지 보내라는 동의인지 알 수 없는데도 접수된다(2026-11-25 검토 지적).
+      if (s.phase === "confirming") say(c, "endGuide", `${script("endGuide")} ${confirmText(s, "confirmAgain")}`);
+      else sayScript(c, "endGuide");
       return;
     case "exit":
       endToHome(c);
