@@ -25,6 +25,7 @@
 | `.claude/rules/` | 개발 규칙(자동 로드) |
 | `.claude/hooks/guard.js` | 금지 명령 차단 훅. 이용자 허락 없이 수정 금지. 시험: `guard.test.js` |
 | `.github/ISSUE_TEMPLATE/` | 이슈 템플릿 |
+| `.github/workflows/ci.yml` | GitHub Actions. PR과 main 푸시마다 `apps/web`의 lint·타입 검사·단위 시험(`npm run check`와 같은 세 명령)을 GitHub 환경에서 돌린다 |
 
 코드 폴더를 만들면 이 표에 추가한다. 웹 배포는 저장소 루트가 아니라 `apps/web`이다.
 
