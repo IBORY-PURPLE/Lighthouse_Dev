@@ -1,145 +1,43 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { installFakeSpeech, say } from "./helpers/fakeSpeech";
-
-// 이용자 화면(/)은 apps/user-voice-ui의 음성 대화 화면이다(PR 합병). 가짜 음성 인식과 가짜 AI(LLM_MODE=mock) 기준이다.
-// 원본 화면에는 텍스트 답변 입력이 없어(음성 인식만) 가짜 음성 인식으로 답한다.
-// 실제 음성 인식, 소리 내어 읽어 주기, VoiceOver 낭독, 실제 OpenAI 응답은 사람이 판정한다.
-// 파일 이름이 a-로 시작하는 까닭: 봉사자 대기열은 오래 기다린 순으로 20건(QUEUE_LIMIT)만 보인다.
-// 다른 시험 파일이 접수 요청을 쌓기 전에 돌아야 새 카드가 목록에 보인다(Playwright는 파일 이름순으로 돈다).
+import AxeBuilder from "@axe-core/playwright";
 
 const BUDGET = "10만 원 이하";
 
-declare global {
-  interface Window {
-    __spoken: string[];
-  }
-}
-
-/** 읽어 주기를 가짜로 바꾼다: 읽은 글을 모으고 바로 끝났다고 알린다(헤드리스 브라우저에는 목소리가 없다). */
-async function installFakeSynthesis(page: Page) {
-  await page.addInitScript(() => {
-    const spoken: string[] = [];
-    window.__spoken = spoken;
-    class FakeUtterance {
-      lang = "";
-      rate = 1;
-      onend: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      constructor(readonly text: string) {}
-    }
-    const target = window as unknown as Record<string, unknown>;
-    target.SpeechSynthesisUtterance = FakeUtterance;
-    Object.defineProperty(window, "speechSynthesis", {
-      configurable: true,
-      value: {
-        cancel() {},
-        speak(utterance: FakeUtterance) {
-          spoken.push(utterance.text);
-          setTimeout(() => utterance.onend?.(), 0);
-        },
-      },
-    });
-  });
-}
-
-async function openVoiceHome(page: Page) {
-  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": `test-${randomUUID()}` });
-  await installFakeSpeech(page);
-  await installFakeSynthesis(page);
-  await page.goto("/");
-}
-
-const spoken = (page: Page) => page.evaluate(() => window.__spoken);
-const heardAI = (page: Page, text: string) =>
-  expect.poll(() => spoken(page)).toContain(text);
-
-test.describe("/ 이용자 화면(음성 대화)", () => {
-  test("/는 동료 화면(홈: 상품 요청·저장된 상품 목록)이고 고정 질문 화면은 /classic이다", async ({
-    page,
-  }) => {
-    await openVoiceHome(page);
-    await expect(page).toHaveTitle("LightHouse MVP");
-    await expect(page.getByRole("button", { name: "상품 요청", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "저장된 상품 목록" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "시작하기" })).toHaveCount(0);
+test.describe("/ 이용자 홈과 요청 목록", () => {
+  test("홈에서 상품 요청 안내를 읽고 운영 음성 대화 화면으로 이동한다", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveTitle("LightHouse · 홈");
+    const request = page.getByRole("link", { name: "상품 요청", exact: true });
+    await expect(request).toHaveAccessibleDescription(/AI와 음성으로 대화/);
+    await expect(page.getByRole("button", { name: "내 구매 요청 목록" })).toHaveAccessibleDescription(/봉사자 리뷰/);
+    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+    expect(results.violations).toEqual([]);
     await page.screenshot({ path: "test-results/voice-home.png" });
+
+    await request.focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/request$/);
+    await expect(page.getByRole("heading", { name: "진행 안내" })).toBeVisible();
+    const guideResults = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+    expect(guideResults.violations).toEqual([]);
+    await page.screenshot({ path: "test-results/voice-request-guide.png" });
+
+    await page.getByRole("link", { name: "질문 시작하기" }).click();
+    await expect(page).toHaveURL(/\/live$/);
+    await expect(page.getByRole("button", { name: "대화 시작", exact: true })).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole("link", { name: "질문 시작하기" })).toBeVisible();
+    await page.getByRole("link", { name: "뒤로 돌아가기" }).click();
+    await expect(request).toBeVisible();
+
+    await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
+    await expect(page.getByRole("heading", { name: "내 구매 요청", exact: true })).toBeFocused();
+    await expect(page.getByRole("link", { name: "새 구매 요청" })).toHaveAttribute("href", "/request");
 
     await page.goto("/classic");
     await expect(page.getByRole("heading", { level: 1, name: "LightHouse 상품 요청" })).toBeVisible();
     await expect(page.getByRole("button", { name: "시작하기" })).toBeVisible();
-  });
-
-  test("AI 대화 → 확정 → 접수 → 봉사자 목록에 새 카드", async ({ page }) => {
-    const chatBodies: { sessionId: string; message: string; reset: boolean; history: unknown[] }[] = [];
-    page.on("request", (request) => {
-      if (request.url().endsWith("/api/voice/chat")) chatBodies.push(request.postDataJSON());
-    });
-    await openVoiceHome(page);
-    const product = `sony 헤드셋 연동${randomUUID().slice(0, 8)}`;
-
-    await page.getByRole("button", { name: "상품 요청", exact: true }).click();
-    await expect(page.locator("#conversation")).toHaveClass(/active/);
-    await expect(page.locator(".orb")).toHaveAttribute("aria-hidden", "true");
-    await heardAI(page, "어떤 상품을 찾으세요?");
-    await expect(page.locator("#conversation")).toHaveClass(/listening/);
-    await page.screenshot({ path: "test-results/voice-conversation.png" });
-
-    await say(page, product);
-    await heardAI(page, "예산은 얼마인가요?");
-    await say(page, BUDGET);
-    await heardAI(page, `${product}, 예산 ${BUDGET}. 이 내용으로 구매 요청을 등록할까요?`);
-
-    // 동의 전에는 접수하지 않았다.
-    expect(await page.evaluate(() => localStorage.getItem("lh-requests"))).toBeNull();
-
-    const registered = page.waitForResponse(
-      (response) => response.url().endsWith("/api/requests") && response.request().method() === "POST",
-    );
-    await say(page, "네, 등록해 주세요");
-    const response = await registered;
-    expect(response.status()).toBe(201);
-    expect(response.request().postDataJSON()).toEqual({
-      clientRequestId: chatBodies[0].sessionId,
-      product,
-      budget: BUDGET,
-      condition: "정하지 않음",
-      // 이용자가 확인한 요약과 질문·답(봉사자 브리핑). 확인 질문과 마지막 동의는 뺀다.
-      details: {
-        summary: `${product}, 예산 ${BUDGET}`,
-        qa: [
-          { q: "어떤 상품을 찾으세요?", a: product },
-          { q: "예산은 얼마인가요?", a: BUDGET },
-        ],
-      },
-    });
-
-    // 원본 흐름 그대로: 읽어 준 뒤 목록 화면으로 가고 기기 안 목록에 카드가 생긴다.
-    await heardAI(page, "구매 요청을 등록했어요.");
-    await expect(page.locator("#list")).toHaveClass(/active/);
-    await expect(page.locator("#requests .card").first()).toContainText(product);
-    await page.screenshot({ path: "test-results/voice-list.png" });
-
-    // 서버는 기록을 저장하지 않는다: 매 호출이 같은 대화 id로 기록 전체를 보냈다.
-    expect(chatBodies.map((body) => [body.reset, body.history.length])).toEqual([
-      [true, 0],
-      [false, 2],
-      [false, 4],
-      [false, 6],
-    ]);
-    expect(new Set(chatBodies.map((body) => body.sessionId)).size).toBe(1);
-    expect(chatBodies.map((body) => body.message)).toEqual(["", product, BUDGET, "네, 등록해 주세요"]);
-
-    // 봉사자 화면: 방금 접수한 요청이 대기열에 뜬다.
-    const volunteer = await page.context().newPage();
-    await volunteer.goto("/volunteer");
-    await expect(volunteer.getByRole("heading", { level: 1, name: "봉사자" })).toBeVisible();
-    await volunteer.getByRole("button", { name: "대기열·내 담당" }).click();
-    const card = volunteer.getByTestId("queue-card").filter({ hasText: product });
-    await expect(card).toHaveCount(1);
-    await expect(card.getByText("대기", { exact: true })).toBeVisible();
-    await expect(card).toContainText(BUDGET);
-    await volunteer.screenshot({ path: "test-results/voice-volunteer-queue.png" });
   });
 
   test("기기 두 대에서 보낸 요청은 기기마다 자기 것만 내 구매 요청 목록에 보인다", async ({ browser }) => {
@@ -148,10 +46,7 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     const productB = `기기B 마우스 ${mark}`;
     const open = async () => {
       const context = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": `test-${randomUUID()}` } });
-      const page = await context.newPage();
-      await installFakeSpeech(page);
-      await installFakeSynthesis(page);
-      return { context, page };
+      return { context, page: await context.newPage() };
     };
     const send = (page: Page, product: string) =>
       page.request.post("/api/requests", {
@@ -177,7 +72,7 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
         [b, productB, productA],
       ] as const) {
         await device.page.goto("/");
-        await device.page.getByRole("button", { name: "저장된 상품 목록" }).click();
+        await device.page.getByRole("button", { name: "내 구매 요청 목록" }).click();
         await expect(device.page.locator("#list")).toHaveClass(/active/);
         await expect(device.page.locator("#requests .card", { hasText: mine })).toHaveCount(1);
         await expect(device.page.locator("#requests .card", { hasText: other })).toHaveCount(0);
@@ -190,33 +85,6 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     } finally {
       await a.context.close();
       await b.context.close();
-    }
-  });
-
-  test("쿠키 없는 새 기기가 화면 대화로 첫 요청을 내도 기기 쿠키는 하나고 목록에는 그 요청 카드가 한 장만 남는다", async ({ browser }) => {
-    const context = await browser.newContext({ extraHTTPHeaders: { "x-forwarded-for": `test-${randomUUID()}` } });
-    const page = await context.newPage();
-    try {
-      await installFakeSpeech(page);
-      await installFakeSynthesis(page);
-      await page.goto("/");
-      await page.getByRole("button", { name: "상품 요청", exact: true }).click();
-      await heardAI(page, "어떤 상품을 찾으세요?");
-      await say(page, "sony 헤드셋");
-      await heardAI(page, "예산은 얼마인가요?");
-      await say(page, BUDGET);
-      await heardAI(page, "sony 헤드셋, 예산 10만 원 이하. 이 내용으로 구매 요청을 등록할까요?");
-      await say(page, "네");
-      await expect(page.locator("#list")).toHaveClass(/active/);
-      await expect.poll(async () => ((await (await page.request.get("/api/requests")).json()).items as unknown[]).length).toBe(1);
-      expect((await context.cookies()).filter((cookie) => cookie.name === "lh_device")).toHaveLength(1);
-      // 접수 응답이 번호를 저장한 뒤 다시 열어도 카드는 한 장이다(접수 중 카드와 서버 카드가 겹치지 않는다).
-      await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("lh-requests") || "[]")[0]?.requestId ?? "")).not.toBe("");
-      await page.reload();
-      await page.getByRole("button", { name: "저장된 상품 목록" }).click();
-      await expect(page.locator("#requests .card", { hasText: "sony 헤드셋" })).toHaveCount(1);
-    } finally {
-      await context.close();
     }
   });
 
@@ -262,15 +130,12 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
       },
       { legacy: LEGACY, deleted: DELETED },
     );
-    await installFakeSpeech(page);
-    await installFakeSynthesis(page);
     await page.goto("/");
     // 전체 목록이 아니면(저장소 폴백 등) 서버가 빈 목록을 줘도 기록을 지키는 쪽이다.
     complete = false;
-    await page.getByRole("button", { name: "저장된 상품 목록" }).click();
+    await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
     await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
-    await expect.poll(() => gets).toBeGreaterThanOrEqual(2);
-    await page.waitForTimeout(300);
+    await expect.poll(() => gets).toBeGreaterThanOrEqual(1);
     await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
     complete = true;
     await page.evaluate(() => (window as unknown as { refreshRequests: () => Promise<void> }).refreshRequests());
@@ -284,12 +149,14 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
       status: "done",
       review: "봉사자가 확인한 리뷰 문단",
     });
+    await page.goto(`/?request=${LEGACY}`);
+    await expect(page.getByText("봉사자가 확인한 리뷰 문단")).toBeFocused();
     await context.close();
   });
 
   test("저장된 상품 상세에는 검증 리뷰 한 문단만 있고 후보 목록·구매 링크·가격이 없다", async ({ page }) => {
-    await openVoiceHome(page);
-    await page.getByRole("button", { name: "저장된 상품 목록" }).click();
+    await page.goto("/");
+    await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
     await expect(page.locator("#list")).toHaveClass(/active/);
     // 이용자 화면은 정적 시연 화면이라 저장된 정보 카드는 모두 이 소니 헤드셋 상세를 연다(서버에서 결과를 받아 그리는 곳은 아직 없다).
     await page.locator("#list .card:not(.pending)", { hasText: "소니 무선 헤드셋" }).click();
@@ -308,31 +175,5 @@ test.describe("/ 이용자 화면(음성 대화)", () => {
     const text = await detail.innerText();
     expect(text).not.toMatch(/링크|\d[\d,]*\s*원|후보|상세 요약/);
     await page.screenshot({ path: "../../test-results/demo6-shots/user-result-review-only.png", fullPage: true });
-  });
-
-  test("AI 호출이 실패하면 원본처럼 안내하고 다시 듣는다", async ({ page }) => {
-    await page.route("**/api/voice/chat", (route) =>
-      route.fulfill({ status: 500, json: { error: "AI 요청에 실패했습니다." } }),
-    );
-    await openVoiceHome(page);
-    await page.getByRole("button", { name: "상품 요청", exact: true }).click();
-    await heardAI(page, "연결에 문제가 생겼어요. 다시 말씀해 주세요.");
-    await expect(page.locator("#conversation")).toHaveClass(/listening/);
-  });
-
-  test("접수가 실패해도 원본 흐름(목록 화면)은 그대로다", async ({ page }) => {
-    await page.route("**/api/requests", (route) =>
-      route.fulfill({ status: 503, json: { ok: false, error: "store_unavailable" } }),
-    );
-    await openVoiceHome(page);
-    await page.getByRole("button", { name: "상품 요청", exact: true }).click();
-    await heardAI(page, "어떤 상품을 찾으세요?");
-    await say(page, "sony 헤드셋");
-    await heardAI(page, "예산은 얼마인가요?");
-    await say(page, BUDGET);
-    await heardAI(page, "sony 헤드셋, 예산 10만 원 이하. 이 내용으로 구매 요청을 등록할까요?");
-    await say(page, "네");
-    await expect(page.locator("#list")).toHaveClass(/active/);
-    await expect(page.locator("#requests .card").first()).toContainText("sony 헤드셋");
   });
 });

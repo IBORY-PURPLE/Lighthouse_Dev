@@ -55,6 +55,7 @@ const test = base.extend<{ openai: string[] }>({
 });
 
 test.describe.configure({ timeout: 120_000 });
+test.use({ serviceWorkers: "block" });
 
 const ANSWERS = ["소니 헤드폰", "노이즈 캔슬링 성능", "검정색이면 좋겠어요"] as const;
 const CONFIRM_RE = /^제품은 .*보낼까요\? 이제 천천히 답변해 주세요\.$/;
@@ -67,6 +68,7 @@ interface Setup extends FakeLiveOptions {
   clock?: boolean;
   /** true면 POST /api/requests를 막지 않고 실제 서버로 보낸다(사례 2의 1건) */
   realRegister?: boolean;
+  fromHome?: boolean;
 }
 
 interface Live {
@@ -134,6 +136,11 @@ async function openLive(page: Page, setup: Setup = {}): Promise<Live> {
     // 화면이 설정을 받은 뒤에 시작 단추를 누른다(Realtime 쪽으로 간다).
     await Promise.all([page.waitForResponse((r) => r.url().includes("/api/live/config")), page.goto("/live")]);
     await page.waitForTimeout(200);
+  } else if (setup.fromHome) {
+    await page.goto("/");
+    await page.getByRole("link", { name: "상품 요청", exact: true }).click();
+    await page.getByRole("link", { name: "질문 시작하기" }).click();
+    await expect(page).toHaveURL(/\/live$/);
   } else {
     await page.goto("/live");
   }
@@ -245,8 +252,9 @@ test.describe("/live 음성 도우미 화면", () => {
     expect(await page.evaluate(() => window.__fakeLive.rec.starts)).toBe(before);
     expect((await earconsOf(page)).length).toBe(earcons);
   });
-  test("사례 2 전체 흐름(실제 접수 1건)", async ({ page }) => {
-    const live = await openLive(page, { realRegister: true });
+  test("사례 2 홈에서 음성 대화·접수·목록 확인까지(실제 접수 1건)", async ({ page }) => {
+    const live = await openLive(page, { realRegister: true, fromHome: true });
+    await page.screenshot({ path: "test-results/voice-live-from-home.png" });
     const main = await bigButton(page).elementHandle();
     const names: string[] = [];
     const recordName = async () => names.push(await bigButton(page).evaluate((el) => el.textContent ?? ""));
@@ -308,6 +316,20 @@ test.describe("/live 음성 도우미 화면", () => {
     expect(await main?.evaluate((el) => el.isConnected)).toBe(true);
     expect(await main?.evaluate((el) => el === document.querySelector("[data-live-surface] button"))).toBe(true);
     await expect(bigButton(page)).toHaveAccessibleName(BUTTONS.newRequest);
+
+    expect((await page.context().cookies()).filter((cookie) => cookie.name === "lh_device")).toHaveLength(1);
+    await page.getByRole("link", { name: BUTTONS.list }).click();
+    await expect(page.locator("#list")).toBeVisible();
+    await expect(page.locator("#requests .card").filter({ hasText: ANSWERS[0] })).toHaveCount(1);
+    await page.reload();
+    await expect(page.locator("#requests .card").filter({ hasText: ANSWERS[0] })).toHaveCount(1);
+
+    const volunteer = await page.context().newPage();
+    await volunteer.goto("/volunteer");
+    await volunteer.getByRole("button", { name: "대기열·내 담당" }).click();
+    const card = volunteer.getByTestId("queue-card").filter({ hasText: ANSWERS[0] });
+    await expect(card).toHaveCount(1);
+    await expect(card.getByText("대기", { exact: true })).toBeVisible();
   });
 
   test("사례 3 동의 관문", async ({ page }) => {
