@@ -62,9 +62,11 @@ describe("원본(apps/user-voice-ui)과의 일치", () => {
     expect(VOICE_INSTRUCTIONS).toBe(match![1].replaceAll("\r\n", "\n"));
   });
 
-  it("이용자 홈의 새 요청은 /live로 보내고 기존 요청 목록과 알림은 그대로 연결한다", () => {
+  it("이용자 홈의 새 요청은 안내를 거쳐 /live로 보내고 기존 요청 목록과 알림은 그대로 연결한다", () => {
     const merged = readFileSync(path.join(ROOT, "web/public/voice/index.html"), "utf8");
-    expect(merged.match(/<a [^>]*href="\/live"/g)).toHaveLength(2);
+    const guide = readFileSync(path.join(ROOT, "web/public/voice/request.html"), "utf8");
+    expect(merged.match(/<a [^>]*href="\/request"/g)).toHaveLength(2);
+    expect(guide).toContain('<a class="guide-start" href="/live">질문 시작하기</a>');
     expect(merged).not.toContain("fetch('/api/voice/chat'");
     // 합병본은 목록이 이 기기의 요청 목록(진행 상황·리뷰 포함)을 서버에 묻고(2026-11-18 기기 쿠키로 구분), "아직 연결되지 않았다"는 옛 안내를 띄우지 않는다.
     // 요청마다 따로 묻던 옛 방식(GET /api/requests/{id} 반복)은 목록 한 번으로 바뀌었다(시험 변경).

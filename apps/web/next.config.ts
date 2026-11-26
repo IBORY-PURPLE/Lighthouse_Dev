@@ -28,8 +28,9 @@ const nextConfig: NextConfig = {
     return [
       // public/ 폴더는 index.html을 자동으로 찾지 않는다.
       { source: "/speech-probe", destination: "/speech-probe/index.html" },
-      // 이용자 홈과 요청 목록은 정적 페이지다. 새 요청은 /live에서 시작한다.
+      // 이용자 홈·요청 목록과 대화 시작 전 안내는 정적 페이지다.
       { source: "/", destination: "/voice/index.html" },
+      { source: "/request", destination: "/voice/request.html" },
     ];
   },
 };

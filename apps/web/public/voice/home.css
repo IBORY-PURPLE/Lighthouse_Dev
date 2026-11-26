@@ -1,4 +1,5 @@
-.shell:has(.home.active) {
+.shell:has(.home.active),
+.request-guide {
   width: min(calc(100% - 2rem), 24.5rem);
   min-height: 0;
   margin: 4.5rem auto;
@@ -7,11 +8,13 @@
   box-shadow: none;
 }
 
-body:has(.home.active) {
+:root:has(.home.active),
+.request-guide-page {
   background: #e8edf4;
 }
 
-.home {
+.home,
+.request-guide {
   min-height: 40.625rem;
   padding: 1.25rem 1.5rem 2rem;
   border-radius: inherit;
@@ -60,15 +63,84 @@ body:has(.home.active) {
   line-height: 1.55;
 }
 
+.request-guide {
+  box-sizing: border-box;
+  background: #fff;
+  color: #19263a;
+}
+
+.request-guide-page {
+  margin: 0;
+}
+
+.request-guide h1 {
+  margin: 1.25rem 0 0.85rem;
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.guide-lead {
+  margin: 0 0 1.5rem;
+  color: #566780;
+  line-height: 1.6;
+}
+
+.guide-panel {
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  border: 1px solid #cbd6e4;
+  border-radius: 0.8rem;
+  background: #f3f7fd;
+  line-height: 1.6;
+}
+
+.guide-panel h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1rem;
+}
+
+.guide-panel p {
+  margin: 0.65rem 0 0;
+}
+
+.guide-back,
+.guide-start {
+  display: inline-flex;
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.5rem;
+  background: #18263b;
+  color: #fff;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.guide-start {
+  display: flex;
+  width: 100%;
+  min-height: 3.25rem;
+}
+
+.request-guide a:focus-visible {
+  outline: 4px solid #ffad27;
+  outline-offset: 4px;
+}
+
 @media (max-width: 27rem) {
-  .shell:has(.home.active) {
+  .shell:has(.home.active),
+  .request-guide {
     width: 100%;
     margin: 0 auto;
     border: 0;
     border-radius: 0;
   }
 
-  .home {
+  .home,
+  .request-guide {
     min-height: 100dvh;
   }
 }

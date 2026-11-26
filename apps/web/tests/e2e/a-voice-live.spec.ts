@@ -55,6 +55,7 @@ const test = base.extend<{ openai: string[] }>({
 });
 
 test.describe.configure({ timeout: 120_000 });
+test.use({ serviceWorkers: "block" });
 
 const ANSWERS = ["소니 헤드폰", "노이즈 캔슬링 성능", "검정색이면 좋겠어요"] as const;
 const CONFIRM_RE = /^제품은 .*보낼까요\? 이제 천천히 답변해 주세요\.$/;
@@ -138,6 +139,7 @@ async function openLive(page: Page, setup: Setup = {}): Promise<Live> {
   } else if (setup.fromHome) {
     await page.goto("/");
     await page.getByRole("link", { name: "상품 요청", exact: true }).click();
+    await page.getByRole("link", { name: "질문 시작하기" }).click();
     await expect(page).toHaveURL(/\/live$/);
   } else {
     await page.goto("/live");

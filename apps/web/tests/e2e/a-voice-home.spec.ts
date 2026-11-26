@@ -5,7 +5,7 @@ import AxeBuilder from "@axe-core/playwright";
 const BUDGET = "10만 원 이하";
 
 test.describe("/ 이용자 홈과 요청 목록", () => {
-  test("홈의 상품 요청 링크는 운영 음성 대화 화면으로 이동한다", async ({ page }) => {
+  test("홈에서 상품 요청 안내를 읽고 운영 음성 대화 화면으로 이동한다", async ({ page }) => {
     await page.goto("/");
     await expect(page).toHaveTitle("LightHouse · 홈");
     const request = page.getByRole("link", { name: "상품 요청", exact: true });
@@ -17,14 +17,23 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
 
     await request.focus();
     await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/request$/);
+    await expect(page.getByRole("heading", { name: "진행 안내" })).toBeVisible();
+    const guideResults = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+    expect(guideResults.violations).toEqual([]);
+    await page.screenshot({ path: "test-results/voice-request-guide.png" });
+
+    await page.getByRole("link", { name: "질문 시작하기" }).click();
     await expect(page).toHaveURL(/\/live$/);
     await expect(page.getByRole("button", { name: "대화 시작", exact: true })).toBeVisible();
     await page.goBack();
+    await expect(page.getByRole("link", { name: "질문 시작하기" })).toBeVisible();
+    await page.getByRole("link", { name: "뒤로 돌아가기" }).click();
     await expect(request).toBeVisible();
 
     await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
     await expect(page.getByRole("heading", { name: "내 구매 요청", exact: true })).toBeFocused();
-    await expect(page.getByRole("link", { name: "새 구매 요청" })).toHaveAttribute("href", "/live");
+    await expect(page.getByRole("link", { name: "새 구매 요청" })).toHaveAttribute("href", "/request");
 
     await page.goto("/classic");
     await expect(page.getByRole("heading", { level: 1, name: "LightHouse 상품 요청" })).toBeVisible();

@@ -7,7 +7,7 @@
   <h1 class="sr-only" id="home-title" tabindex="-1">LightHouse 상품 요청 서비스</h1>
   <p class="home-lead">상품을 요청하거나 내 구매 요청 목록을 확인할 수 있어요.</p>
   <div class="home-choices">
-    <a class="home-choice" href="/live" aria-labelledby="new-request-title" aria-describedby="new-request-help">
+    <a class="home-choice" href="/request" aria-labelledby="new-request-title" aria-describedby="new-request-help">
       <span class="home-choice-name" id="new-request-title">상품 요청</span>
       <span class="home-choice-help" id="new-request-help">AI와 음성으로 대화해 원하는 상품을 봉사자에게 요청할 수 있어요.</span>
     </a>
@@ -17,7 +17,7 @@
     </button>
   </div>
 </section>
-<section class="screen" id="list"><div class="top"><button class="back" onclick="show('home')" aria-label="처음 화면으로 돌아가기">‹</button><h2 id="list-title" tabindex="-1">내 구매 요청</h2></div><div id="requests"></div><button class="card pending" onclick="show('pending')"><small>상품 탐색 중 · 시연 예시</small><strong>소니 무선 헤드셋</strong><p>봉사자가 상품을 확인하고 있어요.</p></button><button class="card" onclick="show('detail')"><small>저장된 정보</small><strong>소니 무선 헤드셋　›</strong></button><button class="card" onclick="show('detail')"><small>저장된 정보</small><strong>소형 전기밥솥　›</strong></button><a class="primary dark" href="/live">새 구매 요청</a></section>
+<section class="screen" id="list"><div class="top"><button class="back" onclick="show('home')" aria-label="처음 화면으로 돌아가기">‹</button><h2 id="list-title" tabindex="-1">내 구매 요청</h2></div><div id="requests"></div><button class="card pending" onclick="show('pending')"><small>상품 탐색 중 · 시연 예시</small><strong>소니 무선 헤드셋</strong><p>봉사자가 상품을 확인하고 있어요.</p></button><button class="card" onclick="show('detail')"><small>저장된 정보</small><strong>소니 무선 헤드셋　›</strong></button><button class="card" onclick="show('detail')"><small>저장된 정보</small><strong>소형 전기밥솥　›</strong></button><a class="primary dark" href="/request">새 구매 요청</a></section>
 <section class="screen" id="pending"><div class="top"><button class="back" onclick="show('list')" aria-label="요청 목록으로 돌아가기">‹</button><h2>요청 진행 상황</h2></div><div class="detail"><h2>소니 무선 헤드셋</h2><p>현재 봉사자가 상품을 탐색하고 있습니다. 상품 정보가 도착하면 이 목록에서 확인할 수 있습니다.</p></div><button class="primary" onclick="show('list')">요청 목록으로 이동</button></section>
 <section class="screen" id="detail"><div class="top"><button class="back" onclick="show('list')" aria-label="요청 목록으로 돌아가기">‹</button><h2>상품 정보 상세</h2></div><p class="muted">봉사자가 직접 확인하고 검수한 리뷰 한 문단을 안내합니다.</p><article class="detail" aria-label="봉사자 리뷰"><h2>소니 무선 헤드셋</h2><p id="review-text">요청하신 상품은 음악 감상용으로 사용할 소니 무선 헤드셋이며, 노이즈 캔슬링 기능을 선호하셨습니다. 봉사자가 직접 구매해 사용한 제품은 무선 연결이 가능하고 음악을 감상하기에 만족스러웠다고 합니다. 다만 봉사자가 실제로 사용한 제품에는 노이즈 캔슬링 기능이 없었습니다. 판매 페이지에는 노이즈 캔슬링 기능이 포함된 다른 옵션이 표시되어 있지만, 봉사자가 해당 옵션을 직접 사용해 본 것은 아닙니다. 구매 전 선택한 옵션에 노이즈 캔슬링 기능이 포함되는지 확인해 주세요.</p></article><p class="muted">※ 봉사자 사용 경험과 판매 페이지에서 확인한 옵션 정보를 구분해 작성한 시연용 예시입니다. 실제 제품 사양은 검증되지 않았습니다.</p><button class="primary" onclick="show('list')">요청 목록으로 이동</button></section>
 </main><script>
