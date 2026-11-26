@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { DEMO_DONE, DEMO_DONE_CANDIDATES, DEMO_WAITING } from "./demoRequests";
+import { hasForbidden } from "./researchCheck";
 import type {
   QueueData,
   QueueItem,
@@ -47,6 +48,20 @@ export interface StoredRequest {
   review?: string | null;
   /** done일 때 보낸 시각(ISO). */
   sentAt?: string | null;
+  /** 요청을 보낸 기기에서 상세를 열 때만 사용한다. */
+  buyer?: {
+    budget: string;
+    condition: string;
+    reviewInfo?: BuyerReviewInfo;
+  };
+}
+
+export interface BuyerReviewInfo {
+  model: string;
+  purchase: string;
+  experience?: string;
+  research: { label: string; value: string }[];
+  sources: { label: string; url: string }[];
 }
 
 /** 기기별 목록에 담는 개수 상한. */
@@ -63,6 +78,42 @@ export interface DeviceListItem extends StoredRequest {
 function reviewOfCandidates(candidates: readonly { guide: string }[]): string | null {
   const text = candidates.find((candidate) => candidate.guide.trim() !== "")?.guide.trim();
   return text ? text : null;
+}
+
+/** 검수 후 보낸 후보에서 이용자가 볼 수 있는 확정 항목만 고른다. */
+function buyerReviewOfCandidates(candidates: readonly SentCandidate[]): BuyerReviewInfo | undefined {
+  const sent = candidates.find((candidate) => candidate.guide.trim() !== "");
+  if (!sent) return undefined;
+  const summary = new Map(sent.summary.map(({ label, value }) => [label, value]));
+  const purchase = summary.get("구매 인증");
+  if (purchase !== "구매 인증됨" && purchase !== "구매했지만 사진 인증 안 됨" && purchase !== "리서치만") {
+    return undefined;
+  }
+  const experience = summary.get("장점");
+  const research = ["같이 고민한 제품", "고민한 이유"].flatMap((label) => {
+    const value = summary.get(label);
+    return value && !hasForbidden(value) ? [{ label, value }] : [];
+  });
+  const sources: BuyerReviewInfo["sources"] = [];
+  for (const [label, value] of summary) {
+    if (!/^(참고|혜택) 링크 [12]$/.test(label)) continue;
+    const raw = /(?:^|\s)(https:\/\/[^\s]+)$/.exec(value)?.[1];
+    if (!raw) continue;
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== "https:" || url.username || url.password) continue;
+      if (!sources.some((source) => source.url === url.href)) sources.push({ label, url: url.href });
+    } catch {
+      continue;
+    }
+  }
+  return {
+    model: hasForbidden(sent.name) ? "" : sent.name,
+    purchase,
+    experience: purchase !== "리서치만" && experience && !hasForbidden(experience) ? experience : undefined,
+    research,
+    sources,
+  };
 }
 
 export type ClaimOutcome = "claimed" | "already_mine" | "busy" | "taken" | "not_found";
@@ -83,9 +134,10 @@ export interface RequestStore {
   get(requestId: string): Promise<StoredRequest | null>;
   /**
    * 이용자 조회용. 행에 기기 ID가 있고 deviceId와 다르면(또는 deviceId가 null이면) 없는 것처럼 null.
-   * 기기 ID가 없는 행(옛 요청·시연 요청)은 get과 같다.
+   * 기기 ID가 없는 행(옛 요청·시연 요청)은 기본 조회만 허용한다.
+   * withBuyerDetails가 true면 기기 소유를 확인한 뒤 요청 조건과 보낸 리뷰 정보를 포함한다.
    */
-  getForDevice(requestId: string, deviceId: string | null): Promise<StoredRequest | null>;
+  getForDevice(requestId: string, deviceId: string | null, withBuyerDetails?: boolean): Promise<StoredRequest | null>;
   /** 이 기기가 접수한 요청만 최신순으로(DEVICE_LIST_LIMIT개). 끝난 요청에는 리뷰와 보낸 시각이 붙는다. */
   listByDevice(deviceId: string): Promise<DeviceListItem[]>;
   storeKind(): StoreKind;
@@ -304,7 +356,7 @@ export function createMemoryStore(
     return row;
   }
 
-  function storedOf(row: MemoryRow): StoredRequest {
+  function storedOf(row: MemoryRow, withBuyerDetails = false): StoredRequest {
     const sent = row.status === "done" ? state.results.get(row.id) : undefined;
     return {
       requestId: row.id,
@@ -313,6 +365,13 @@ export function createMemoryStore(
       product: row.product,
       ...(sent
         ? { review: reviewOfCandidates(sent.candidates), sentAt: new Date(sent.sentAt).toISOString() }
+        : {}),
+      ...(withBuyerDetails
+        ? { buyer: {
+            budget: row.budget,
+            condition: row.condition,
+            reviewInfo: sent ? buyerReviewOfCandidates(sent.candidates) : undefined,
+          } }
         : {}),
     };
   }
@@ -366,12 +425,14 @@ export function createMemoryStore(
       const row = state.rows.get(requestId);
       return row ? storedOf(row) : null;
     },
-    async getForDevice(requestId, deviceId) {
+    async getForDevice(requestId, deviceId, withBuyerDetails = false) {
       sweep(now());
       const row = state.rows.get(requestId);
       if (!row) return null;
-      if (row.deviceId !== null && row.deviceId !== deviceId) return null;
-      return storedOf(row);
+      if (withBuyerDetails ? !deviceId || row.deviceId !== deviceId : row.deviceId !== null && row.deviceId !== deviceId) {
+        return null;
+      }
+      return storedOf(row, withBuyerDetails);
     },
     async listByDevice(deviceId) {
       sweep(now());
@@ -873,10 +934,14 @@ export function createSupabaseStore(
         .maybeSingle();
       const row = sent.error ? null : (sent.data as Record<string, unknown> | null);
       if (!row) return stored;
+      const candidates = toCandidates(row.candidates);
       return {
         ...stored,
-        review: reviewOfCandidates(toCandidates(row.candidates)),
+        review: reviewOfCandidates(candidates),
         sentAt: typeof row.sent_at === "string" ? row.sent_at : null,
+        ...(stored.buyer
+          ? { buyer: { ...stored.buyer, reviewInfo: buyerReviewOfCandidates(candidates) } }
+          : {}),
       };
     } catch {
       return stored;
@@ -951,14 +1016,16 @@ export function createSupabaseStore(
       if (fellBack) return fallback.get(requestId);
       return getLegacy(requestId);
     },
-    async getForDevice(requestId, deviceId) {
-      if (fellBack) return fallback.getForDevice(requestId, deviceId);
-      if (deviceDegraded()) return getLegacy(requestId);
+    async getForDevice(requestId, deviceId, withBuyerDetails = false) {
+      if (fellBack) return fallback.getForDevice(requestId, deviceId, withBuyerDetails);
+      if (withBuyerDetails && !deviceId) return null;
+      if (deviceDegraded()) return withBuyerDetails ? null : getLegacy(requestId);
+      const columns = "id, queue_number, status, product, created_at, is_demo, device_id";
       let result: DbResult;
       try {
         result = await client
           .from("requests")
-          .select("id, queue_number, status, product, created_at, is_demo, device_id")
+          .select(withBuyerDetails ? `${columns}, budget, condition` : columns)
           .eq("id", requestId)
           .maybeSingle();
       } catch {
@@ -967,13 +1034,21 @@ export function createSupabaseStore(
       if (result.error) {
         if (isMissingSchema(result.error)) {
           deviceFellBackAt = Date.now();
-          return getLegacy(requestId);
+          return withBuyerDetails ? null : getLegacy(requestId);
         }
         throw new StoreUnavailableError("requests select failed");
       }
       const owner = deviceIdOf(result.data);
-      if (owner !== null && owner !== deviceId) return null;
-      return withReview(toStoredRequest(result.data));
+      if (withBuyerDetails ? owner !== deviceId : owner !== null && owner !== deviceId) return null;
+      const stored = toStoredRequest(result.data);
+      if (stored && withBuyerDetails) {
+        const row = result.data as Record<string, unknown>;
+        stored.buyer = {
+          budget: typeof row.budget === "string" ? row.budget : "",
+          condition: typeof row.condition === "string" ? row.condition : "",
+        };
+      }
+      return withReview(stored);
     },
     listByDevice(deviceId) {
       // 이 인스턴스가 통째로 메모리로 떨어졌으면 접수도 메모리에 있으니 같은 곳에서 읽는다.

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { setTimeout as wait } from "node:timers/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -106,6 +107,8 @@ describe("예전 동작 그대로", () => {
   it("한 트랜잭션 안의 두 접수도 created_at이 다르다(now()가 아니라 잠금을 얻은 뒤의 시각)", async () => {
     const ids = await db.transaction(async (tx) => {
       const first = (await tx.query<Registered>(REGISTER, [randomUUID(), "u-tx"])).rows[0];
+      // PGlite에서 같은 밀리초에 두 호출을 실행하면 clock_timestamp()도 같은 값일 수 있다.
+      await wait(20);
       const second = (await tx.query<Registered>(REGISTER, [randomUUID(), "u-tx"])).rows[0];
       return [first.out_request_id, second.out_request_id];
     });

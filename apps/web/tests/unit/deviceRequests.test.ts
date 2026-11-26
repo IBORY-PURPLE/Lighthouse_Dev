@@ -45,9 +45,9 @@ function getList(cookie?: string, client = freshClient()) {
   );
 }
 
-function getById(id: string, cookie?: string) {
+function getById(id: string, cookie?: string, view?: "details") {
   return getOne(
-    new NextRequest(`${ORIGIN}/api/requests/${id}`, {
+    new NextRequest(`${ORIGIN}/api/requests/${id}${view ? "?view=" + view : ""}`, {
       headers: { "x-forwarded-for": freshClient(), ...cookieHeader(cookie) },
     }),
     { params: Promise.resolve({ requestId: id }) },
@@ -333,6 +333,58 @@ describe("단건 조회와 푸시 구독은 요청을 보낸 기기만", () => {
     const { cookie } = await newDevice();
     expect((await getById(legacy.requestId)).status).toBe(200);
     expect((await getById(legacy.requestId, cookie)).status).toBe(200);
+    expect((await getById(legacy.requestId, cookie, "details")).status).toBe(404);
+  });
+
+  it("상세는 보낸 기기에만 요청 조건과 확인한 답변을 주고 완료 뒤에는 발송된 리뷰 정보만 준다", async () => {
+    const owner = await newDevice();
+    const other = await newDevice();
+    const details = {
+      summary: "작업용 조용한 키보드",
+      qa: [{ q: "사용 목적", a: "사무실 업무" }],
+    };
+    const registered = await post(owner.cookie, { product: "키보드", details });
+    const { requestId } = await registered.json() as { requestId: string };
+
+    const open = await getById(requestId, owner.cookie, "details");
+    expect(open.headers.get("cache-control")).toBe("no-store");
+    expect(await open.json()).toMatchObject({
+      buyer: { budget: "10만 원", condition: "새 제품" }, details,
+    });
+    expect(await (await getById(requestId, owner.cookie)).json()).not.toHaveProperty("details");
+    expect((await getById(requestId, other.cookie, "details")).status).toBe(404);
+    expect((await getById(requestId, undefined, "details")).status).toBe(404);
+
+    const store = requestStore.getRequestStore();
+    expect(await store.claim(requestId, "volunteer-1")).toBe("claimed");
+    const completed = await store.complete(requestId, "volunteer-1", [{
+      name: "Quiet Keys",
+      url: "https://example.com/search",
+      guide: "봉사자가 검수한 리뷰입니다.",
+      summary: [
+        { label: "구매 인증", value: "구매 인증됨" },
+        { label: "장점", value: "키 입력이 조용합니다." },
+        { label: "같이 고민한 제품", value: "Silent Keys" },
+        { label: "고민한 이유", value: "가격은 59,000원" },
+        { label: "참고 링크 1", value: "제조사 https://example.com/product" },
+        { label: "혜택 링크 1", value: "https://user:pass@example.com" },
+      ],
+    }]);
+    expect(completed.outcome).toBe("completed");
+    const sent = await (await getById(requestId, owner.cookie, "details")).json();
+    expect(sent).toMatchObject({
+      status: "done",
+      review: "봉사자가 검수한 리뷰입니다.",
+      details: null,
+    });
+    expect(sent.buyer.reviewInfo).toEqual({
+      model: "Quiet Keys",
+      purchase: "구매 인증됨",
+      experience: "키 입력이 조용합니다.",
+      research: [{ label: "같이 고민한 제품", value: "Silent Keys" }],
+      sources: [{ label: "참고 링크 1", url: "https://example.com/product" }],
+    });
+    expect(await (await getById(requestId, owner.cookie)).json()).not.toHaveProperty("buyer");
   });
 
   it("푸시 구독도 다른 기기에서는 404이고 보낸 기기에서는 201이다", async () => {

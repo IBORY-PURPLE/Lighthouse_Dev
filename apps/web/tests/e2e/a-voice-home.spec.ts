@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test.use({ serviceWorkers: "block" });
+
 const BUDGET = "10만 원 이하";
 
 test.describe("/ 이용자 홈과 요청 목록", () => {
@@ -32,7 +34,7 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
     await expect(request).toBeVisible();
 
     await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
-    await expect(page.getByRole("heading", { name: "내 구매 요청", exact: true })).toBeFocused();
+    await expect(page.getByRole("heading", { name: "내 구매 요청 목록", exact: true })).toBeFocused();
     await expect(page.getByRole("link", { name: "새 구매 요청" })).toHaveAttribute("href", "/request");
 
     await page.goto("/classic");
@@ -74,8 +76,8 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
         await device.page.goto("/");
         await device.page.getByRole("button", { name: "내 구매 요청 목록" }).click();
         await expect(device.page.locator("#list")).toHaveClass(/active/);
-        await expect(device.page.locator("#requests .card", { hasText: mine })).toHaveCount(1);
-        await expect(device.page.locator("#requests .card", { hasText: other })).toHaveCount(0);
+        await expect(device.page.locator("#requests .request-card", { hasText: mine })).toHaveCount(1);
+        await expect(device.page.locator("#requests .request-card", { hasText: other })).toHaveCount(0);
       }
       // 서버가 이 기기 목록을 기준으로 주므로 다른 기기 요청 번호의 단건 조회도 막힌다.
       const listA = (await (await a.page.request.get("/api/requests")).json()).items as { requestId: string }[];
@@ -134,16 +136,16 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
     // 전체 목록이 아니면(저장소 폴백 등) 서버가 빈 목록을 줘도 기록을 지키는 쪽이다.
     complete = false;
     await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
-    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
+    await expect(page.locator("#requests .request-card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
     await expect.poll(() => gets).toBeGreaterThanOrEqual(1);
-    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
+    await expect(page.locator("#requests .request-card", { hasText: "서버에 없는 요청" })).toHaveCount(1);
     complete = true;
     await page.evaluate(() => (window as unknown as { refreshRequests: () => Promise<void> }).refreshRequests());
-    await expect(page.locator("#requests .card", { hasText: "서버에 없는 요청" })).toHaveCount(0);
-    await expect(page.locator("#requests .card", { hasText: "서버에서 지워진 요청" })).toHaveCount(0);
-    await expect(page.locator("#requests .card", { hasText: "접수 중인 요청" })).toHaveCount(1);
+    await expect(page.locator("#requests .request-card", { hasText: "서버에 없는 요청" })).toHaveCount(0);
+    await expect(page.locator("#requests .request-card", { hasText: "서버에서 지워진 요청" })).toHaveCount(0);
+    await expect(page.locator("#requests .request-card", { hasText: "접수 중인 요청" })).toHaveCount(1);
     // 기기 쿠키 전 요청은 남고, 단건 조회로 받은 상태(done)와 리뷰로 바뀐다.
-    await expect(page.locator("#requests .card", { hasText: "기기 쿠키 전 요청" })).toHaveCount(1);
+    await expect(page.locator("#requests .request-card", { hasText: "기기 쿠키 전 요청" })).toHaveCount(1);
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("lh-requests") || "[]"));
     expect(stored.find((x: { requestId?: string }) => x.requestId === LEGACY)).toMatchObject({
       status: "done",
@@ -154,26 +156,91 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
     await context.close();
   });
 
-  test("저장된 상품 상세에는 검증 리뷰 한 문단만 있고 후보 목록·구매 링크·가격이 없다", async ({ page }) => {
+  test("B 목록에서 내 요청사항과 봉사자 응답을 각각 열 수 있다", async ({ page }) => {
+    const pending = {
+      requestId: "33333333-3333-4333-8333-333333333333",
+      product: "조용한 키보드",
+      status: "in_progress",
+      queueNumber: 3,
+    };
+    const completed = {
+      requestId: "44444444-4444-4444-8444-444444444444",
+      product: "여행용 헤드폰",
+      status: "done",
+      queueNumber: 4,
+      review: "이동할 때 쓰기 편했어요.",
+      sentAt: "2026-11-25T16:30:00Z",
+    };
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "speechSynthesis", {
+        configurable: true,
+        value: { cancel() {}, speak() { document.body.dataset.spoken = "true"; } },
+      });
+    });
+    await page.route("**/api/requests", route => route.fulfill({ json: { items: [pending, completed], complete: true } }));
+    await page.route("**/api/requests/*?view=details", route => route.fulfill({
+      json: route.request().url().includes(pending.requestId)
+        ? {
+            ...pending,
+            buyer: { budget: "10만 원 이하", condition: "새 제품" },
+            details: { summary: "업무용으로 쓸 조용한 키보드", qa: [{ q: "사용 목적", a: "사무실 업무" }] },
+          }
+        : {
+            ...completed,
+            buyer: {
+              reviewInfo: {
+                model: "Example H2",
+                purchase: "구매 인증됨",
+                experience: "배터리가 오래 갔어요.",
+                research: [{ label: "같이 고민한 제품", value: "Example H3" }],
+                sources: [{ label: "참고 링크 1", url: "https://example.com/headphones" }],
+              },
+            },
+          },
+    }));
+
+    const audit = async () => {
+      const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+      expect(results.violations).toEqual([]);
+    };
     await page.goto("/");
     await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
-    await expect(page.locator("#list")).toHaveClass(/active/);
-    // 이용자 화면은 정적 시연 화면이라 저장된 정보 카드는 모두 이 소니 헤드셋 상세를 연다(서버에서 결과를 받아 그리는 곳은 아직 없다).
-    await page.locator("#list .card:not(.pending)", { hasText: "소니 무선 헤드셋" }).click();
-    const detail = page.locator("#detail");
-    await expect(detail).toHaveClass(/active/);
-    // 읽히는 것은 봉사자가 검수한 리뷰 문단 하나다.
-    const review = detail.getByRole("article", { name: "봉사자 리뷰" });
-    await expect(review).toBeVisible();
-    await expect(review.locator("#review-text")).toContainText("봉사자가 직접 구매해 사용한 제품");
-    await expect(detail.getByRole("link")).toHaveCount(0);
-    // 버튼은 뒤로 가기와 목록으로 이동 둘뿐이다("상품 링크 바로가기"는 없다).
-    await expect(detail.getByRole("button")).toHaveCount(2);
-    await expect(detail.getByRole("button", { name: "요청 목록으로 이동" })).toBeVisible();
-    // 리뷰 상자(article)는 제목과 리뷰 문단 하나뿐이다.
-    await expect(review.locator("p")).toHaveCount(1);
-    const text = await detail.innerText();
-    expect(text).not.toMatch(/링크|\d[\d,]*\s*원|후보|상세 요약/);
-    await page.screenshot({ path: "../../test-results/demo6-shots/user-result-review-only.png", fullPage: true });
+    const first = page.getByRole("article", { name: pending.product });
+    const second = page.getByRole("article", { name: completed.product });
+    await expect(first.getByText("상품 탐색 중")).toBeVisible();
+    await expect(first.getByRole("button", { name: "봉사자 응답 확인하기" })).toHaveCount(0);
+    await expect(second.getByRole("button", { name: "봉사자 응답 확인하기" })).toBeVisible();
+    await expect(page.locator("#requests .request-card")).toHaveCount(2);
+    await expect(page.getByRole("button", { name: "리뷰가 오면 알림 받기" })).toBeVisible();
+    await audit();
+    await page.screenshot({ path: "test-results/b-request-list.png", fullPage: true });
+
+    await first.getByRole("button", { name: "내 요청사항 확인하기" }).click();
+    await expect(page.getByRole("heading", { name: "내 요청 사항 확인" })).toBeFocused();
+    await expect(page.getByText("10만 원 이하", { exact: true })).toBeVisible();
+    await expect(page.getByText("사무실 업무", { exact: true })).toBeVisible();
+    await audit();
+    await page.screenshot({ path: "test-results/b-request-details.png", fullPage: true });
+    await page.getByRole("button", { name: "뒤로 돌아가기" }).click();
+    await expect(first.getByRole("button", { name: "내 요청사항 확인하기" })).toBeFocused();
+
+    await second.getByRole("button", { name: "봉사자 응답 확인하기" }).click();
+    await expect(page.locator("#review-text")).toBeFocused();
+    await expect(page.getByText("2026년 11월 26일", { exact: false })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "봉사자의 직접 사용 경험" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "조사 정보" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /참고 링크 1 열기/ })).toHaveAttribute("href", "https://example.com/headphones");
+    await expect(page.locator("body")).not.toHaveAttribute("data-spoken", "true");
+    await audit();
+    await page.screenshot({ path: "test-results/b-request-review.png", fullPage: true });
+  });
+
+  test("요청 없는 기기에는 빈 화면을 보여 주고 시연 요청을 섞지 않는다", async ({ page }) => {
+    await page.route("**/api/requests", route => route.fulfill({ json: { items: [], complete: true } }));
+    await page.goto("/");
+    await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
+    await expect(page.getByText("아직 등록한 상품 요청이 없습니다.")).toBeVisible();
+    await expect(page.locator("#requests .request-card")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "새 구매 요청" })).toHaveAttribute("href", "/request");
   });
 });

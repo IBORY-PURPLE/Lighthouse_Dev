@@ -1,82 +1,80 @@
-<!doctype html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LightHouse · 홈</title><style>
-:root{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;color:#192638;background:#eef1f6}*{box-sizing:border-box}body{margin:0}.shell{max-width:430px;min-height:100dvh;margin:auto;background:white;box-shadow:0 8px 40px #15233716}.screen{display:none;min-height:100dvh;padding:28px 22px 32px}.screen.active{display:flex;flex-direction:column}button{font:inherit;cursor:pointer}button:focus-visible,a:focus-visible{outline:4px solid #ffad27;outline-offset:4px}.top{display:flex;align-items:center;gap:14px;margin-bottom:25px}h1{font-size:25px;margin:0 0 20px}h2{font-size:21px}.back{border:0;background:#eef3f9;border-radius:12px;min-width:48px;min-height:48px;font-size:22px}.card{width:100%;text-align:left;border:1.5px solid #d1d9e3;border-radius:14px;background:white;padding:17px;margin-bottom:14px;min-height:94px}.card small{display:block;color:#178354;font-weight:700;margin-bottom:7px}.card.pending small{color:#25618b}.card strong{font-size:17px}.card p{color:#6c7887;font-size:13px;margin:9px 0 0}.primary{border:0;background:#205bd6;color:white;border-radius:13px;padding:17px;font-weight:750;min-height:54px;width:100%;margin-top:12px}.dark{display:block;background:#192638;text-align:center;text-decoration:none}.detail{background:#e8f1ff;border:2px solid #3776ff;border-radius:18px;padding:20px;line-height:1.8}.detail h2{margin:0 0 8px}.detail p{font-size:16px}.muted{color:#60728c;font-size:13px;line-height:1.6}.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}a{color:inherit}
-</style>
-<link rel="stylesheet" href="/voice/home.css">
-</head><body><main class="shell">
-<section class="screen home active" id="home" aria-labelledby="home-title">
-  <h1 class="sr-only" id="home-title" tabindex="-1">LightHouse 상품 요청 서비스</h1>
-  <p class="home-lead">상품을 요청하거나 내 구매 요청 목록을 확인할 수 있어요.</p>
-  <div class="home-choices">
-    <a class="home-choice" href="/request" aria-labelledby="new-request-title" aria-describedby="new-request-help">
-      <span class="home-choice-name" id="new-request-title">상품 요청</span>
-      <span class="home-choice-help" id="new-request-help">AI와 음성으로 대화해 원하는 상품을 봉사자에게 요청할 수 있어요.</span>
-    </a>
-    <button class="home-choice home-choice-list" type="button" onclick="show('list')" aria-labelledby="request-list-title" aria-describedby="request-list-help">
-      <span class="home-choice-name" id="request-list-title">내 구매 요청 목록</span>
-      <span class="home-choice-help" id="request-list-help">요청한 상품의 진행 상황과 봉사자 리뷰를 확인할 수 있어요.</span>
-    </button>
-  </div>
-</section>
-<section class="screen" id="list"><div class="top"><button class="back" onclick="show('home')" aria-label="처음 화면으로 돌아가기">‹</button><h2 id="list-title" tabindex="-1">내 구매 요청</h2></div><div id="requests"></div><button class="card pending" onclick="show('pending')"><small>상품 탐색 중 · 시연 예시</small><strong>소니 무선 헤드셋</strong><p>봉사자가 상품을 확인하고 있어요.</p></button><button class="card" onclick="show('detail')"><small>저장된 정보</small><strong>소니 무선 헤드셋　›</strong></button><button class="card" onclick="show('detail')"><small>저장된 정보</small><strong>소형 전기밥솥　›</strong></button><a class="primary dark" href="/request">새 구매 요청</a></section>
-<section class="screen" id="pending"><div class="top"><button class="back" onclick="show('list')" aria-label="요청 목록으로 돌아가기">‹</button><h2>요청 진행 상황</h2></div><div class="detail"><h2>소니 무선 헤드셋</h2><p>현재 봉사자가 상품을 탐색하고 있습니다. 상품 정보가 도착하면 이 목록에서 확인할 수 있습니다.</p></div><button class="primary" onclick="show('list')">요청 목록으로 이동</button></section>
-<section class="screen" id="detail"><div class="top"><button class="back" onclick="show('list')" aria-label="요청 목록으로 돌아가기">‹</button><h2>상품 정보 상세</h2></div><p class="muted">봉사자가 직접 확인하고 검수한 리뷰 한 문단을 안내합니다.</p><article class="detail" aria-label="봉사자 리뷰"><h2>소니 무선 헤드셋</h2><p id="review-text">요청하신 상품은 음악 감상용으로 사용할 소니 무선 헤드셋이며, 노이즈 캔슬링 기능을 선호하셨습니다. 봉사자가 직접 구매해 사용한 제품은 무선 연결이 가능하고 음악을 감상하기에 만족스러웠다고 합니다. 다만 봉사자가 실제로 사용한 제품에는 노이즈 캔슬링 기능이 없었습니다. 판매 페이지에는 노이즈 캔슬링 기능이 포함된 다른 옵션이 표시되어 있지만, 봉사자가 해당 옵션을 직접 사용해 본 것은 아닙니다. 구매 전 선택한 옵션에 노이즈 캔슬링 기능이 포함되는지 확인해 주세요.</p></article><p class="muted">※ 봉사자 사용 경험과 판매 페이지에서 확인한 옵션 정보를 구분해 작성한 시연용 예시입니다. 실제 제품 사양은 검증되지 않았습니다.</p><button class="primary" onclick="show('list')">요청 목록으로 이동</button></section>
-</main><script>
-/* apps/web 합병: 목록이 열려 있는 동안 진행 상황을 다시 묻는 타이머, 실제 요청을 보여 주는 중인지(시연 카드와 구분), 시연 화면의 원래 글. */
-let refreshTimer=null, realScreen=false;
-/* apps/web 합병: 웹 앱(PWA)·웹 푸시(A13). 원본 마크업을 바꾸지 않으려고 head 태그와 [리뷰 알림 받기] 버튼을 스크립트로 붙인다. */
-(function addAppTags(){const add=(tag,attrs)=>{const el=document.createElement(tag);Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v));document.head.appendChild(el)};add('link',{rel:'manifest',href:'/manifest.webmanifest'});add('link',{rel:'apple-touch-icon',href:'/brand/apple-touch-icon.png'});add('meta',{name:'apple-mobile-web-app-capable',content:'yes'});add('meta',{name:'apple-mobile-web-app-title',content:'Lighthouse'});add('meta',{name:'theme-color',content:'#192638'})})();
-if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
-const demoText={detailTitle:document.querySelector('#detail .detail h2').textContent,review:document.getElementById('review-text').textContent,pendingTitle:document.querySelector('#pending .detail h2').textContent,pendingText:document.querySelector('#pending .detail p').textContent};
-function show(id) {
-  window.speechSynthesis?.cancel();
-  document.querySelector('.screen.active').classList.remove('active');
-  document.getElementById(id).classList.add('active');
-  document.title = 'LightHouse · ' + ({ home: '홈', list: '구매 요청 목록', detail: '상품 상세', pending: '진행 상황' }[id]);
-  clearInterval(refreshTimer);
-  if (!realScreen) restoreDemo(id);
-  realScreen = false;
-  if (id === 'home') document.getElementById('home-title').focus();
-  if (id === 'list') {
-    renderRequests();
-    document.getElementById('list-title').focus();
-    refreshTimer = setInterval(refreshRequests, 15000);
-    return refreshRequests();
-  }
-}
-/* apps/web 합병: 기기 기록(lh-requests)에 대화 id(cid)·요청 번호(requestId)·상태·리뷰를 둔다. 예전 기록(번호 없음)은 진행 상황을 모른다고 보인다. */
-function loadRequests(){try{const v=JSON.parse(localStorage.getItem('lh-requests')||'[]');return Array.isArray(v)?v:[]}catch{return[]}}
-function storeRequests(items){try{localStorage.setItem('lh-requests',JSON.stringify(items.slice(0,20)))}catch{}}
-function stateOf(item){return item.requestId?(item.status||'waiting'):(item.cid?'sending':'unknown')}
-const STATUS_TEXT={sending:'요청 접수 중',waiting:'요청 등록 완료 · 봉사자 매칭 대기',in_progress:'봉사자가 상품을 찾는 중',done:'리뷰 도착 · 눌러서 듣기',expired:'요청 시간이 지났어요',unknown:'이전 기록 · 진행 상황을 알 수 없어요'};
-function renderRequests(){const wrap=document.getElementById('requests');wrap.replaceChildren();loadRequests().forEach(item=>{const st=stateOf(item);const b=document.createElement('button');b.className='card'+(st==='done'?'':' pending');const small=document.createElement('small');small.textContent=STATUS_TEXT[st]||STATUS_TEXT.waiting;const strong=document.createElement('strong');strong.textContent=item.product;const p=document.createElement('p');p.textContent=item.summary;b.append(small,strong,p);b.onclick=()=>openRequest(item);wrap.appendChild(b)});renderPushButton()}
-/* 읽어 주기(대화 화면 밖에서도). 화면을 바꾼 뒤 부른다(show가 소리를 끈다). */
-function sayText(t){try{window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='ko-KR';window.speechSynthesis.speak(u)}catch{}}
-const PENDING_TEXT={sending:'요청을 접수하고 있어요. 잠시 뒤 다시 확인해 주세요.',waiting:'요청이 등록되었고 봉사자를 기다리고 있어요. 봉사자가 요청을 맡으면 진행 중으로 바뀌어요.',in_progress:'봉사자가 요청을 맡아 상품을 찾고 있어요. 리뷰가 도착하면 이 목록에서 들을 수 있어요.',done:'리뷰가 도착했지만 내용을 아직 불러오지 못했어요. 잠시 뒤 다시 확인해 주세요.',expired:'요청 시간이 지나 봉사자에게 연결되지 않았어요. 새 구매 요청을 해 주세요.',unknown:'이 기록은 이전 방식으로 저장되어 진행 상황을 확인할 수 없어요. 새 구매 요청을 해 주세요.'};
-function openRequest(item){const st=stateOf(item);if(st==='done'&&item.review){showReview(item);return}const msg=PENDING_TEXT[st]||PENDING_TEXT.waiting;realScreen=true;show('pending');document.querySelector('#pending .detail h2').textContent=item.product;const note=document.querySelector('#pending .detail p');note.textContent=msg;note.setAttribute('tabindex','-1');note.focus()}
-function showReview(item){realScreen=true;show('detail');document.querySelector('#detail .detail h2').textContent=item.product;const text=document.getElementById('review-text');text.textContent=item.review;text.setAttribute('tabindex','-1');text.focus()}
-function restoreDemo(id){if(id==='detail'){document.querySelector('#detail .detail h2').textContent=demoText.detailTitle;document.getElementById('review-text').textContent=demoText.review}if(id==='pending'){document.querySelector('#pending .detail h2').textContent=demoText.pendingTitle;document.querySelector('#pending .detail p').textContent=demoText.pendingText}}
-function listLive(t){let el=document.getElementById('list-live');if(!el){el=document.createElement('div');el.id='list-live';el.className='sr-only';el.setAttribute('aria-live','polite');document.getElementById('list').appendChild(el)}el.textContent=t}
-/* 이 기기가 접수한 요청 목록을 서버에 묻는다(GET /api/requests, 기기 쿠키 lh_device로 구분). 서버 목록이 기준이고, 아직 번호를 못 받은 기기 안 기록(접수 중·접수 실패)만 앞에 남긴다. 서버가 주지 않은 번호의 기록은 서버가 전체 목록(complete)이라고 알릴 때만 지운다(아니면 그대로 둔다). 바뀐 것이 있으면 목록을 다시 그리고 읽어 준다. */
-async function refreshRequests(){let d;try{const r=await fetch('/api/requests',{cache:'no-store'});if(!r.ok)return;d=await r.json()}catch{return}if(!d||!Array.isArray(d.items))return;const onServer=new Set(d.items.map(s=>s.requestId));const checked=new Map();if(d.complete===true){/* 기기 목록에 없는 번호는 한 건씩 물어 400·404일 때만 지운다. 기기 쿠키 전에 접수한 요청(주인 기기 없음)은 단건 조회가 되므로 남는다. */await Promise.all(loadRequests().filter(x=>x.requestId&&!onServer.has(x.requestId)).map(async x=>{try{const r=await fetch('/api/requests/'+encodeURIComponent(x.requestId),{cache:'no-store'});if(r.status===404||r.status===400){checked.set(x.requestId,null);return}if(r.ok)checked.set(x.requestId,await r.json())}catch{}}));}const local=loadRequests();const known=new Map(local.filter(x=>x.requestId).map(x=>[x.requestId,x]));const news=[];const note=(item,status)=>{if(status==='in_progress')news.push(item.product+' 요청을 봉사자가 맡았어요.');if(status==='done')news.push(item.product+' 리뷰가 도착했어요. 목록에서 눌러 들어 보세요.');if(status==='expired')news.push(item.product+' 요청 시간이 지났어요.')};const synced=d.items.map(s=>{const old=known.get(s.requestId);const item=old?{...old}:{cid:'',product:s.product,summary:'접수 번호 '+s.queueNumber+'번',date:new Date(s.createdAt).toLocaleDateString('ko-KR')};item.requestId=s.requestId;if(old&&s.status!==old.status)note(item,s.status);item.status=s.status;if(s.review)item.review=s.review;return item});const unsent=local.filter(x=>!x.requestId);const kept=local.filter(x=>x.requestId&&!onServer.has(x.requestId)&&checked.get(x.requestId)!==null).map(x=>{const s=checked.get(x.requestId);if(!s)return x;const item={...x};if(s.status&&s.status!==x.status)note(item,s.status);if(s.status)item.status=s.status;if(s.review)item.review=s.review;return item});const merged=[...unsent.filter(x=>x.cid),...synced,...kept,...unsent.filter(x=>!x.cid)].slice(0,20);if(JSON.stringify(merged)===JSON.stringify(local))return;storeRequests(merged);if(document.getElementById('list').classList.contains('active')){renderRequests();if(news.length)listLive(news.join(' '))}}
-/* 웹 푸시(A13): [리뷰가 오면 알림 받기]를 누르면 권한을 묻고 구독해, 진행 중인 요청마다 서버에 붙인다. 아이폰은 홈 화면에 추가한 앱에서만 된다. */
-function pushSupported(){return 'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window}
-function isIos(){return /iphone|ipad|ipod/i.test(navigator.userAgent)}
-function isStandalone(){return window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true}
-function pushOn(){try{return pushSupported()&&Notification.permission==='granted'&&localStorage.getItem('lh-push')==='on'}catch{return false}}
-function b64ToBytes(v){const pad='='.repeat((4-v.length%4)%4);const raw=atob((v+pad).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(raw,c=>c.charCodeAt(0))}
-async function pushSubscription(){const key=await fetch('/api/push/key',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);if(!key||!key.publicKey)return null;const reg=await navigator.serviceWorker.register('/sw.js');await navigator.serviceWorker.ready;return (await reg.pushManager.getSubscription())||reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToBytes(key.publicKey)})}
-async function attachPush(requestId,sub){try{const r=await fetch('/api/requests/'+encodeURIComponent(requestId)+'/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sub.toJSON())});return r.ok}catch{return false}}
-function pushTell(t){listLive(t);sayText(t)}
-async function enablePush(){const install='알림을 받으려면 Safari 아래 공유 버튼을 누르고 홈 화면에 추가를 고른 뒤, 홈 화면의 Lighthouse 아이콘으로 열어 주세요.';if(isIos()&&!isStandalone()){pushTell(install);return}if(!pushSupported()){pushTell('이 브라우저는 알림을 지원하지 않아요. 목록을 열면 진행 상황을 확인할 수 있어요.');return}let perm=Notification.permission;if(perm==='default')perm=await Notification.requestPermission();if(perm!=='granted'){pushTell('알림이 꺼져 있어요. 설정에서 Lighthouse 알림을 켜 주세요.');return}const sub=await pushSubscription().catch(()=>null);if(!sub){pushTell('알림 준비에 실패했어요. 잠시 뒤 다시 눌러 주세요.');return}const open=loadRequests().filter(x=>x.requestId&&(x.status==='waiting'||x.status==='in_progress'));await Promise.all(open.map(x=>attachPush(x.requestId,sub)));try{localStorage.setItem('lh-push','on')}catch{}renderPushButton();pushTell(open.length?'리뷰가 도착하면 알림으로 알려 드릴게요.':'알림을 켰어요. 다음 요청부터 리뷰가 도착하면 알려 드릴게요.')}
-function renderPushButton(){const list=document.getElementById('list');let btn=document.getElementById('push-btn');if(!btn){btn=document.createElement('button');btn.id='push-btn';btn.className='card';btn.onclick=()=>enablePush();list.insertBefore(btn,document.getElementById('requests'))}const on=pushOn();btn.replaceChildren();const small=document.createElement('small');small.textContent=on?'알림 켜짐':'알림';const strong=document.createElement('strong');strong.textContent=on?'리뷰가 오면 알림으로 알려 드려요':'리뷰가 오면 알림 받기';btn.append(small,strong)}
-/* 알림 등에서 /?request=<요청 번호>로 열면 목록을 열고, 리뷰가 와 있으면 바로 리뷰 화면으로 간다. */
-async function openFromLink() {
-  const id = new URLSearchParams(location.search).get('request');
-  if (!id) return;
-  await show('list');
-  if (!document.getElementById('list').classList.contains('active')) return;
-  const item = loadRequests().find(x => x.requestId === id);
-  if (item?.status === 'done' && item.review) showReview(item);
-}
-openFromLink();
-</script></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e8edf4">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Lighthouse">
+  <title>LightHouse · 홈</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <link rel="stylesheet" href="/voice/home.css">
+  <link rel="stylesheet" href="/voice/requests.css">
+  <script src="/voice/requests.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <section class="screen home active" id="home" aria-labelledby="home-title">
+      <h1 class="sr-only" id="home-title" tabindex="-1">LightHouse 상품 요청 서비스</h1>
+      <p class="home-lead">상품을 요청하거나 내 구매 요청 목록을 확인할 수 있어요.</p>
+      <div class="home-choices">
+        <a class="home-choice" href="/request" aria-labelledby="new-request-title" aria-describedby="new-request-help">
+          <span class="home-choice-name" id="new-request-title">상품 요청</span>
+          <span class="home-choice-help" id="new-request-help">AI와 음성으로 대화해 원하는 상품을 봉사자에게 요청할 수 있어요.</span>
+        </a>
+        <button class="home-choice home-choice-list" type="button" data-screen="list" aria-labelledby="request-list-title" aria-describedby="request-list-help">
+          <span class="home-choice-name" id="request-list-title">내 구매 요청 목록</span>
+          <span class="home-choice-help" id="request-list-help">요청한 상품의 진행 상황과 봉사자 리뷰를 확인할 수 있어요.</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="screen requests-screen" id="list" aria-labelledby="list-title" hidden>
+      <h1 id="list-title" tabindex="-1">내 구매 요청 목록</h1>
+      <button class="request-back" type="button" data-screen="home">뒤로 돌아가기</button>
+      <p id="list-live" class="sr-only" role="status"></p>
+      <p id="requests-empty" class="requests-empty" hidden></p>
+      <div id="requests" class="request-list"></div>
+      <div class="request-tools">
+        <button class="request-action request-secondary" id="push-btn" type="button">리뷰가 오면 알림 받기</button>
+        <a class="request-action" href="/request">새 구매 요청</a>
+      </div>
+    </section>
+
+    <section class="screen requests-screen" id="details" aria-labelledby="details-title" hidden>
+      <h1 id="details-title" tabindex="-1">내 요청 사항 확인</h1>
+      <button class="request-back" type="button" data-screen="list">뒤로 돌아가기</button>
+      <article class="request-detail" aria-labelledby="details-product">
+        <h2 id="details-product"></h2>
+        <p class="request-status" id="details-status"></p>
+        <p id="details-message"></p>
+        <dl class="request-facts" id="details-facts"></dl>
+      </article>
+    </section>
+
+    <section class="screen requests-screen" id="review" aria-labelledby="review-title" hidden>
+      <h1 id="review-title" tabindex="-1">봉사자 응답 확인</h1>
+      <button class="request-back" type="button" data-screen="list">뒤로 돌아가기</button>
+      <article class="request-detail" aria-label="봉사자 리뷰">
+        <h2 id="review-product"></h2>
+        <p id="review-meta" class="review-meta" hidden></p>
+        <section class="review-part" aria-labelledby="review-text-title">
+          <h3 id="review-text-title">검수를 마친 리뷰</h3>
+          <p id="review-text" tabindex="-1"></p>
+        </section>
+        <section class="review-part" aria-labelledby="review-experience-title" id="review-experience" hidden>
+          <h3 id="review-experience-title">봉사자의 직접 사용 경험</h3>
+          <p id="review-experience-text"></p>
+        </section>
+        <section class="review-part" aria-labelledby="review-research-title" id="review-research" hidden>
+          <h3 id="review-research-title">조사 정보</h3>
+          <dl class="request-facts" id="review-research-facts"></dl>
+        </section>
+        <p class="review-notice" id="review-notice" hidden>상품 정보와 판매 조건은 달라질 수 있습니다.</p>
+      </article>
+      <div class="review-links" id="review-links"></div>
+    </section>
+  </main>
+</body>
+</html>

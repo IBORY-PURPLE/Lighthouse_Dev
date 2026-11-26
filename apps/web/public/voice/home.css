@@ -1,4 +1,4 @@
-.shell:has(.home.active),
+.shell,
 .request-guide {
   width: min(calc(100% - 2rem), 24.5rem);
   min-height: 0;
@@ -8,7 +8,7 @@
   box-shadow: none;
 }
 
-:root:has(.home.active),
+:root:has(.shell),
 .request-guide-page {
   background: #e8edf4;
 }
@@ -131,7 +131,7 @@
 }
 
 @media (max-width: 27rem) {
-  .shell:has(.home.active),
+  .shell,
   .request-guide {
     width: 100%;
     margin: 0 auto;
