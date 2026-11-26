@@ -62,31 +62,10 @@ describe("원본(apps/user-voice-ui)과의 일치", () => {
     expect(VOICE_INSTRUCTIONS).toBe(match![1].replaceAll("\r\n", "\n"));
   });
 
-  it("공개 화면(public/voice/index.html)의 마크업·스타일은 원본과 같고, 스크립트는 호출 주소와 접수만 다르다", () => {
-    const original = readFileSync(path.join(ROOT, "user-voice-ui/public/index.html"), "utf8");
+  it("이용자 홈의 새 요청은 /live로 보내고 기존 요청 목록과 알림은 그대로 연결한다", () => {
     const merged = readFileSync(path.join(ROOT, "web/public/voice/index.html"), "utf8");
-    const head = (html: string) => {
-      const text = html.replaceAll("\r\n", "\n");
-      return text.slice(0, text.indexOf("</main><script>"));
-    };
-    expect(head(merged)).toBe(head(original));
-    expect(merged).toContain("fetch('/api/voice/chat'");
-    expect(merged).not.toContain("fetch('/api/chat'");
-    expect(merged).toContain("fetch('/api/requests'");
-    // 원본의 음성 인식·읽어 주기·VoiceOver 처리 함수가 그대로 있다.
-    for (const piece of [
-      "function speak(t,cb)",
-      "function listen()",
-      "recognition.lang='ko-KR'",
-      "u.lang='ko-KR'",
-      "aria-hidden=\"true\"",
-      "prefers-reduced-motion",
-      // 합병본은 요청 번호를 같이 저장하려고 대화 id 인자를 하나 더 받는다(앞 두 인자는 같다).
-      "function saveRequest(product,summary",
-    ]) {
-      expect(merged).toContain(piece);
-      expect(original).toContain(piece);
-    }
+    expect(merged.match(/<a [^>]*href="\/live"/g)).toHaveLength(2);
+    expect(merged).not.toContain("fetch('/api/voice/chat'");
     // 합병본은 목록이 이 기기의 요청 목록(진행 상황·리뷰 포함)을 서버에 묻고(2026-11-18 기기 쿠키로 구분), "아직 연결되지 않았다"는 옛 안내를 띄우지 않는다.
     // 요청마다 따로 묻던 옛 방식(GET /api/requests/{id} 반복)은 목록 한 번으로 바뀌었다(시험 변경).
     // 다만 기기 목록에 없는 번호는 한 건씩 물어 400·404일 때만 지운다(기기 쿠키 전 요청은 남김, 2026-11-18 이용자 결정).
@@ -94,7 +73,7 @@ describe("원본(apps/user-voice-ui)과의 일치", () => {
     expect(merged).not.toContain("fetch('/api/requests/'+encodeURIComponent(item.requestId),{cache");
     expect(merged).toContain("if(r.status===404||r.status===400){checked.set(x.requestId,null);return}");
     expect(merged).not.toContain("아직 연결되지 않았습니다");
-    // 웹 앱(PWA)·웹 푸시(A13): head 태그와 알림 버튼은 스크립트로 붙인다(마크업은 원본과 같다).
+    // 웹 앱(PWA)·웹 푸시(A13): head 태그와 알림 버튼은 스크립트로 붙인다.
     expect(merged).toContain("rel:'manifest',href:'/manifest.webmanifest'");
     expect(merged).toContain("fetch('/api/push/key'");
   });

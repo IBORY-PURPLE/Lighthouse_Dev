@@ -450,10 +450,10 @@ test.describe("봉사자 화면(시연)", () => {
     const box = await link.boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(44);
     await link.click();
-    // /는 이제 apps/user-voice-ui 화면이다(고정 질문 화면은 /classic).
+    // /는 이용자 홈이고 고정 질문 화면은 /classic이다.
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("button", { name: "상품 요청", exact: true })).toBeVisible();
-    await expect(page).toHaveTitle("LightHouse MVP");
+    await expect(page.getByRole("link", { name: "상품 요청", exact: true })).toBeVisible();
+    await expect(page).toHaveTitle("LightHouse · 홈");
   });
 
   test("깨진 저장값은 매칭 정보 없음으로 처리한다", async ({ page }) => {

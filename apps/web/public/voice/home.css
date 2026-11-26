@@ -1,0 +1,74 @@
+.shell:has(.home.active) {
+  width: min(calc(100% - 2rem), 24.5rem);
+  min-height: 0;
+  margin: 4.5rem auto;
+  border: 1px solid #cbd6e4;
+  border-radius: 1rem;
+  box-shadow: none;
+}
+
+body:has(.home.active) {
+  background: #e8edf4;
+}
+
+.home {
+  min-height: 40.625rem;
+  padding: 1.25rem 1.5rem 2rem;
+  border-radius: inherit;
+  font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+}
+
+.home-lead {
+  margin: 4.4rem 0 1.7rem;
+  color: #566780;
+  line-height: 1.6;
+}
+
+.home-choices {
+  display: grid;
+  gap: 1rem;
+}
+
+.home-choice {
+  display: grid;
+  width: 100%;
+  min-height: 9.375rem;
+  align-content: center;
+  gap: 0.8rem;
+  padding: 1.25rem;
+  border: 2px solid #20a75a;
+  border-radius: 1rem;
+  background: #eaf9f0;
+  color: #19263a;
+  font: inherit;
+  text-align: center;
+  text-decoration: none;
+}
+
+.home-choice-list {
+  border-color: #417bff;
+  background: #eaf2ff;
+}
+
+.home-choice-name {
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.home-choice-help {
+  color: #566780;
+  line-height: 1.55;
+}
+
+@media (max-width: 27rem) {
+  .shell:has(.home.active) {
+    width: 100%;
+    margin: 0 auto;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .home {
+    min-height: 100dvh;
+  }
+}
