@@ -44,6 +44,7 @@ export interface StoredRequest {
   queueNumber: number;
   status: RequestStatus;
   product: string;
+  createdAt?: string;
   /** done일 때 봉사자가 보낸 리뷰 문단(이용자 화면이 읽어 준다). 없으면 null. */
   review?: string | null;
   /** done일 때 보낸 시각(ISO). */
@@ -363,6 +364,7 @@ export function createMemoryStore(
       queueNumber: row.queueNumber,
       status: row.status,
       product: row.product,
+      createdAt: new Date(row.createdAt).toISOString(),
       ...(sent
         ? { review: reviewOfCandidates(sent.candidates), sentAt: new Date(sent.sentAt).toISOString() }
         : {}),
@@ -725,6 +727,7 @@ function toStoredRequest(data: unknown): StoredRequest | null {
     queueNumber: row.queue_number,
     status,
     product: row.product,
+    ...(typeof row.created_at === "string" ? { createdAt: row.created_at } : {}),
   };
 }
 

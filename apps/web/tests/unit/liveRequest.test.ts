@@ -370,7 +370,6 @@ describe("saveLiveRecord", () => {
         product: "소니 헤드셋",
         summary: "요약",
         date: NOW.toLocaleDateString("ko-KR"),
-        createdAt: NOW.toISOString(),
         status: "waiting",
         requestId: "req-1",
       },

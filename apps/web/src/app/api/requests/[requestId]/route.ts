@@ -76,6 +76,7 @@ async function handleGet(request: NextRequest, requestId: string): Promise<Outco
         queueNumber: row.queueNumber,
         status: row.status,
         product: row.product,
+        createdAt: row.createdAt,
         // 끝난 요청이면 봉사자가 보낸 리뷰 문단과 보낸 시각(이용자 화면이 읽어 준다).
         ...(row.status === "done" ? { review: row.review ?? null, sentAt: row.sentAt ?? null } : {}),
         ...(withBuyerDetails ? { buyer: row.buyer, details } : {}),

@@ -153,7 +153,11 @@ function updateItem(old, row) {
 async function checkSavedRequest(id) {
   try {
     const response = await fetch(requestUrl(id), { cache: 'no-store' });
-    if (response.status === 400 || response.status === 404) return null;
+    if (response.status === 400) return null;
+    if (response.status === 404) {
+      const body = await response.json();
+      return body.persistent === false ? undefined : null;
+    }
     if (response.ok) return await response.json();
   } catch { /* 연결이 끊긴 동안에는 기기 기록을 유지한다. */ }
 }
@@ -174,6 +178,7 @@ function announceChanges(previous, next) {
 }
 
 async function syncRequests() {
+  const knownAtStart = new Set(loadRequests(items).map(item => item.requestId));
   let response;
   try {
     const result = await fetch('/api/requests', { cache: 'no-store' });
@@ -197,18 +202,20 @@ async function syncRequests() {
   const synced = response.items.map(row => updateItem(cached.get(row.requestId) || {}, row));
   const kept = local.filter(item => item.requestId && !serverIds.has(item.requestId)).flatMap(item => {
     const row = checked.get(item.requestId);
-    if (row === null) return [];
+    if (row === null && knownAtStart.has(item.requestId)) return [];
     return [row ? updateItem(item, row) : item];
   });
   const sending = local.filter(item => !item.requestId && item.cid);
   const legacy = local.filter(item => !item.requestId && !item.cid);
   const newestListedAt = Date.parse(synced[0]?.createdAt ?? '');
-  const highestListedNumber = Math.max(0, ...synced.map(item => item.queueNumber ?? 0));
+  const newestListedNumber = synced[0]?.queueNumber ?? 0;
   const newer = [];
   const older = [];
   for (const item of kept) {
     const time = Date.parse(item.createdAt ?? '');
-    const isNewer = time > newestListedAt || item.queueNumber > highestListedNumber;
+    const hasServerTime = Number.isFinite(time) && Number.isFinite(newestListedAt);
+    const isNewer = (!checked.get(item.requestId) && !knownAtStart.has(item.requestId))
+      || (hasServerTime && (time > newestListedAt || (time === newestListedAt && item.queueNumber > newestListedNumber)));
     (isNewer ? newer : older).push(item);
   }
   // 이전 서버 응답이 20건을 채워도, 그 응답보다 늦게 접수한 요청부터 보존한다.

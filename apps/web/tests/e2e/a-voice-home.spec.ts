@@ -249,15 +249,15 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
       requestId: "55555555-5555-4555-8555-555555555555",
       product: "접이식 키보드",
       status: "waiting",
-      queueNumber: 21,
-      createdAt: "2026-11-27T10:00:01Z",
+      queueNumber: 1,
+      createdAt: "2026-11-27T15:00:01Z",
     };
     const older = Array.from({ length: 20 }, (_, index) => ({
       requestId: randomUUID(),
       product: "이전 요청 " + (20 - index),
       status: "waiting",
       queueNumber: 20 - index,
-      createdAt: "2026-11-27T10:00:00Z",
+      createdAt: "2026-11-27T14:59:59Z",
     }));
     let finishList!: () => void;
     const listReady = new Promise<void>(resolve => { finishList = resolve; });
@@ -274,7 +274,10 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
     await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
     await listStarted;
     await otherTab.evaluate(item => localStorage.setItem("lh-requests", JSON.stringify([item])), {
-      ...request,
+      requestId: request.requestId,
+      product: request.product,
+      status: request.status,
+      createdAt: "2026-11-27T14:58:00Z",
       summary: "출장에 들고 다닐 작은 키보드",
     });
     finishList();
