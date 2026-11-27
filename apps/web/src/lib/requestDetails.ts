@@ -5,7 +5,7 @@ import type { RequestDetailsView, RequestQa } from "./volunteerView";
 
 /**
  * 이용자 음성 요청의 확인 요약과 질문·답(봉사자 브리핑). 서버 전용.
- * - 접수(POST /api/requests) 때 이용자가 말한 그대로 저장한다. 맡은 봉사자 1명에게만, 그 요청이 진행 중인 동안만 내보낸다.
+ * - 접수(POST /api/requests) 때 저장한다. 대기·진행 중 본인이 접수한 기기와, 진행 중 담당 봉사자가 읽을 수 있다.
  * - 요청이 done·expired가 되면 지운다(DB는 트리거, 메모리는 onRequestLeave). 요청이 지워지면 함께 지워진다.
  * - Supabase 표 request_details가 없거나(마이그레이션 전) 못 쓰면 던지지 않고 "unavailable"·"failed"로 알린다. 접수는 그대로 된다.
  * - 글은 로그·OpenAI 기록·봉사자 기기에 남기지 않는다.

@@ -243,4 +243,33 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
     await expect(page.locator("#requests .request-card")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "새 구매 요청" })).toHaveAttribute("href", "/request");
   });
+
+  test("목록을 불러오는 동안 다른 탭에서 기록한 요청 요약을 보존한다", async ({ context, page }) => {
+    const request = {
+      requestId: "55555555-5555-4555-8555-555555555555",
+      product: "접이식 키보드",
+      status: "waiting",
+      queueNumber: 5,
+    };
+    let finishList!: () => void;
+    const listReady = new Promise<void>(resolve => { finishList = resolve; });
+    await page.route("**/api/requests", async route => {
+      await listReady;
+      await route.fulfill({ json: { items: [request], complete: true } });
+    });
+    await page.route("**/api/requests/*?view=details", route => route.fulfill({ status: 404 }));
+    const otherTab = await context.newPage();
+    await otherTab.goto("/");
+    await page.goto("/");
+    const listStarted = page.waitForRequest(req => new URL(req.url()).pathname === "/api/requests");
+    await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
+    await listStarted;
+    await otherTab.evaluate(item => localStorage.setItem("lh-requests", JSON.stringify([item])), {
+      ...request,
+      summary: "출장에 들고 다닐 작은 키보드",
+    });
+    finishList();
+    await page.getByRole("article", { name: request.product }).getByRole("button", { name: "내 요청사항 확인하기" }).click();
+    await expect(page.getByText("출장에 들고 다닐 작은 키보드", { exact: true })).toBeVisible();
+  });
 });

@@ -22,14 +22,14 @@ const statuses = {
   unknown: ['이전 기록', '이전 요청이라 진행 상황을 확인할 수 없어요.'],
 };
 
-function loadRequests() {
+function loadRequests(fallback = []) {
   try {
     const value = JSON.parse(localStorage.getItem(listKey) || '[]');
     return Array.isArray(value)
       ? value.filter(item => item && typeof item.product === 'string').slice(0, listLimit)
       : [];
   } catch {
-    return [];
+    return fallback;
   }
 }
 
@@ -149,13 +149,12 @@ function updateItem(old, row) {
   return item;
 }
 
-async function checkSavedRequest(item) {
+async function checkSavedRequest(id) {
   try {
-    const response = await fetch(requestUrl(item.requestId), { cache: 'no-store' });
+    const response = await fetch(requestUrl(id), { cache: 'no-store' });
     if (response.status === 400 || response.status === 404) return null;
-    if (response.ok) return updateItem(item, await response.json());
+    if (response.ok) return await response.json();
   } catch { /* 연결이 끊긴 동안에는 기기 기록을 유지한다. */ }
-  return item;
 }
 
 function announceChanges(previous, next) {
@@ -185,16 +184,23 @@ async function syncRequests() {
     return;
   }
 
-  const previous = items;
   const serverIds = new Set(response.items.map(row => row.requestId));
-  const cached = new Map(previous.filter(item => item.requestId).map(item => [item.requestId, item]));
+  const missing = loadRequests(items).filter(item => item.requestId && !serverIds.has(item.requestId));
+  const checked = new Map(response.complete === true
+    ? await Promise.all(missing.map(async item => [item.requestId, await checkSavedRequest(item.requestId)]))
+    : []);
+  // 기다리는 동안 다른 탭에서 접수했을 수 있어, 마지막에 기기 기록을 다시 읽는다.
+  const previous = items;
+  const local = loadRequests(items);
+  const cached = new Map(local.filter(item => item.requestId).map(item => [item.requestId, item]));
   const synced = response.items.map(row => updateItem(cached.get(row.requestId) || {}, row));
-  const missing = previous.filter(item => item.requestId && !serverIds.has(item.requestId));
-  const kept = response.complete === true
-    ? (await Promise.all(missing.map(checkSavedRequest))).filter(Boolean)
-    : missing;
-  const sending = previous.filter(item => !item.requestId && item.cid);
-  const legacy = previous.filter(item => !item.requestId && !item.cid);
+  const kept = local.filter(item => item.requestId && !serverIds.has(item.requestId)).flatMap(item => {
+    const row = checked.get(item.requestId);
+    if (row === null) return [];
+    return [row ? updateItem(item, row) : item];
+  });
+  const sending = local.filter(item => !item.requestId && item.cid);
+  const legacy = local.filter(item => !item.requestId && !item.cid);
   const next = [...sending, ...synced, ...kept, ...legacy].slice(0, listLimit);
   const shouldRender = listState !== 'ready' || JSON.stringify(previous) !== JSON.stringify(next);
   listState = 'ready';
@@ -371,8 +377,10 @@ async function enablePush() {
 async function openFromLink() {
   const id = new URLSearchParams(location.search).get('request');
   if (!id) return;
-  await show('list');
-  if (activeScreen !== 'list') return;
+  const opened = show('list');
+  const displayed = viewSequence;
+  await opened;
+  if (viewSequence !== displayed) return;
   const item = items.find(request => request.requestId === id);
   if (item?.status === 'done' && item.review) openReview(item);
 }
