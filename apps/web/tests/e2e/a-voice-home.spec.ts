@@ -259,11 +259,12 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
       queueNumber: 20 - index,
       createdAt: "2026-11-27T14:59:59Z",
     }));
+    let complete = false;
     let finishList!: () => void;
     const listReady = new Promise<void>(resolve => { finishList = resolve; });
     await page.route("**/api/requests", async route => {
       await listReady;
-      await route.fulfill({ json: { items: older, complete: true } });
+      await route.fulfill({ json: { items: older, complete } });
     });
     await page.route("**/api/requests/" + request.requestId + "?view=order", route => route.fulfill({ json: request }));
     await page.route("**/api/requests/*?view=details", route => route.fulfill({ status: 404 }));
@@ -274,10 +275,10 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
     await page.getByRole("button", { name: "내 구매 요청 목록" }).click();
     await listStarted;
     await otherTab.evaluate(item => localStorage.setItem("lh-requests", JSON.stringify([item])), {
+      cid: randomUUID(),
       requestId: request.requestId,
       product: request.product,
       status: request.status,
-      createdAt: "2026-11-27T14:58:00Z",
       summary: "출장에 들고 다닐 작은 키보드",
     });
     finishList();
@@ -285,6 +286,11 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
     await expect(page.locator("#requests .request-card")).toHaveCount(20);
     await page.evaluate(() => (window as unknown as { refreshRequests: () => Promise<void> }).refreshRequests());
     await expect(page.locator("#requests .request-card").first()).toHaveAccessibleName(request.product);
+    complete = true;
+    await page.evaluate(() => (window as unknown as { refreshRequests: () => Promise<void> }).refreshRequests());
+    await expect(page.locator("#requests .request-card").first()).toHaveAccessibleName(request.product);
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("lh-requests") ?? "[]")[0]?.createdAt))
+      .toBe(request.createdAt);
     await page.getByRole("article", { name: request.product }).getByRole("button", { name: "내 요청사항 확인하기" }).click();
     await expect(page.getByText("출장에 들고 다닐 작은 키보드", { exact: true })).toBeVisible();
   });

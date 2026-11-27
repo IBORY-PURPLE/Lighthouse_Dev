@@ -207,19 +207,21 @@ async function syncRequests() {
   });
   const sending = local.filter(item => !item.requestId && item.cid);
   const legacy = local.filter(item => !item.requestId && !item.cid);
-  const newestListedAt = Date.parse(synced[0]?.createdAt ?? '');
-  const newestListedNumber = synced[0]?.queueNumber ?? 0;
-  const newer = [];
-  const older = [];
+  const unsynced = [];
+  const confirmed = [...synced];
   for (const item of kept) {
     const time = Date.parse(item.createdAt ?? '');
-    const hasServerTime = Number.isFinite(time) && Number.isFinite(newestListedAt);
-    const isNewer = (!checked.get(item.requestId) && !knownAtStart.has(item.requestId))
-      || (hasServerTime && (time > newestListedAt || (time === newestListedAt && item.queueNumber > newestListedNumber)));
-    (isNewer ? newer : older).push(item);
+    const notYetListed = (item.cid && !Number.isFinite(time))
+      || (!checked.get(item.requestId) && !knownAtStart.has(item.requestId));
+    (notYetListed ? unsynced : confirmed).push(item);
   }
-  // 이전 서버 응답이 20건을 채워도, 그 응답보다 늦게 접수한 요청부터 보존한다.
-  const next = [...sending, ...newer, ...synced, ...older, ...legacy].slice(0, listLimit);
+  confirmed.sort((a, b) => {
+    const timeA = Date.parse(a.createdAt ?? '') || 0;
+    const timeB = Date.parse(b.createdAt ?? '') || 0;
+    return timeB - timeA || (timeA ? (b.queueNumber ?? 0) - (a.queueNumber ?? 0) : 0);
+  });
+  // 서버에서 접수 시각을 받을 때까지, 이 기기가 방금 저장한 접수 기록을 먼저 보존한다.
+  const next = [...sending, ...unsynced, ...confirmed, ...legacy].slice(0, listLimit);
   const shouldRender = listState !== 'ready' || JSON.stringify(previous) !== JSON.stringify(next);
   listState = 'ready';
   if (!shouldRender) return;
