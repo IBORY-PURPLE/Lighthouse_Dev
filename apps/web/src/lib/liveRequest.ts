@@ -224,6 +224,7 @@ export function saveLiveRecord(
       product: record.product,
       summary: record.summary,
       date: now.toLocaleDateString("ko-KR"),
+      createdAt: now.toISOString(),
       status: record.status || "waiting",
       requestId: record.requestId,
     };

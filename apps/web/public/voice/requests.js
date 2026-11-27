@@ -138,6 +138,7 @@ function updateItem(old, row) {
     product: row.product || old.product,
     status: row.status || old.status,
     queueNumber: row.queueNumber ?? old.queueNumber,
+    createdAt: row.createdAt ?? old.createdAt,
   };
   if (item.status === 'done') {
     item.review = row.review ?? old.review;
@@ -201,7 +202,17 @@ async function syncRequests() {
   });
   const sending = local.filter(item => !item.requestId && item.cid);
   const legacy = local.filter(item => !item.requestId && !item.cid);
-  const next = [...sending, ...synced, ...kept, ...legacy].slice(0, listLimit);
+  const newestListedAt = Date.parse(synced[0]?.createdAt ?? '');
+  const highestListedNumber = Math.max(0, ...synced.map(item => item.queueNumber ?? 0));
+  const newer = [];
+  const older = [];
+  for (const item of kept) {
+    const time = Date.parse(item.createdAt ?? '');
+    const isNewer = time > newestListedAt || item.queueNumber > highestListedNumber;
+    (isNewer ? newer : older).push(item);
+  }
+  // 이전 서버 응답이 20건을 채워도, 그 응답보다 늦게 접수한 요청부터 보존한다.
+  const next = [...sending, ...newer, ...synced, ...older, ...legacy].slice(0, listLimit);
   const shouldRender = listState !== 'ready' || JSON.stringify(previous) !== JSON.stringify(next);
   listState = 'ready';
   if (!shouldRender) return;
