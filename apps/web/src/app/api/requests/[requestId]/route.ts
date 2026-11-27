@@ -47,7 +47,8 @@ async function handleGet(request: NextRequest, requestId: string): Promise<Outco
   }
 
   const store = getRequestStore();
-  const withBuyerDetails = request.nextUrl.searchParams.get("view") === "details";
+  const view = request.nextUrl.searchParams.get("view");
+  const withBuyerDetails = view === "details";
   const startedAt = Date.now();
   let row: StoredRequest | null;
   try {
@@ -76,7 +77,7 @@ async function handleGet(request: NextRequest, requestId: string): Promise<Outco
         queueNumber: row.queueNumber,
         status: row.status,
         product: row.product,
-        createdAt: row.createdAt,
+        ...(view === "order" ? { createdAt: row.createdAt } : {}),
         // 끝난 요청이면 봉사자가 보낸 리뷰 문단과 보낸 시각(이용자 화면이 읽어 준다).
         ...(row.status === "done" ? { review: row.review ?? null, sentAt: row.sentAt ?? null } : {}),
         ...(withBuyerDetails ? { buyer: row.buyer, details } : {}),

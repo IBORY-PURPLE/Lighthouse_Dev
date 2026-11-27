@@ -152,7 +152,7 @@ function updateItem(old, row) {
 
 async function checkSavedRequest(id) {
   try {
-    const response = await fetch(requestUrl(id), { cache: 'no-store' });
+    const response = await fetch(requestUrl(id) + '?view=order', { cache: 'no-store' });
     if (response.status === 400) return null;
     if (response.status === 404) {
       const body = await response.json();

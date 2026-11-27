@@ -26,8 +26,9 @@ function postRequest(body: unknown, { client }: { client?: string } = {}) {
   });
 }
 
-function getRequest(id: string, { client }: { client?: string } = {}) {
-  return GET(new NextRequest(`${ORIGIN}/api/requests/${id}`, { headers: headers(client) }), {
+function getRequest(id: string, { client, view }: { client?: string; view?: "order" } = {}) {
+  const suffix = view ? "?view=" + view : "";
+  return GET(new NextRequest(`${ORIGIN}/api/requests/${id}${suffix}`, { headers: headers(client) }), {
     params: Promise.resolve({ requestId: id }),
   });
 }
@@ -312,8 +313,10 @@ describe("GET /api/requests/[requestId] (메모리 저장소)", () => {
       queueNumber: created.queueNumber,
       status: "waiting",
       product: PRODUCT,
-      createdAt: expect.any(String),
     });
+    const ordered = await (await getRequest(created.requestId, { view: "order" })).json();
+    expect(ordered.createdAt).toEqual(expect.any(String));
+    expect(ordered).not.toHaveProperty("details");
   });
 
   it("봉사자가 맡으면 in_progress, 보내면 done과 리뷰 문단·보낸 시각을 돌려준다(이용자 화면이 읽어 준다)", async () => {

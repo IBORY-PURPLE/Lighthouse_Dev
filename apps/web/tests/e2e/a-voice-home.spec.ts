@@ -107,14 +107,14 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
     // 기기 쿠키 전에 접수한 요청(주인 기기 없음)은 기기 목록에 없지만 단건 조회는 된다. 서버에서 지워진 요청은 404다.
     const LEGACY = "11111111-1111-4111-8111-111111111111";
     const DELETED = "22222222-2222-4222-8222-222222222222";
-    await page.route("**/api/requests/*", (route) => {
-      const url = route.request().url();
-      if (url.endsWith(LEGACY)) {
+    await page.route(url => /^\/api\/requests\/[^/]+$/.test(url.pathname), (route) => {
+      const { pathname } = new URL(route.request().url());
+      if (pathname.endsWith(LEGACY)) {
         return route.fulfill({
           json: { requestId: LEGACY, queueNumber: 1, status: "done", product: "기기 쿠키 전 요청", review: "봉사자가 확인한 리뷰 문단" },
         });
       }
-      if (url.endsWith(DELETED)) return route.fulfill({ status: 404, json: { error: "not_found", persistent: true } });
+      if (pathname.endsWith(DELETED)) return route.fulfill({ status: 404, json: { error: "not_found", persistent: true } });
       return route.fallback();
     });
     await page.addInitScript(
@@ -265,7 +265,7 @@ test.describe("/ 이용자 홈과 요청 목록", () => {
       await listReady;
       await route.fulfill({ json: { items: older, complete: true } });
     });
-    await page.route("**/api/requests/" + request.requestId, route => route.fulfill({ json: request }));
+    await page.route("**/api/requests/" + request.requestId + "?view=order", route => route.fulfill({ json: request }));
     await page.route("**/api/requests/*?view=details", route => route.fulfill({ status: 404 }));
     const otherTab = await context.newPage();
     await otherTab.goto("/");
