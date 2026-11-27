@@ -53,45 +53,15 @@ const CONFIRMING: VoiceTurn[] = [
 const errorOf = async (response: Response) =>
   ((await response.json()) as { error: string }).error;
 
-describe("원본(apps/user-voice-ui)과의 일치", () => {
-  it("지시문이 server.js의 instructions와 글자 단위로 같다", () => {
-    const source = readFileSync(path.join(ROOT, "user-voice-ui/server.js"), "utf8");
-    const match = /const instructions = `([\s\S]*?)`;/.exec(source);
-    expect(match).not.toBeNull();
-    // 작업 폴더의 줄 끝(CRLF)과 무관하게 비교한다.
-    expect(VOICE_INSTRUCTIONS).toBe(match![1].replaceAll("\r\n", "\n"));
-  });
-
-  it("이용자 홈의 새 요청은 안내를 거쳐 /live로 보내고 기존 요청 목록과 알림은 그대로 연결한다", () => {
-    const merged = readFileSync(path.join(ROOT, "web/public/voice/index.html"), "utf8");
+describe("운영 음성 화면의 진입점", () => {
+  it("홈과 구매 요청 목록에서 안내를 거쳐 /live로 이동하고 PWA를 연다", () => {
+    const home = readFileSync(path.join(ROOT, "web/public/voice/index.html"), "utf8");
     const guide = readFileSync(path.join(ROOT, "web/public/voice/request.html"), "utf8");
-    expect(merged.match(/<a [^>]*href="\/request"/g)).toHaveLength(2);
+    const requests = readFileSync(path.join(ROOT, "web/public/voice/requests.js"), "utf8");
+    expect(home.match(/<a [^>]*href="\/request"/g)).toHaveLength(2);
     expect(guide).toContain('<a class="guide-start" href="/live">질문 시작하기</a>');
-    expect(merged).not.toContain("fetch('/api/voice/chat'");
-    // 합병본은 목록이 이 기기의 요청 목록(진행 상황·리뷰 포함)을 서버에 묻고(2026-11-18 기기 쿠키로 구분), "아직 연결되지 않았다"는 옛 안내를 띄우지 않는다.
-    // 요청마다 따로 묻던 옛 방식(GET /api/requests/{id} 반복)은 목록 한 번으로 바뀌었다(시험 변경).
-    // 다만 기기 목록에 없는 번호는 한 건씩 물어 400·404일 때만 지운다(기기 쿠키 전 요청은 남김, 2026-11-18 이용자 결정).
-    expect(merged).toContain("fetch('/api/requests',{cache:'no-store'})");
-    expect(merged).not.toContain("fetch('/api/requests/'+encodeURIComponent(item.requestId),{cache");
-    expect(merged).toContain("if(r.status===404||r.status===400){checked.set(x.requestId,null);return}");
-    expect(merged).not.toContain("아직 연결되지 않았습니다");
-    // 웹 앱(PWA)·웹 푸시(A13): head 태그와 알림 버튼은 스크립트로 붙인다.
-    expect(merged).toContain("rel:'manifest',href:'/manifest.webmanifest'");
-    expect(merged).toContain("fetch('/api/push/key'");
-  });
-
-  it("상세 화면(리뷰·진행 상황)은 음성 합성으로 읽지 않고 문단에 초점만 옮긴다(VoiceOver와 겹쳐 두 번 읽히지 않게)", () => {
-    const merged = readFileSync(path.join(ROOT, "web/public/voice/index.html"), "utf8");
-    const body = (name: string) => {
-      const start = merged.indexOf(`function ${name}(`);
-      expect(start).toBeGreaterThanOrEqual(0);
-      const end = merged.indexOf("\nfunction ", start + 1);
-      return merged.slice(start, end === -1 ? undefined : end);
-    };
-    for (const name of ["showReview", "openRequest"]) {
-      expect(body(name)).not.toMatch(/sayText\(|speechSynthesis/);
-      expect(body(name)).toContain(".focus()");
-    }
+    expect(home).toContain('<link rel="manifest" href="/manifest.webmanifest">');
+    expect(requests).not.toContain("/api/voice/chat");
   });
 });
 

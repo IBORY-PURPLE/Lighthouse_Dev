@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { currentDeviceId } from "@/lib/deviceSession";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
+import { readRequestDetails } from "@/lib/requestDetails";
 import { getRequestStore, type StoredRequest } from "@/lib/requestStore";
 
 // 다시 열기 조회. TSD §8.4, notes-flow-a.md C4.
@@ -46,10 +47,12 @@ async function handleGet(request: NextRequest, requestId: string): Promise<Outco
   }
 
   const store = getRequestStore();
+  const view = request.nextUrl.searchParams.get("view");
+  const withBuyerDetails = view === "details";
   const startedAt = Date.now();
   let row: StoredRequest | null;
   try {
-    row = await store.getForDevice(requestId.toLowerCase(), currentDeviceId(request));
+    row = await store.getForDevice(requestId.toLowerCase(), currentDeviceId(request), withBuyerDetails);
   } catch {
     return {
       response: failure(503, { error: "store_unavailable" }),
@@ -64,6 +67,9 @@ async function handleGet(request: NextRequest, requestId: string): Promise<Outco
       storeMs,
     };
   }
+  const details = withBuyerDetails && (row.status === "waiting" || row.status === "in_progress")
+    ? await readRequestDetails(row.requestId)
+    : null;
   return {
     response: NextResponse.json(
       {
@@ -71,8 +77,10 @@ async function handleGet(request: NextRequest, requestId: string): Promise<Outco
         queueNumber: row.queueNumber,
         status: row.status,
         product: row.product,
+        ...(view === "order" ? { createdAt: row.createdAt } : {}),
         // 끝난 요청이면 봉사자가 보낸 리뷰 문단과 보낸 시각(이용자 화면이 읽어 준다).
         ...(row.status === "done" ? { review: row.review ?? null, sentAt: row.sentAt ?? null } : {}),
+        ...(withBuyerDetails ? { buyer: row.buyer, details } : {}),
       },
       { headers: NO_STORE },
     ),

@@ -69,6 +69,7 @@ describe("메모리 저장소", () => {
       queueNumber: 1,
       status: "waiting",
       product: "소니 헤드셋",
+      createdAt: new Date(T0).toISOString(),
     });
     expect(await store.get("00000000-0000-4000-8000-000000000000")).toBeNull();
   });
@@ -233,6 +234,7 @@ describe("Supabase 저장소(가짜 RPC 클라이언트)", () => {
       queueNumber: 2,
       status: "waiting",
       product: "헤드셋",
+      createdAt,
     });
     expect(selects).toEqual([
       { table: "requests", columns: "id, queue_number, status, product, created_at", column: "id", value: "r-1" },

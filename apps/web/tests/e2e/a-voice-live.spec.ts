@@ -320,9 +320,9 @@ test.describe("/live 음성 도우미 화면", () => {
     expect((await page.context().cookies()).filter((cookie) => cookie.name === "lh_device")).toHaveLength(1);
     await page.getByRole("link", { name: BUTTONS.list }).click();
     await expect(page.locator("#list")).toBeVisible();
-    await expect(page.locator("#requests .card").filter({ hasText: ANSWERS[0] })).toHaveCount(1);
+    await expect(page.locator("#requests .request-card").filter({ hasText: ANSWERS[0] })).toHaveCount(1);
     await page.reload();
-    await expect(page.locator("#requests .card").filter({ hasText: ANSWERS[0] })).toHaveCount(1);
+    await expect(page.locator("#requests .request-card").filter({ hasText: ANSWERS[0] })).toHaveCount(1);
 
     const volunteer = await page.context().newPage();
     await volunteer.goto("/volunteer");

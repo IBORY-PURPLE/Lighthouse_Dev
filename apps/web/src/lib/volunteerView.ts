@@ -59,7 +59,7 @@ export interface RequestQa {
   a: string;
 }
 
-/** 이용자가 확인한 요약과 질문·답(봉사자 브리핑). 요청을 맡은 봉사자에게만 간다. */
+/** 이용자가 확인한 요약과 질문·답. 접수 기기의 요청 상세와 담당 봉사자 브리핑에 사용한다. */
 export interface RequestDetailsView {
   summary: string;
   qa: RequestQa[];
