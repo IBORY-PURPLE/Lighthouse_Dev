@@ -6,6 +6,9 @@ const MICROPHONE_RELEASE_DELAY_MS = 1000;
 const RECOGNITION_RELEASE_DELAY_MS = 250;
 const SPEECH_CANCEL_RELEASE_DELAY_MS = 150;
 const FIRST_QUESTION = '어떤 상품을 찾고 계신가요?';
+const DEFAULT_SPEECH_RATE = 0.92;
+const SLOW_SPEECH_RATE = 0.72;
+const FAST_SPEECH_RATE = 1.12;
 const ORDERS = ['첫 번째', '두 번째', '세 번째', '네 번째', '다섯 번째', '여섯 번째'];
 const REQUIREMENT_LABELS = {
   product: '요청 상품',
@@ -15,6 +18,17 @@ const REQUIREMENT_LABELS = {
   priority: '중요한 점',
   additionalNotes: '기타 요청'
 };
+const END_COMMANDS = new Set([
+  '끝내기', '네끝내기', '끝내기다음', '네끝내기다음', '끝내기할게',
+  '그만', '끝', '끝내', '종료', '끝내고싶어요', '그만하고싶어요',
+  '끝낼래', '그만할래', '나가고싶어', '나갈래'
+]);
+const REPEAT_COMMANDS = new Set(['다시', '뭐라고', '다시말해']);
+const PAUSE_COMMANDS = new Set(['잠깐', '잠깐만', '잠시만', '멈춰', '정지']);
+const NEXT_COMMANDS = new Set(['다음', '다음질문', '넘어가기', '다했어', '다말했어', '이상입니다']);
+const CONFIRM_COMMANDS = new Set([
+  '네', '보내주세요', '그렇게해주세요', '네보내주세요', '네그렇게해주세요'
+]);
 
 const DEMO_REQUESTS = [
   {
@@ -63,6 +77,7 @@ const state = {
   exchanges: [],
   summary: null,
   inputMode: 'answer',
+  speechRate: DEFAULT_SPEECH_RATE,
   error: '',
   registeredRequestId: null,
   requestsReturnTarget: 'home'
@@ -74,6 +89,7 @@ let recognitionSequence = 0;
 let requestSequence = 0;
 let activeSpeechUtterance = null;
 let pendingNextCommand = null;
+let pendingGlobalCommand = null;
 let pendingRecognitionRetry = false;
 
 /**
@@ -97,7 +113,7 @@ const speakNotice = (message, onEnd) => {
   const utterance = new SpeechSynthesisUtterance(message);
   activeSpeechUtterance = utterance;
   utterance.lang = 'ko-KR';
-  utterance.rate = 0.92;
+  utterance.rate = state.speechRate;
   utterance.volume = 1;
   utterance.onend = () => {
     activeSpeechUtterance = null;
@@ -149,6 +165,7 @@ const stopConversationMedia = () => {
   recognitionSequence += 1;
   requestSequence += 1;
   pendingNextCommand = null;
+  pendingGlobalCommand = null;
   pendingRecognitionRetry = false;
   window.speechSynthesis?.cancel();
   activeSpeechUtterance = null;
@@ -167,6 +184,7 @@ const resetConversation = () => {
   state.exchanges = [];
   state.summary = null;
   state.inputMode = 'answer';
+  state.speechRate = DEFAULT_SPEECH_RATE;
   state.error = '';
   state.registeredRequestId = null;
   state.requestsReturnTarget = 'home';
@@ -244,6 +262,14 @@ const renderConversationError = () => `
   <button class="primary-button" type="button" data-action="start-conversation">대화 다시 시작하기</button>
 `;
 
+const renderPausedConversation = () => `
+  <section class="pause-panel" aria-labelledby="pause-title">
+    <h2 id="pause-title">음성 대화 일시 정지</h2>
+    <p>대화를 멈췄습니다. 준비가 되면 계속하기를 선택해 주세요.</p>
+    <button class="primary-button" type="button" data-action="resume-conversation" data-initial-focus>계속하기</button>
+  </section>
+`;
+
 const renderSummary = () => `
   <section class="screen" aria-labelledby="summary-screen-title">
     <h1 id="summary-screen-title" class="screen-title" tabindex="-1" data-screen-title>요청사항 확인</h1>
@@ -260,23 +286,49 @@ const renderRequest = () => {
   if (state.phase === 'summary') return renderSummary();
 
   return `
-    <div class="screen">
-      ${renderBackButton('home')}
+    <div class="screen ${state.phase === 'intro' ? 'request-intro-screen' : ''}">
+      ${renderBackButton('home', { initialFocus: state.phase !== 'paused' })}
       <p class="screen-title" data-screen-title>상품 요청</p>
-      <p class="lead">질문 시작하기를 선택하면 AI가 여섯 개의 질문을 차례로 합니다. 답변한 뒤 ‘다음’이라고 말하면 다음 질문으로 넘어갑니다.</p>
+      <p class="lead">AI가 총 여섯 개의 질문을 합니다. 아래 명령어를 확인한 뒤 시작해 주세요.</p>
       ${state.phase === 'intro' ? `
-        <div class="guide-panel">
-          <p class="guide-title">진행 안내 · 총 여섯 개의 질문</p>
-          <p>AI는 매번 ‘첫 번째 질문입니다’처럼 현재 질문 순서를 먼저 말합니다.</p>
-          <p>대화가 시작되면 별도의 버튼을 누르지 않고 자연스럽게 답변하세요.</p>
-          <p>질문에 답한 뒤 다음 질문을 듣고 싶으면 ‘다음’이라고 말씀해 주세요.</p>
-        </div>
-        <button class="primary-button" type="button" data-action="start-conversation">질문 시작하기</button>
+        <section class="command-guide" aria-labelledby="command-guide-title">
+          <h2 id="command-guide-title">지금 말로 쓸 수 있는 명령</h2>
+          <p class="command-guide-intro">마이크가 듣는 동안 아래 명령어를 사용할 수 있습니다</p>
+          <div class="command-list">
+            <article class="command-card">
+              <h3>대화 끝내기</h3>
+              <p>끝내기 또는 그만 또는 종료라고 말하면 현재 대화를 끝냅니다</p>
+            </article>
+            <article class="command-card">
+              <h3>다음 단계로 이동</h3>
+              <p>다음이나 다음 질문 또는 넘어가기라고 말하면 답변을 전달하고 다음 단계로 이동합니다</p>
+            </article>
+            <article class="command-card">
+              <h3>다시 듣기</h3>
+              <p>다시 또는 뭐라고 라고 말하면 방금 들은 안내나 질문을 다시 읽습니다</p>
+            </article>
+            <article class="command-card">
+              <h3>말하기 속도 변경</h3>
+              <p>천천히 또는 빠르게 또는 보통 속도라고 말하면 AI의 말하기 속도를 바꿉니다</p>
+            </article>
+            <article class="command-card">
+              <h3>대화 잠시 멈추기</h3>
+              <p>잠깐 또는 잠시만 또는 멈춰라고 말하면 대화를 일시 정지합니다</p>
+            </article>
+            <article class="command-card">
+              <h3>최종 요청 보내기</h3>
+              <p>네 또는 보내주세요 또는 그렇게 해주세요라고 말하면 요청을 접수합니다</p>
+            </article>
+          </div>
+        </section>
+        <button class="primary-button" type="button" data-action="start-conversation">음성 요청 시작하기</button>
       ` : state.phase === 'error'
         ? renderConversationError()
-        : state.questionNumber > 0
-          ? renderActiveConversation()
-          : ''}
+        : state.phase === 'paused'
+          ? renderPausedConversation()
+          : state.questionNumber > 0
+            ? renderActiveConversation()
+            : ''}
     </div>
   `;
 };
@@ -428,6 +480,100 @@ const failConversation = message => {
   speakNotice(message);
 };
 
+/**
+ * 음성 인식 결과를 명령 비교에 사용할 수 있는 문자열로 정규화합니다.
+ *
+ * @author 정효림
+ */
+const normalizeVoiceCommand = value => String(value ?? '')
+  .normalize('NFKC')
+  .replace(/[^\p{L}\p{N}]/gu, '')
+  .toLowerCase();
+
+const getSpeechRateCommand = command => {
+  if (['천천히', '느리게'].includes(command)) {
+    return { rate: SLOW_SPEECH_RATE, message: '말하기 속도를 느리게 바꿨습니다.' };
+  }
+  if (['빠르게', '빨리'].includes(command)) {
+    return { rate: FAST_SPEECH_RATE, message: '말하기 속도를 빠르게 바꿨습니다.' };
+  }
+  if (command === '보통속도') {
+    return { rate: DEFAULT_SPEECH_RATE, message: '말하기 속도를 보통으로 바꿨습니다.' };
+  }
+  return null;
+};
+
+const isGlobalVoiceCommand = transcript => {
+  const command = normalizeVoiceCommand(transcript);
+  return END_COMMANDS.has(command)
+    || REPEAT_COMMANDS.has(command)
+    || PAUSE_COMMANDS.has(command)
+    || Boolean(getSpeechRateCommand(command));
+};
+
+const endConversationByVoice = () => {
+  stopConversationMedia();
+  state.phase = 'completing';
+  render();
+  speakNotice('음성 대화를 종료하고 처음 화면으로 돌아갑니다.', () => {
+    resetConversation();
+    navigate('home');
+  });
+};
+
+const pauseConversation = () => {
+  recognitionSequence += 1;
+  recognition = null;
+  state.phase = 'paused';
+  render();
+  focusScreenStart();
+};
+
+const repeatCurrentPrompt = () => {
+  if (state.inputMode === 'confirmation') {
+    speakSummaryConfirmation();
+    return;
+  }
+  if (state.inputMode === 'next') {
+    speakRetryAndListen(`다음 질문으로 넘어가려면 '다음'이라고 말씀해 주세요.`);
+    return;
+  }
+  if (state.inputMode === 'correction') {
+    speakRetryAndListen('수정할 내용을 말씀해 주세요.');
+    return;
+  }
+  speakCurrentQuestion({ immediate: true });
+};
+
+/**
+ * 모든 대화 단계에서 사용할 수 있는 공통 음성 명령을 처리합니다.
+ *
+ * @author 정효림
+ */
+const handleGlobalVoiceCommand = transcript => {
+  const command = normalizeVoiceCommand(transcript);
+  if (END_COMMANDS.has(command)) {
+    endConversationByVoice();
+    return true;
+  }
+  if (REPEAT_COMMANDS.has(command)) {
+    repeatCurrentPrompt();
+    return true;
+  }
+  if (PAUSE_COMMANDS.has(command)) {
+    pauseConversation();
+    return true;
+  }
+
+  const speechRateCommand = getSpeechRateCommand(command);
+  if (speechRateCommand) {
+    state.speechRate = speechRateCommand.rate;
+    speakRetryAndListen(speechRateCommand.message);
+    return true;
+  }
+  return false;
+};
+
 const speakRetryAndListen = (message = '잘 듣지 못했습니다. 다시 한 번 말씀해 주세요.') => {
   recognitionSequence += 1;
   recognition = null;
@@ -444,7 +590,7 @@ const speakRetryAndListen = (message = '잘 듣지 못했습니다. 다시 한 �
   const utterance = new SpeechSynthesisUtterance(message);
   activeSpeechUtterance = utterance;
   utterance.lang = 'ko-KR';
-  utterance.rate = 0.92;
+  utterance.rate = state.speechRate;
   utterance.volume = 1;
   utterance.onend = () => {
     activeSpeechUtterance = null;
@@ -515,9 +661,20 @@ const startRecognition = () => {
       render();
       return;
     }
+    if (isGlobalVoiceCommand(answer)) {
+      pendingGlobalCommand = answer;
+      state.phase = 'processing';
+      render();
+      return;
+    }
     if (state.inputMode === 'correction') {
       recognition = null;
       submitCorrection(answer);
+      return;
+    }
+    if (state.inputMode === 'confirmation') {
+      recognition = null;
+      handleSummaryConfirmation(answer);
       return;
     }
     if (state.inputMode === 'next') {
@@ -546,6 +703,15 @@ const startRecognition = () => {
   recognition.onend = () => {
     if (currentRecognitionSequence !== recognitionSequence || state.screen !== 'request') return;
     recognition = null;
+    if (pendingGlobalCommand !== null) {
+      const command = pendingGlobalCommand;
+      pendingGlobalCommand = null;
+      window.setTimeout(() => {
+        if (currentRecognitionSequence !== recognitionSequence || state.screen !== 'request') return;
+        handleGlobalVoiceCommand(command);
+      }, RECOGNITION_RELEASE_DELAY_MS);
+      return;
+    }
     if (pendingNextCommand !== null) {
       const command = pendingNextCommand;
       pendingNextCommand = null;
@@ -572,7 +738,7 @@ const startRecognition = () => {
 };
 
 const handleNextCommand = command => {
-  if (!command.replaceAll(' ', '').includes('다음')) {
+  if (!NEXT_COMMANDS.has(normalizeVoiceCommand(command))) {
     speakRetryAndListen(`말씀하신 내용을 다음 명령으로 이해하지 못했어요. 다음 질문으로 넘어가려면 '다음'이라고 말씀해 주세요.`);
     return;
   }
@@ -582,7 +748,7 @@ const handleNextCommand = command => {
 };
 
 const separateAdvanceCommand = transcript => {
-  const match = transcript.match(/\s+(?:그리고\s+)?다음(?:\s*(?:질문|으로))?[.!?]?$/);
+  const match = transcript.match(/\s+(?:그리고\s+)?(?:다음(?:\s*(?:질문|으로))?|넘어가기|다\s*했어|다\s*말했어|이상입니다)[.!?]?\s*$/);
   const answer = match ? transcript.slice(0, match.index).trim() : '';
   if (!answer) {
     return { answer: transcript, advanceRequested: false };
@@ -612,7 +778,7 @@ const speakCurrentQuestion = ({ immediate = false } = {}) => {
       const utterance = new SpeechSynthesisUtterance(speechText);
       activeSpeechUtterance = utterance;
       utterance.lang = 'ko-KR';
-      utterance.rate = 0.92;
+      utterance.rate = state.speechRate;
       utterance.volume = 1;
       utterance.onend = () => {
         activeSpeechUtterance = null;
@@ -633,6 +799,44 @@ const speakCurrentQuestion = ({ immediate = false } = {}) => {
     return;
   }
   window.setTimeout(startSpeech, SPEECH_START_DELAY_MS);
+};
+
+const speakSummaryConfirmation = () => {
+  if (!state.summary) return;
+  state.inputMode = 'confirmation';
+  speakRetryAndListen(
+    `여섯 개의 질문이 모두 끝났습니다. 요청 내용을 읽어 드릴게요. ${state.summary.summaryText} 이대로 요청하려면 네, 보내주세요, 또는 그렇게 해주세요라고 말씀해 주세요.`
+  );
+};
+
+const handleSummaryConfirmation = transcript => {
+  if (CONFIRM_COMMANDS.has(normalizeVoiceCommand(transcript))) {
+    registerRequest();
+    return;
+  }
+
+  recognitionSequence += 1;
+  state.phase = 'summary';
+  render();
+  window.requestAnimationFrame(() => {
+    document.querySelector('[data-summary-text]')?.focus();
+  });
+};
+
+const resumeConversation = () => {
+  if (state.inputMode === 'confirmation') {
+    speakSummaryConfirmation();
+    return;
+  }
+  if (state.inputMode === 'next') {
+    speakRetryAndListen(`다음 질문으로 넘어가려면 '다음'이라고 말씀해 주세요.`);
+    return;
+  }
+  if (state.inputMode === 'correction') {
+    speakRetryAndListen('수정할 내용을 말씀해 주세요.');
+    return;
+  }
+  speakCurrentQuestion({ immediate: true });
 };
 
 const startConversation = () => {
@@ -696,19 +900,7 @@ const submitAnswer = async (answer, { advanceRequested = false } = {}) => {
         summaryText: data.summaryText,
         requirements: data.requirements
       };
-      state.phase = 'completing';
-      render();
-      speakNotice(
-        '6개의 질문이 모두 끝났습니다. 요청 확인 페이지로 넘어가겠습니다.',
-        () => {
-          if (state.phase !== 'completing' || state.screen !== 'request') return;
-          state.phase = 'summary';
-          render();
-          window.requestAnimationFrame(() => {
-            document.querySelector('[data-summary-text]')?.focus();
-          });
-        }
-      );
+      speakSummaryConfirmation();
       return;
     }
 
@@ -820,6 +1012,8 @@ app.addEventListener('click', event => {
     navigate('request');
   } else if (action === 'start-conversation') {
     startConversation();
+  } else if (action === 'resume-conversation') {
+    resumeConversation();
   } else if (action === 'register-request') {
     registerRequest();
   } else if (action === 'correct-request') {
