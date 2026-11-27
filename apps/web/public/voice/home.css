@@ -34,6 +34,7 @@
 
 .home-choice {
   display: grid;
+  box-sizing: border-box;
   width: 100%;
   min-height: 9.375rem;
   align-content: center;

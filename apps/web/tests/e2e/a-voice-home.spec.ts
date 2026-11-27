@@ -6,6 +6,25 @@ test.use({ serviceWorkers: "block" });
 
 const BUDGET = "10만 원 이하";
 
+test("홈 카드 두 개가 좁은 화면과 데스크톱에서 같은 폭으로 들어간다", async ({ page }) => {
+  await page.goto("/");
+  const choices = page.locator(".home-choices");
+
+  for (const width of [320, 390, 650, 1280]) {
+    await page.setViewportSize({ width, height: 850 });
+    await expect.poll(() => choices.evaluate((grid) => {
+      const container = grid.getBoundingClientRect();
+      const [request, list] = Array.from(grid.children, (card) => card.getBoundingClientRect());
+      return {
+        aligned: request.left === list.left && request.right === list.right,
+        inside: request.left >= container.left && request.right <= container.right,
+        viewportFits: document.documentElement.scrollWidth <= window.innerWidth,
+      };
+    })).toEqual({ aligned: true, inside: true, viewportFits: true });
+  }
+  await page.screenshot({ path: "test-results/home-card-width.png" });
+});
+
 test.describe("/ 이용자 홈과 요청 목록", () => {
   test("홈에서 상품 요청 안내를 읽고 운영 음성 대화 화면으로 이동한다", async ({ page }) => {
     await page.goto("/");
