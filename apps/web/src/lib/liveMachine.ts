@@ -1,13 +1,16 @@
 // /live 상태 기계: 순수 함수 liveStep(상태, 사건 → 상태, 효과)과 접수 관문 canRegister. 설계서 5절, 12.2절.
 // 시계, DOM, 네트워크, 난수를 쓰지 않는다. 시간은 TIMER_SET 효과와 TIMER 사건으로만 다룬다.
 import {
+  ANSWER_CUE,
   hasQuestion,
   isCardEcho,
   isClearConsent,
   isDecline,
+  isIntroEcho,
   isPlausibleConsent,
   isScreenReaderEcho,
   matchLocalCommand,
+  normalizeSpeech,
   type LocalCommand,
   splitNext,
 } from "@/lib/liveCommands";
@@ -18,8 +21,11 @@ import type {
   InputMode,
   LiveDraft,
   LiveErrorKind,
+  LiveSlots,
   LiveTurn,
+  ToolResponse,
 } from "@/lib/liveEngine";
+import { checkIntake } from "@/lib/liveIntake";
 import { errorScriptFor, guideFor, script, type ScriptId } from "@/lib/liveScripts";
 import {
   CONNECT_SAY_MS,
@@ -62,14 +68,21 @@ export interface LiveState {
   speechAvailable: boolean;           // 브라우저 음성 인식 생성자가 있다
   inputMode: InputMode;               // "voice" | "text"
   tts: boolean;                       // speechSynthesis를 쓸 수 있다
-  speaking: string | null;            // 지금 기기 목소리로 읽는 대본 id
-  speakingText: string | null;        // 기기 목소리로 읽는 글. 읽지 못하면 화면 낭독기 알림으로 대신 전한다
+  speaking: string | null;            // 지금 읽는 앱 대본의 id
+  speakingText: string | null;        // 읽는 대본의 글. 메아리 검사에도 쓴다.
+  realtimeSpeech: "waiting" | "playing" | null;
   speakRetried: boolean;              // 이 글을 기기 목소리로 한 번 더 읽어 보았다
   mic: "off" | "on" | "held";         // held: 단추를 찾는 동안 잠시 닫음
   micOnce: boolean;                   // 이 페이지에서 듣기가 한 번이라도 실제로 시작됐다
   hidden: boolean;                    // 화면이 숨겨져 있다(HIDDEN·VISIBLE)
   cid: string;                        // 대화 id = 접수 clientRequestId
   visit: "first" | "returning";
+  productIntake: boolean;
+  deferIntroListening: boolean;
+  introPending: boolean;
+  bargeIn: boolean;
+  bargeSpeech: "none" | "started" | "waiting";
+  replyTranscript: string;
   history: LiveTurn[];                // 엔진을 바꿔도 이어지는 기록
   draft: LiveDraft | null;            // 확인받을(받은) 내용. summary는 앱이 만든다(6.4절)
   pendingConfirm: boolean;            // 확인 문장을 읽고 나면 confirming으로 간다
@@ -129,12 +142,14 @@ export type LiveEffect =
   | { type: "ANNOUNCE"; channel: "status" | "alert"; text: string; endId?: string }
   | { type: "OPEN_TURN"; earcon: "turn" | "confirm"; settle: boolean; keep: boolean; sticky?: boolean }  // (뜸) → 신호음 → 150ms → 마이크. sticky: 말이 끊겨도 닫지 않는다
   | { type: "RELISTEN"; sticky?: boolean }             // 신호음 없이 인식만 다시 시작
+  | { type: "LISTEN_BARGE_IN" }
   | { type: "ENGINE_START"; kind: EngineKind }         // realtime이면 실행기가 마이크부터 받는다
   | { type: "ENGINE_HOLD" } | { type: "ENGINE_SUBMIT" }
   | { type: "ENGINE_CANCEL_LISTEN"; discard: boolean }
   | { type: "ENGINE_RESPOND"; text: string; source: "voice" | "text"; history: LiveTurn[] }
   | { type: "ENGINE_CANCEL_RESPONSE" }
-  | { type: "ENGINE_TOOL_RESULT"; callId: string; output: object; respond: boolean }
+  | { type: "ENGINE_NARRATE"; text: string }
+  | { type: "ENGINE_TOOL_RESULT"; callId: string; output: object; respond: ToolResponse }
   | { type: "ENGINE_SET_RATE"; rate: "slow" | "normal" | "fast" }
   | { type: "ENGINE_CLOSE" }
   | { type: "TIMER_SET"; id: TimerId; ms: number } | { type: "TIMER_CLEAR"; id: TimerId }
@@ -146,24 +161,28 @@ export type LiveEffect =
 
 export type TimerId =
   | "micWait" | "connect" | "connectSay" | "relisten" | "silence" | "controlHold"
-  | "waitSay1" | "waitSay2" | "think" | "retryAfter" | "speakGuard"
-  | "registerSay" | "pausedWarn" | "pausedEnd" | "idleClose" | "thinkGrace" | "micSay" | "more";
+  | "waitSay1" | "waitSay2" | "think" | "retryAfter" | "speakGuard" | "bargeWait"
+  | "registerSay" | "pausedWarn" | "pausedEnd" | "idleClose" | "thinkGrace" | "micSay" | "more" | "narration";
 
 const ALL_TIMERS: TimerId[] = [
   "micWait", "connect", "connectSay", "relisten", "silence", "controlHold",
   "waitSay1", "waitSay2", "think", "retryAfter", "speakGuard",
-  "registerSay", "pausedWarn", "pausedEnd", "idleClose", "thinkGrace", "micSay",
+  "registerSay", "pausedWarn", "pausedEnd", "idleClose", "thinkGrace", "micSay", "narration",
 ];
 
 // '다음' 방식: 말 한 토막을 들은 뒤 이만큼 조용하면 "더 말씀하셔도 돼요…"를 읽는다. 말소리가 시작됐는데 글이 오지 않을 때는 더 길게 기다린다.
 const MANUAL_MORE_MS = 6_000;
 const MANUAL_MORE_GUARD_MS = 30_000;
+const BARGE_WAIT_MS = 8_000;
 
 // 설계서가 값을 주지 않은 곳(429에 Retry-After가 없을 때)의 기본 대기. 직접 정했다.
 const DEFAULT_RETRY_AFTER_MS = 3_000;
 
 export function createInitialLive(o: {
   cid: string; visit: "first" | "returning"; tts: boolean; speechAvailable: boolean;
+  productIntake?: boolean;
+  manualAdvance?: boolean;
+  deferIntroListening?: boolean;
 }): LiveState {
   return {
     phase: "idle",
@@ -176,12 +195,19 @@ export function createInitialLive(o: {
     tts: o.tts,
     speaking: null,
     speakingText: null,
+    realtimeSpeech: null,
     speakRetried: false,
     mic: "off",
     micOnce: false,
     hidden: false,
     cid: o.cid,
     visit: o.visit,
+    productIntake: o.productIntake === true,
+    deferIntroListening: o.deferIntroListening === true,
+    introPending: false,
+    bargeIn: false,
+    bargeSpeech: "none",
+    replyTranscript: "",
     history: [],
     draft: null,
     pendingConfirm: false,
@@ -209,7 +235,7 @@ export function createInitialLive(o: {
     resultUnspoken: false,
     thinkFresh: false,
     micSays: 0,
-    manual: false,
+    manual: o.manualAdvance === true,
     parts: [],
     manualSubmit: false,
     manualTold: false,
@@ -235,6 +261,7 @@ interface Cx { s: LiveState; fx: LiveEffect[] }
 const isListenPhase = (p: LivePhase) => p === "listening" || p === "confirming";
 const isRunning = (p: LivePhase) => p === "listening" || p === "thinking" || p === "speaking" || p === "confirming";
 const isActive = (p: LivePhase) => p === "guiding" || p === "connecting" || isRunning(p);
+const usesRealtimeVoice = (s: LiveState) => s.productIntake && s.engine === "realtime" && s.engineReady;
 
 const userCell = (text: string): LiveTurn => ({ role: "user", content: cutText(text, USER_TURN_MAX) });
 /** 이용자가 지금까지 한 말. 칸의 근거 검사(groundSlots)에 쓴다. */
@@ -251,8 +278,17 @@ function clearTimers(c: Cx, ...ids: TimerId[]): void {
   for (const id of ids) c.fx.push({ type: "TIMER_CLEAR", id });
 }
 
-/** 기기 목소리로 읽는다. 목소리를 못 쓰면 같은 글을 ANNOUNCE로 내고 endId를 싣는다. */
+/** 상품 대화가 연결돼 있으면 Realtime으로 읽는다. 예비 경로는 기기 목소리나 화면 알림을 쓴다. */
 function say(c: Cx, id: string, text: string, channel: "status" | "alert" = "status"): void {
+  if (usesRealtimeVoice(c.s)) {
+    if (c.s.speaking !== null && c.s.realtimeSpeech === null) c.fx.push({ type: "STOP_SPEAK" });
+    c.s.speaking = id;
+    c.s.speakingText = text;
+    c.s.realtimeSpeech = "waiting";
+    c.fx.push({ type: "ENGINE_NARRATE", text });
+    setTimer(c, "narration", 45_000);
+    return;
+  }
   if (c.s.tts) c.fx.push({ type: "SPEAK", id, text });
   else c.fx.push({ type: "ANNOUNCE", channel, text, endId: id });
   c.s.speaking = id;
@@ -266,9 +302,46 @@ const confirmText = (s: LiveState, id: "confirmAgain" | "confirmRetell") =>
   script(id, { summary: s.draft?.summary ?? "" });
 
 function stopSpeak(c: Cx): void {
+  if (c.s.realtimeSpeech !== null) {
+    clearTimers(c, "narration");
+    c.fx.push({ type: "ENGINE_CANCEL_RESPONSE" });
+    c.s.realtimeSpeech = null;
+  }
   c.fx.push({ type: "STOP_SPEAK" });
   c.s.speaking = null;
   c.s.speakingText = null;
+}
+
+function listenForInterruption(c: Cx): void {
+  const s = c.s;
+  if (!s.productIntake || !s.engineReady || s.inputMode !== "voice" || s.hidden || s.pendingConfirm) return;
+  s.bargeIn = true;
+  c.fx.push({ type: "LISTEN_BARGE_IN" });
+}
+
+function stopListeningForInterruption(c: Cx): void {
+  if (!c.s.bargeIn) return;
+  c.s.bargeIn = false;
+  c.s.bargeSpeech = "none";
+  c.s.replyTranscript = "";
+  clearTimers(c, "bargeWait");
+  c.fx.push({ type: "ENGINE_CANCEL_LISTEN", discard: false });
+}
+
+function waitForInterruption(c: Cx): boolean {
+  const s = c.s;
+  if (!s.bargeIn || s.bargeSpeech === "none") return false;
+  if (s.bargeSpeech === "started") {
+    s.bargeSpeech = "waiting";
+    clearTimers(c, "speakGuard");
+    setTimer(c, "bargeWait", BARGE_WAIT_MS);
+  }
+  return true;
+}
+
+function finishInterruptedPrompt(c: Cx): void {
+  if (c.s.phase === "guiding") afterConnect(c);
+  else if (c.s.phase === "speaking") afterAnswer(c);
 }
 
 /** 시작한 엔진 종류. 시작 때 정해진 두 값으로 다시 구한다. */
@@ -284,6 +357,7 @@ function go(
   o: { engineEnded?: boolean; discard?: boolean; handled?: boolean } = {},
 ): void {
   const s = c.s;
+  if (s.phase !== to) stopListeningForInterruption(c);
   if (isListenPhase(s.phase) && s.phase !== to) {
     if (!o.handled) {
       clearTimers(c, "silence", "relisten", "controlHold", "micSay");
@@ -415,6 +489,11 @@ function switchToFallback(c: Cx): void {
 
 function afterConnect(c: Cx): void {
   const s = c.s;
+  if (s.introPending) {
+    s.introPending = false;
+    beginGuide(c, "first");
+    return;
+  }
   const resume = s.resumeTo;
   s.resumeTo = null;
   if (resume === "confirming" && s.draft) {
@@ -436,6 +515,10 @@ function afterConnect(c: Cx): void {
 function skipGuide(c: Cx): void {
   const s = c.s;
   stopSpeak(c);
+  if (s.productIntake && s.engineReady) {
+    afterConnect(c);
+    return;
+  }
   c.fx.push({ type: "VISIT_MARK" });
   s.resumeTo = "listening";
   s.settleNext = true;
@@ -447,12 +530,22 @@ function beginGuide(c: Cx, visit: "first" | "returning" | "new"): void {
   const s = c.s;
   c.fx.push({ type: "WAKE_LOCK", on: true });
   const voice = s.speechAvailable || (s.realtimeHint && !s.fallbackOnly);
-  s.inputMode = voice ? "voice" : "text";
-  const gid = guideFor(visit, s.inputMode);
-  const text = script(gid) + (s.inputMode === "voice" && !s.micOnce ? ` ${script("micHint")}` : "");
+  if (!s.engineReady) s.inputMode = voice ? "voice" : "text";
+  if (s.productIntake && s.inputMode === "voice" && !s.engineReady) {
+    s.introPending = true;
+    go(c, "connecting");
+    startEngine(c);
+    return;
+  }
+  const deferMic = s.deferIntroListening && s.engine === "fallback";
+  const gid = s.productIntake
+    ? (s.inputMode === "voice" ? (deferMic ? "productGuideLocalIntro" : "productGuideVoice") : "productGuideText")
+    : guideFor(visit, s.inputMode);
+  const text = script(gid) + (!s.productIntake && s.inputMode === "voice" && !s.micOnce ? ` ${script("micHint")}` : "");
   if (s.history.length === 0) s.history = [aiCell(text, "asking", EMPTY_SLOTS)];
   s.lastReply = script(gid);   // 첫 AI 답이 오기 전에도 [다시 듣기]와 '다시'가 안내를 다시 읽는다
   go(c, "guiding");
+  if (s.productIntake && !deferMic) listenForInterruption(c);
   say(c, gid, text);
 }
 
@@ -484,9 +577,11 @@ function enterPaused(c: Cx, o: { read?: ScriptId; silent?: boolean } = {}): void
     c.fx.push({ type: "EARCON", name: "pause" });
     if (o.read) sayScript(c, o.read);
   }
-  setTimer(c, "pausedWarn", PAUSED_WARN_MS);
-  setTimer(c, "pausedEnd", PAUSED_END_MS);
-  if (s.engine === "realtime" && s.engineReady) setTimer(c, "idleClose", REALTIME_IDLE_CLOSE_MS);
+  if (!s.productIntake) {
+    setTimer(c, "pausedWarn", PAUSED_WARN_MS);
+    setTimer(c, "pausedEnd", PAUSED_END_MS);
+    if (s.engine === "realtime" && s.engineReady) setTimer(c, "idleClose", REALTIME_IDLE_CLOSE_MS);
+  }
 }
 
 function enterEnded(c: Cx, o: { script?: ScriptId } = {}): void {
@@ -585,6 +680,7 @@ function startRegister(c: Cx, callId?: string): void {
 /** 확인 문장을 읽는다(TURN_RESULT confirming, Realtime의 확인 요청이 끝났을 때). 기록에 AI 칸(confirming)을 넣는다. */
 function speakConfirm(c: Cx): void {
   const s = c.s;
+  stopListeningForInterruption(c);
   receiveAnswer(c, true);
   clearTimers(c, "speakGuard");
   const text = confirmText(s, "confirmAgain");
@@ -673,10 +769,10 @@ function doHelp(c: Cx): void {
   const voice = s.inputMode === "voice";
   if (s.helpDepth === 0) {
     s.helpDepth = 1;
-    sayScript(c, voice ? "helpVoice" : "helpText");
+    sayScript(c, voice ? (s.productIntake ? "productHelpVoice" : "helpVoice") : "helpText");
   } else {
     s.helpDepth = 0;
-    sayScript(c, voice ? "helpMoreVoice" : "helpText");
+    sayScript(c, voice ? (s.productIntake ? "productHelpMoreVoice" : "helpMoreVoice") : "helpText");
   }
 }
 
@@ -748,13 +844,13 @@ function runCommand(c: Cx, cmd: LocalCommand): void {
       else sayScript(c, "endGuide");
       return;
     case "exit":
-      endToHome(c);
+      endToRequest(c);
       return;
   }
 }
 
-/** 말로 끝냈다('끝내기'). 보내는 중이 아니면 마침 안내 뒤 화면이 /live 처음 상태로 돌아간다(화면이 이 대본 id를 보고 돌아간다). */
-function endToHome(c: Cx): void {
+/** 말로 끝냈다('끝내기'). 보내는 중이 아니면 화면이 마침 대본을 다 읽은 뒤 /request로 이동한다. */
+function endToRequest(c: Cx): void {
   const s = c.s;
   if (s.sendPending) enterEnded(c);
   else if (s.requestId !== null) enterEnded(c, { script: "endedHomeRegistered" });
@@ -787,7 +883,7 @@ function onUtterance(c: Cx, raw: string, source: "voice" | "text", engineEnded: 
   // 3. 끝낼까요?에 대한 답
   if (s.ask === "end") {
     if (isClearConsent(text)) {
-      endToHome(c);
+      endToRequest(c);
       return;
     }
     s.ask = null;
@@ -883,6 +979,30 @@ function onPart(c: Cx, raw: string): void {
   manualTake(c, text, false);
 }
 
+/** 받았다고 확인된 말로 안내를 끊는다. 소음과 읽고 있는 문구가 끼어드는 일을 줄인다. */
+function onInterruption(c: Cx, raw: string): void {
+  const s = c.s;
+  const text = raw.trim();
+  const spoken = normalizeSpeech(s.speakingText ?? s.replyTranscript);
+  const heard = normalizeSpeech(text);
+  const waited = s.bargeSpeech === "waiting";
+  s.bargeSpeech = "none";
+  const echoesPrompt = (heard.length >= 7 && spoken.includes(heard))
+    || (s.phase === "guiding" && isIntroEcho(heard, spoken));
+  if (!heard || isScreenReaderEcho(text) || echoesPrompt) {
+    if (waited) finishInterruptedPrompt(c);
+    else if (s.engine === "fallback") listenForInterruption(c);
+    return;
+  }
+  c.fx.push({ type: "ENGINE_CANCEL_RESPONSE" });
+  stopSpeak(c);
+  clearTimers(c, "speakGuard");
+  s.pendingConfirm = false;
+  go(c, "listening");
+  onUtterance(c, text, "voice", true);
+  if (s.phase === "listening" && s.mic === "off" && s.speaking === null) openTurn(c);
+}
+
 // ----- 사건별 처리 -----
 
 function onListenStarted(c: Cx, late: boolean): void {
@@ -929,6 +1049,7 @@ function onMainButton(c: Cx, kind: "main" | "hold"): void {
   s.helpDepth = 0;
   switch (s.phase) {
     case "guiding":
+      if (s.speaking === "productGuideLocalIntro" || s.speaking === "productGuideLocalQuestion" || s.speaking === "productGuideLocalManual") return;
       skipGuide(c);
       return;
     case "listening":
@@ -1039,20 +1160,22 @@ function onTimer(c: Cx, id: TimerId): void {
     case "more":
       // '다음' 방식: 말이 멎은 채 조용하다. 마이크를 닫고 넘기는 법을 알린 뒤(읽기가 끝나면 onSpeakEnd가) 차례를 다시 연다.
       if (!manualTurn(s) || s.mic !== "on") return;
+      if (usesRealtimeVoice(s)) return;
       closeMic(c);
       sayScript(c, s.parts.length > 0 ? "manualMore" : "silence1");
       return;
     case "silence":
+      if (usesRealtimeVoice(s)) return;
       onSilenceTimer(c);
       return;
     case "controlHold":
       if (isListenPhase(s.phase) && s.mic === "held") openTurn(c, { keep: true, noWarn: true });
       return;
     case "waitSay1":
-      if (s.phase === "thinking") sayScript(c, "waiting1");
+      if (s.phase === "thinking" && !usesRealtimeVoice(s)) sayScript(c, "waiting1");
       return;
     case "waitSay2":
-      if (s.phase === "thinking") sayScript(c, "waiting2");
+      if (s.phase === "thinking" && !usesRealtimeVoice(s)) sayScript(c, "waiting2");
       return;
     case "think":
       if (s.phase === "thinking") aiFailure(c, "timeout");
@@ -1074,6 +1197,9 @@ function onTimer(c: Cx, id: TimerId): void {
       if (!s.pendingConfirm) afterAnswer(c);
       else if (s.speaking !== "confirm") speakConfirm(c);
       return;
+    case "bargeWait":
+      if (s.bargeSpeech === "waiting") finishInterruptedPrompt(c);
+      return;
     case "registerSay":
       if (s.phase === "registering") sayScript(c, "registering");
       return;
@@ -1081,16 +1207,31 @@ function onTimer(c: Cx, id: TimerId): void {
       if (s.phase === "paused") sayScript(c, "pausedWarn");
       return;
     case "pausedEnd":
-      if (s.phase === "paused") enterEnded(c);
+      if (s.phase === "paused" && !s.productIntake) enterEnded(c);
       return;
     case "idleClose":
-      if (s.phase === "paused") {
+      if (s.phase === "paused" && !s.productIntake) {
         c.fx.push({ type: "ENGINE_CLOSE" });
         c.fx.push({ type: "RELEASE_MIC" });
         s.engineReady = false;
         s.engine = null;
       }
       return;
+    case "narration": {
+      const id = s.speaking;
+      if (s.realtimeSpeech === null || id === null) return;
+      if (id === "confirm") {
+        stopSpeak(c);
+        s.pendingConfirm = false;
+        s.awaitingConsent = false;
+        go(c, "listening");
+        openTurn(c);
+      } else {
+        c.fx.push({ type: "ENGINE_CANCEL_RESPONSE" });
+        onSpeakEnd(c, id);
+      }
+      return;
+    }
   }
 }
 
@@ -1098,7 +1239,7 @@ function onTimer(c: Cx, id: TimerId): void {
 function aiFailure(c: Cx, kind: "timeout" | "failed" | "bad_request"): void {
   const s = c.s;
   const n = s.aiFailures + 1;
-  if (n >= MAX_AI_FAILURES) {
+  if (n >= MAX_AI_FAILURES && !usesRealtimeVoice(s)) {
     s.aiFailures = n;
     enterError(c, kind === "bad_request" ? "bad_request" : "failed");
     return;
@@ -1118,6 +1259,13 @@ function aiFailure(c: Cx, kind: "timeout" | "failed" | "bad_request"): void {
 
 function onFailed(c: Cx, e: Extract<EngineEvent, { type: "FAILED" }>): void {
   const s = c.s;
+  if (s.bargeIn && s.engine === "fallback") {
+    const waited = s.bargeSpeech === "waiting";
+    if (e.kind === "mic_denied" || e.kind === "speech_unavailable") s.inputMode = "text";
+    stopListeningForInterruption(c);
+    if (waited) finishInterruptedPrompt(c);
+    return;
+  }
   switch (s.phase) {
     case "connecting": {
       if (e.kind === "mic_blocked" || e.kind === "mic_denied" || e.kind === "speech_unavailable") return;
@@ -1173,14 +1321,28 @@ function onFailed(c: Cx, e: Extract<EngineEvent, { type: "FAILED" }>): void {
 
 function onLost(c: Cx, e: Extract<EngineEvent, { type: "LOST" }>): void {
   const s = c.s;
+  if (s.productIntake && s.phase === "paused") {
+    stopSpeak(c);
+    s.engine = null;
+    s.engineReady = false;
+    c.fx.push({ type: "ENGINE_CLOSE" }, { type: "RELEASE_MIC" });
+    return;
+  }
   if (s.phase === "connecting") {
     if (startedKind(s) === "realtime") switchToFallback(c);
     return;
   }
+  if (s.phase === "guiding" && s.productIntake && s.engine === "realtime") {
+    stopSpeak(c);
+    s.introPending = true;
+    go(c, "connecting");
+    switchToFallback(c);
+    return;
+  }
   if (!isRunning(s.phase)) return;
-  const resumeTo = s.phase === "confirming" ? "confirming" : "listening";
+  const resumeTo = s.phase === "confirming" || (s.productIntake && s.pendingConfirm && s.draft) ? "confirming" : "listening";
   if (e.reason === "session_limit") {
-    if (s.reconnects >= MAX_RECONNECTS) {
+    if (!s.productIntake && s.reconnects >= MAX_RECONNECTS) {
       s.fallbackOnly = true;
       enterEnded(c, { script: "sessionOver" });
       return;
@@ -1197,7 +1359,7 @@ function onLost(c: Cx, e: Extract<EngineEvent, { type: "LOST" }>): void {
     s.engine = null;
     s.resumeTo = resumeTo;
     go(c, "connecting", { handled: true });
-    sayScript(c, "sessionRenewed");
+    if (!s.productIntake) sayScript(c, "sessionRenewed");
     startEngine(c);
     return;
   }
@@ -1221,18 +1383,36 @@ function onLost(c: Cx, e: Extract<EngineEvent, { type: "LOST" }>): void {
 }
 
 function onReplyStart(c: Cx): void {
+  if (c.s.realtimeSpeech !== null) {
+    c.s.realtimeSpeech = "playing";
+    return;
+  }
   receiveAnswer(c, true);
   go(c, "speaking");
+  listenForInterruption(c);
   setTimer(c, "speakGuard", SPEAK_GUARD_MAX_MS);
 }
 
 function onReplyText(c: Cx, e: Extract<EngineEvent, { type: "REPLY_TEXT" }>): void {
   const s = c.s;
+  if (s.realtimeSpeech !== null) return;
+  if (s.bargeIn) s.replyTranscript = e.text;
   if (!e.final || e.text.trim() === "") return;
   if (s.pendingConfirm) return;   // 확인으로 가는 응답의 말은 기록하지 않는다. 앱이 확인 문장을 읽는다.
   s.lastReply = e.text;
   s.history = [...s.history, aiCell(e.text, "asking", s.draft ?? EMPTY_SLOTS)];
   setTimer(c, "speakGuard", Math.min(e.text.length * 250 + 3000, SPEAK_GUARD_MAX_MS));
+}
+
+function speakIntakeQuestion(c: Cx, question: string, slots: LiveSlots): void {
+  const s = c.s;
+  receiveAnswer(c, true);
+  const text = `${question} ${ANSWER_CUE}`;
+  s.lastReply = text;
+  s.history = [...s.history, aiCell(text, "asking", slots)];
+  go(c, "speaking");
+  listenForInterruption(c);
+  say(c, "ai", text);
 }
 
 function onTurnResult(c: Cx, e: Extract<EngineEvent, { type: "TURN_RESULT" }>): void {
@@ -1242,13 +1422,14 @@ function onTurnResult(c: Cx, e: Extract<EngineEvent, { type: "TURN_RESULT" }>): 
     receiveAnswer(c, true);
     s.awaitingConsent = false;
     s.consentText = null;
-    s.history = [...s.history, aiCell(e.reply, "asking", s.draft ?? EMPTY_SLOTS)];
+    s.history = [...s.history, aiCell(e.reply, "asking", s.productIntake ? e.slots : (s.draft ?? EMPTY_SLOTS))];
     s.lastReply = e.reply;
     go(c, "speaking");
     if (e.reply.trim() === "") {
       afterAnswer(c);
       return;
     }
+    listenForInterruption(c);
     say(c, "ai", e.reply);
   };
   switch (e.status) {
@@ -1256,7 +1437,12 @@ function onTurnResult(c: Cx, e: Extract<EngineEvent, { type: "TURN_RESULT" }>): 
       asAsking();
       return;
     case "confirming": {
-      const draft = toDraft(groundSlots(e.slots, userTexts(s)));
+      const intake = s.productIntake ? checkIntake(e.slots, userTexts(s)) : null;
+      if (intake?.question) {
+        speakIntakeQuestion(c, intake.question, intake.slots);
+        return;
+      }
+      const draft = toDraft(intake?.slots ?? groundSlots(e.slots, userTexts(s)));
       if (!draft) {
         asAsking();   // 서버가 이미 낮춰 보내므로 올 수 없는 방어 줄
         return;
@@ -1281,13 +1467,30 @@ function onIntent(c: Cx, e: Extract<EngineEvent, { type: "INTENT" }>): void {
   const s = c.s;
   if (s.phase !== "thinking" && s.phase !== "speaking") return;
   if (e.kind === "confirm") {
-    const draft = toDraft(groundSlots(e.slots, userTexts(s)));
+    const intake = s.productIntake ? checkIntake(e.slots, userTexts(s), s.history) : null;
+    if (intake?.question) {
+      c.fx.push({ type: "ENGINE_CANCEL_RESPONSE" });
+      stopSpeak(c);
+      clearTimers(c, "speakGuard", "waitSay1", "waitSay2");
+      s.pendingConfirm = false;
+      go(c, "thinking");
+      setTimer(c, "think", THINK_TIMEOUT_MS);
+      c.fx.push({
+        type: "ENGINE_TOOL_RESULT",
+        callId: e.callId,
+        output: { ok: false, error: "intake_incomplete", question: intake.question, verified: intake.slots },
+        respond: "clarify",
+      });
+      return;
+    }
+    const draft = toDraft(intake?.slots ?? groundSlots(e.slots, userTexts(s)));
     if (!draft) return;   // 엔진이 bad_arguments로 되돌린다
     s.draft = draft;
     s.pendingConfirm = true;
     s.awaitingConsent = false;   // 내용이 바뀌었으므로 앞의 동의는 쓰지 않는다
     s.consentText = null;
     c.fx.push({ type: "ENGINE_TOOL_RESULT", callId: e.callId, output: { ok: true }, respond: false });
+    if (!e.audioPending) speakConfirm(c);
   } else if (e.kind === "register") {
     onRegisterIntent(c, e.callId);
   } else {
@@ -1297,6 +1500,10 @@ function onIntent(c: Cx, e: Extract<EngineEvent, { type: "INTENT" }>): void {
 
 function onReplyEnd(c: Cx): void {
   const s = c.s;
+  if (s.realtimeSpeech !== null) {
+    if (s.realtimeSpeech === "playing" && s.speaking !== null) onSpeakEnd(c, s.speaking);
+    return;
+  }
   if (s.phase === "thinking") {
     if (s.pendingConfirm) {
       speakConfirm(c);
@@ -1306,14 +1513,19 @@ function onReplyEnd(c: Cx): void {
       openTurn(c);
     }
   } else if (s.phase === "speaking") {
-    if (!s.pendingConfirm) afterAnswer(c);
-    else if (s.speaking !== "confirm") speakConfirm(c);
+    if (!s.pendingConfirm) {
+      if ((s.speaking === null || !s.productIntake) && !waitForInterruption(c)) afterAnswer(c);
+    } else if (s.speaking !== "confirm") speakConfirm(c);
   }
 }
 
 function onSpeakEnd(c: Cx, id: string, failed = false): void {
   const s = c.s;
   if (id !== s.speaking) return;   // 낡은 SPEAK_END는 버린다
+  if (s.realtimeSpeech !== null) {
+    s.realtimeSpeech = null;
+    clearTimers(c, "narration");
+  }
   // 기기 목소리가 읽지 못했다(낭독 오류, 끝남 신호 없음). 들은 것으로 치지 않는다(Codex 3차 지적 4).
   // 동의 관문 앞의 요약은 기기 목소리로 한 번 더 읽어 본다. 그래도 안 되거나 다른 글이면 취소음을 내고
   // 같은 글을 화면 낭독기 알림으로 전한 뒤 그 길이만큼 기다린다. 그 알림이 끝나면 SPEAK_END가 다시 온다(이때는 failed가 아니다).
@@ -1331,9 +1543,25 @@ function onSpeakEnd(c: Cx, id: string, failed = false): void {
     return;
   }
   s.speaking = null;
+  if (waitForInterruption(c)) {
+    s.replyTranscript = s.speakingText ?? s.replyTranscript;
+    s.speakingText = null;
+    return;
+  }
   s.speakingText = null;
   switch (s.phase) {
     case "guiding":
+      if (id === "productGuideLocalIntro") {
+        const next = s.manual ? "productGuideLocalManual" : "productGuideLocalQuestion";
+        s.lastReply = script(next);
+        sayScript(c, next);
+        return;
+      }
+      if (id === "productGuideLocalManual") s.manualTold = true;
+      if (s.productIntake && s.engineReady) {
+        afterConnect(c);
+        return;
+      }
       c.fx.push({ type: "VISIT_MARK" });
       s.resumeTo = "listening";
       go(c, "connecting");
@@ -1442,8 +1670,11 @@ function resetForNewRequest(c: Cx, cid: string): void {
   s.sendPending = false;
   s.resultUnspoken = false;
   s.speaking = null;
+  s.realtimeSpeech = null;
   s.parts = [];
   s.manualSubmit = false;
+  s.manualTold = false;
+  s.introPending = false;
 }
 
 function onRegisterFail(c: Cx, kind: "retryable" | "unknown" | "rejected" | "conflict"): void {
@@ -1567,6 +1798,7 @@ function step(c: Cx, e: LiveEvent): void {
       return;
 
     case "USER_SPEECH_START":
+      if (s.bargeIn && s.bargeSpeech === "none") s.bargeSpeech = "started";
       if (isListenPhase(s.phase)) {
         clearTimers(c, "silence");
         s.silenceArmed = false;
@@ -1576,6 +1808,14 @@ function step(c: Cx, e: LiveEvent): void {
       return;
 
     case "NO_SPEECH":
+      if (s.bargeIn && s.engine === "fallback") {
+        if (s.bargeSpeech === "waiting") finishInterruptedPrompt(c);
+        else {
+          s.bargeSpeech = "none";
+          listenForInterruption(c);
+        }
+        return;
+      }
       if (!isListenPhase(s.phase)) return;
       if (s.manualSubmit) {
         // 큰 단추로 넘겼는데 지금은 말이 없었다. 모아 둔 말이 있으면 그것을 넘긴다.
@@ -1589,10 +1829,15 @@ function step(c: Cx, e: LiveEvent): void {
       return;
 
     case "USER_PART":
-      onPart(c, e.text);
+      if (s.bargeIn) onInterruption(c, e.text);
+      else onPart(c, e.text);
       return;
 
     case "USER_TURN_END": {
+      if (s.bargeIn && e.transcribed) {
+        onInterruption(c, e.text);
+        return;
+      }
       if (!isListenPhase(s.phase)) return;
       if (!e.transcribed && s.manual && s.phase === "listening" && s.parts.length > 0) {
         // '다음' 방식: 마지막 토막의 전사가 늦다. 모아 둔 말로 넘긴다.
@@ -1645,10 +1890,11 @@ function step(c: Cx, e: LiveEvent): void {
       return;
 
     case "REPLY_START":
-      if (s.phase === "thinking") onReplyStart(c);
+      if (s.realtimeSpeech !== null || s.phase === "thinking") onReplyStart(c);
       return;
 
     case "REPLY_TEXT":
+      if (s.realtimeSpeech !== null) return;
       if (s.phase === "thinking") onReplyStart(c);
       if (s.phase === "speaking") onReplyText(c, e);
       return;
@@ -1666,6 +1912,7 @@ function step(c: Cx, e: LiveEvent): void {
       return;
 
     case "SESSION_WARN":
+      if (s.productIntake) return;
       if (isListenPhase(s.phase)) {
         closeMic(c);
         sayScript(c, sessionWarnId(s));

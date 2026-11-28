@@ -11,7 +11,7 @@ import {
 } from "@/lib/liveMachine";
 import { BUTTONS } from "@/lib/liveCommands";
 import { script } from "@/lib/liveScripts";
-import { cutText, decodeAiTurn, summaryOf, toDraft } from "@/lib/liveText";
+import { cutText, decodeAiTurn, EMPTY_SLOTS, summaryOf, toDraft } from "@/lib/liveText";
 import type { LiveSlots } from "@/lib/liveEngine";
 import { RELISTEN_DELAYS_MS, SILENCE_STEPS_MS } from "@/lib/liveTiming";
 
@@ -878,9 +878,9 @@ describe("Realtime 응답", () => {
     expect(r.state.phase).toBe("listening");
     expect(ofType(r.effects, "OPEN_TURN")).toHaveLength(1);
   });
-  it("INTENT confirm → draft, pendingConfirm, 도구 결과. 이어 REPLY_END에서 앱이 확인 문장을 읽는다", () => {
+  it("소리 재생 중 INTENT confirm → draft, pendingConfirm, 도구 결과. REPLY_END에서 확인 문장을 읽는다", () => {
     const t = thinking();
-    const i = run(t.state, { type: "INTENT", kind: "confirm", slots: SLOTS, callId: "call1" });
+    const i = run(t.state, { type: "INTENT", kind: "confirm", slots: SLOTS, callId: "call1", audioPending: true });
     expect(i.state.phase).toBe("thinking");
     expect(i.state.draft).toEqual(toDraft(SLOTS));
     expect(i.state.pendingConfirm).toBe(true);
@@ -896,9 +896,31 @@ describe("Realtime 응답", () => {
     expect(conf.state.phase).toBe("confirming");
   });
   it("speaking 중 INTENT confirm 뒤 speakGuard가 오면 확인 문장을 읽는다", () => {
-    const sp = run(thinking().state, { type: "REPLY_START" }, { type: "INTENT", kind: "confirm", slots: SLOTS, callId: "c" });
+    const sp = run(thinking().state, { type: "REPLY_START" }, { type: "INTENT", kind: "confirm", slots: SLOTS, callId: "c", audioPending: true });
     const r = run(sp.state, timer("speakGuard"));
     expect(spoken(r.effects)).toEqual(["confirm"]);
+  });
+  it("소리 없는 확인 요청은 요약을 읽고, 조건이 부족하면 같은 모델에 보완 질문을 맡긴다", () => {
+    const t = thinking();
+    const confirmed = run(t.state, { type: "INTENT", kind: "confirm", slots: SLOTS, callId: "complete" });
+    expect(spoken(confirmed.effects)).toEqual(["confirm"]);
+    const state = {
+      ...t.state,
+      productIntake: true,
+      history: [{ role: "user" as const, content: "노트북이 필요하고 애플을 선호해요" }],
+    };
+    const conditions = [{ label: "브랜드", answer: "애플" }];
+    const missing = run(state, {
+      type: "INTENT", kind: "confirm", callId: "missing",
+      slots: { ...EMPTY_SLOTS, product: "노트북", conditions },
+    });
+    expect(missing.state.phase).toBe("thinking");
+    expect(spoken(missing.effects)).toEqual([]);
+    expect(ofType(missing.effects, "OPEN_TURN")).toEqual([]);
+    expect(ofType(missing.effects, "ENGINE_TOOL_RESULT")).toMatchObject([{
+      callId: "missing", respond: "clarify",
+      output: { error: "intake_incomplete", question: expect.stringContaining("어떤 일"), verified: { conditions } },
+    }]);
   });
   it("제품이 빈 INTENT confirm은 무시한다(엔진이 bad_arguments로 되돌린다)", () => {
     const t = thinking();
@@ -1307,7 +1329,7 @@ describe("error", () => {
         { type: "EARCON", name: "error" },
       ]),
     );
-    expect(ofType(r.effects, "TIMER_CLEAR")).toHaveLength(17);   // ALL_TIMERS 전부
+    expect(ofType(r.effects, "TIMER_CLEAR")).toHaveLength(18);   // ALL_TIMERS 전부
     const end = run(r.state, speakEnd(r.state));
     expect(end.effects).toEqual([{ type: "FOCUS", target: "main" }]);
   });
@@ -1365,7 +1387,7 @@ describe("paused", () => {
     expect(r.state.resumeTo).toBe("listening");
     expect(r.state.mic).toBe("off");
     const fx = run(atListening().state, { type: "PAUSE" }).effects;
-    expect(ofType(fx, "TIMER_CLEAR")).toHaveLength(17);   // ALL_TIMERS 전부
+    expect(ofType(fx, "TIMER_CLEAR")).toHaveLength(18);   // ALL_TIMERS 전부
     expect(fx).toEqual(
       expect.arrayContaining([
         { type: "WAIT_PULSE", on: false },
@@ -1913,7 +1935,7 @@ describe("확인 동의와 끝내기 답(A11·A36·A13)", () => {
     expect(other.state.phase).toBe("thinking");
     expect(other.state.ask).toBeNull();
   });
-  it("'끝내기'라고 하면 되묻지 않고 바로 끝내고, 메인 화면으로 돌아간다는 마침 안내를 읽는다. 단추로 끝내면 예전 안내 그대로다", () => {
+  it("'끝내기'라고 하면 되묻지 않고 바로 끝내고, 상품 요청 화면으로 돌아간다는 마침 안내를 읽는다. 단추로 끝내면 예전 안내 그대로다", () => {
     const home = new Set(["endedHome", "endedHomeRegistered", "endedHomeUnsent"]);
     for (const said of ["끝내기", "끝내기요"]) {
       const end = run(atArmed().state, { type: "USER_TURN_END", text: said, transcribed: true });

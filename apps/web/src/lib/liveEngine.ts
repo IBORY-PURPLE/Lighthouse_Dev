@@ -4,9 +4,18 @@
 export type EngineKind = "realtime" | "fallback";
 export type InputMode = "voice" | "text";
 export type LiveChatStatus = "asking" | "confirming" | "done" | "ended";
+export type ToolResponse = boolean | "clarify";
 
 /** 모은 내용. 모두 문자열이고 모르면 "". 길이는 SLOT_MAX(6.4절) 이하다. */
-export interface LiveSlots { product: string; info: string; options: string; budget: string }
+export interface LiveConditionAnswer { label: string; answer: string }
+export interface LiveSlots {
+  product: string;
+  info: string;
+  options: string;
+  budget: string;
+  purchaseTiming?: string;
+  conditions?: LiveConditionAnswer[];
+}
 /** 확인받을 내용. summary는 AI가 아니라 앱이 칸으로 만든다(summaryOf). */
 export interface LiveDraft extends LiveSlots { summary: string }
 
@@ -30,7 +39,7 @@ export type EngineEvent =
   | { type: "REPLY_START" }                                          // Realtime만: AI 소리 시작
   | { type: "REPLY_TEXT"; text: string; final: boolean }             // Realtime만: AI 말의 자막
   | { type: "REPLY_END" }                                            // Realtime만: AI 소리 끝(소리 없이 끝난 응답 포함)
-  | { type: "INTENT"; kind: "confirm"; slots: LiveSlots; callId: string }   // Realtime만
+  | { type: "INTENT"; kind: "confirm"; slots: LiveSlots; callId: string; audioPending?: true }   // Realtime만
   | { type: "INTENT"; kind: "register" | "end"; callId: string }           // Realtime만
   | { type: "FAILED"; kind: LiveErrorKind; retryAfterMs?: number }
   | { type: "SESSION_WARN" }
@@ -47,13 +56,14 @@ export interface EngineStartContext {
 export interface LiveEngine {
   readonly kind: EngineKind;
   start(ctx: EngineStartContext): Promise<void>;   // 실패는 던지지 않고 FAILED나 LOST로 알린다
-  listen(opts?: { keep?: boolean; sticky?: boolean }): void;   // 마이크를 연다. keep: 붙든 글과 버퍼를 버리지 않는다. sticky: 말이 잠깐 끊겨도 마이크를 닫지 않는다(Realtime만)
+  listen(opts?: { keep?: boolean; sticky?: boolean; bargeIn?: boolean }): void;   // bargeIn: AI가 말하는 중에 별도로 듣는다.
   hold(): void;                                     // 마이크를 잠시 닫는다. 들은 글은 버리지 않는다
   submit(): void;                                   // 지금까지 들은 것으로 차례를 끝낸다
   cancelListen(discard: boolean): void;
   respond(turn: { text: string; source: "voice" | "text" }, history: LiveTurn[]): void;  // history에는 이번 말이 없다
+  narrate?(text: string): void;
   cancelResponse(): void;                           // 답 요청을 끊고 AI 소리를 멈춘다
-  toolResult(callId: string, output: object, respond: boolean): void;  // fallback은 아무 일도 하지 않는다
+  toolResult(callId: string, output: object, respond: ToolResponse): void;  // fallback은 아무 일도 하지 않는다
   setRate(rate: "slow" | "normal" | "fast"): void;
   close(): void;                                    // 여러 번 불러도 안전
   on(listener: (e: EngineEvent) => void): () => void;
@@ -65,7 +75,7 @@ export interface EarconPlayer { unlock(): void; play(name: EarconName): Promise<
 export interface LiveSpeaker {
   readonly available: boolean;
   // 앞의 읽기는 끊는다. failed가 참이면 읽지 못했거나 끝까지 읽었는지 알 수 없다(낭독 오류, 끝남 신호 없음).
-  speak(id: string, text: string, onEnd: (id: string, failed?: boolean) => void): void;
+  speak(id: string, text: string, onEnd: (id: string, failed?: boolean) => void, fastest?: boolean): void;
   stop(): void;
   setRate(rate: "slow" | "normal" | "fast"): void;
 }

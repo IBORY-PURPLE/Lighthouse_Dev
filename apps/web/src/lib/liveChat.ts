@@ -1,6 +1,7 @@
 import "server-only";
-import { liveAskName } from "@/lib/liveConfig";
-import { liveChatInstructions } from "@/lib/liveInstructions";
+import { liveAskName, liveProductIntake } from "@/lib/liveConfig";
+import { mockProductIntake } from "@/lib/liveIntake";
+import { liveChatInstructions, liveProductChatInstructions } from "@/lib/liveInstructions";
 import { hasQuestion, isClearConsent, isPlausibleConsent, isScreenReaderEcho } from "@/lib/liveCommands";
 import type { LiveChatStatus, LiveSlots, LiveTurn } from "@/lib/liveEngine";
 import { cutText, decodeAiTurn, maskPhone, readSlots, REPLY_MAX } from "@/lib/liveText";
@@ -116,7 +117,8 @@ export function mockLiveText(history: LiveTurn[]): string {
 
 /** OpenAI Responses API 호출. mock이면 가짜 대화를 쓰고 fetch를 부르지 않는다. */
 export async function callLiveAI(history: LiveTurn[]): Promise<LiveChatResult> {
-  if (getLlmMode() === "mock") return parseLiveText(mockLiveText(history));
+  const productIntake = liveProductIntake();
+  if (getLlmMode() === "mock") return parseLiveText(productIntake ? mockProductIntake(history) : mockLiveText(history));
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LIVE_CHAT_TIMEOUT_MS);
@@ -129,7 +131,7 @@ export async function callLiveAI(history: LiveTurn[]): Promise<LiveChatResult> {
       },
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || VOICE_MODEL_DEFAULT,
-        instructions: liveChatInstructions(liveAskName()),
+        instructions: productIntake ? liveProductChatInstructions() : liveChatInstructions(liveAskName()),
         input: [{ role: "developer", content: "반드시 JSON 객체로 답변하세요." }, ...history],
         max_output_tokens: LIVE_CHAT_MAX_OUTPUT_TOKENS,
         text: { format: { type: "json_object" } },

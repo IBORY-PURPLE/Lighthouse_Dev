@@ -128,6 +128,8 @@ function fromEffect(fx: LiveEffect, event: LiveEvent): LogCore[] {
       return ev(`ENGINE_START:${fx.kind}`);
     case "ENGINE_RESPOND":
       return ev(`sent:${fx.source}`);
+    case "ENGINE_TOOL_RESULT":
+      return fx.respond === "clarify" ? ev("CLARIFY:realtime") : [];
     case "ENGINE_CANCEL_RESPONSE":
       return ev("ENGINE_CANCEL_RESPONSE");
     case "REGISTER":

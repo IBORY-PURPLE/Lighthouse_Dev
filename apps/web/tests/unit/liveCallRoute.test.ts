@@ -88,6 +88,7 @@ beforeEach(async () => {
     "LIVE_REAL_CALL_BUDGET",
     "LIVE_DAILY_SESSION_CAP",
     "LIVE_MAX_SESSION_SEC",
+    "LIVE_PRODUCT_INTAKE",
     "LIVE_REALTIME_MODEL",
     "LIVE_REALTIME_VAD",
     "LIVE_REALTIME_REASONING",
@@ -319,6 +320,15 @@ describe("POST /api/live/call 검사 순서(7.4절 표)", () => {
 });
 
 describe("POST /api/live/call 성공과 세션 설정", () => {
+  it("상품 대화는 통화 시간 제한과 서버 예약 종료를 두지 않는다", async () => {
+    vi.stubEnv("LIVE_PRODUCT_INTAKE", "on");
+    const { body } = await makeCall();
+    expect(body).toMatchObject({ engine: "realtime", maxSessionSec: 0, maxTurns: null });
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/hangup"))).toHaveLength(0);
+    expect(await session.sweepCalls(Date.now() + 600_000)).toBe(0);
+  });
+
   it("성공: realtime 응답 필드, FormData 본문, Authorization, 장부 기록", async () => {
     const { response, body } = await makeCall();
     expect(response.status).toBe(200);

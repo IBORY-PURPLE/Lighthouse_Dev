@@ -195,6 +195,10 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
         deps.setAudioSession("auto");
         current?.engine.listen(fx.sticky === true ? { keep: true, sticky: true } : { keep: true });
         return;
+      case "LISTEN_BARGE_IN":
+        deps.setAudioSession("auto");
+        current?.engine.listen({ bargeIn: true });
+        return;
       case "ENGINE_START":
         startEngine(fx.kind);
         return;
@@ -221,6 +225,9 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
         return;
       case "ENGINE_TOOL_RESULT":
         current?.engine.toolResult(fx.callId, fx.output, fx.respond);
+        return;
+      case "ENGINE_NARRATE":
+        current?.engine.narrate?.(fx.text);
         return;
       case "ENGINE_SET_RATE":
         current?.engine.setRate(fx.rate);
@@ -296,14 +303,15 @@ export function createLiveRunner(deps: LiveRunnerDeps, initial: LiveState): Live
     clearEntry(announceEnd);
     announceEnd = null;
     deps.earcons.stopWait();
-    deps.setAudioSession("playback");
+    deps.setAudioSession(state.bargeIn ? "auto" : "playback");
     speakingId = id;
     try {
+      const fastest = state.productIntake && (id === "confirm" || id === "confirmAgain" || id === "confirmRetell");
       deps.speaker.speak(id, text, (endedId, failed) => {
         if (speakingId === endedId) speakingId = null;
         if (pulseWanted && speakingId === null) startPulse();
         dispatch(failed ? { type: "SPEAK_END", id: endedId, failed: true } : { type: "SPEAK_END", id: endedId });
-      });
+      }, fastest);
     } catch {
       // 읽기를 시작하지 못했다. 읽지 못한 것으로 알린다(상태 기계가 화면 낭독기 알림으로 대신 전한다).
       speakingId = null;

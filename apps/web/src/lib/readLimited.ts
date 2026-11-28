@@ -3,13 +3,21 @@ export async function readLimitedText(
   request: { body: ReadableStream<Uint8Array> | null },
   maxBytes: number,
 ): Promise<string | null> {
-  if (!request.body) return "";
+  const bytes = await readLimitedBytes(request, maxBytes);
+  return bytes === null ? null : bytes.toString("utf8");
+}
+
+export async function readLimitedBytes(
+  request: { body: ReadableStream<Uint8Array> | null },
+  maxBytes: number,
+): Promise<Buffer | null> {
+  if (!request.body) return Buffer.alloc(0);
   const reader = request.body.getReader();
   const pieces: Uint8Array[] = [];
   let size = 0;
   for (;;) {
     const { done, value } = await reader.read();
-    if (done) return Buffer.concat(pieces).toString("utf8");
+    if (done) return Buffer.concat(pieces);
     size += value.byteLength;
     if (size > maxBytes) {
       await reader.cancel();

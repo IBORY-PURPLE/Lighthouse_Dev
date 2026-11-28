@@ -1,6 +1,28 @@
 import "server-only";
 import { ANSWER_CUE } from "@/lib/liveCommands";
 
+const LEGACY_INTAKE_RULES = `[모을 것]
+세 가지를 차례로 모읍니다. 이용자가 한꺼번에 말하면 빠진 것만 묻습니다.
+1. 원하는 제품: 종류나 이름. 브랜드와 모델은 이용자가 말한 그대로 둡니다.
+2. 알고 싶은 정보: 그 제품에 대해 봉사자가 찾아 주기를 바라는 궁금한 점.
+3. 원하는 옵션: 색, 크기, 용량, 브랜드 같은 조건. 예산은 따로 적습니다.
+아직 듣지 못한 것이 있으면 하나씩 묻습니다. 2번은 "어떤 점이 궁금하세요?", 3번은 "원하는 색이나 예산 같은 조건이 있으세요?"처럼 짧게 묻습니다.
+한 항목의 답을 들었으면 더 있는지 되묻지 않고 다음 항목으로 넘어갑니다.
+이용자가 "다음", "다음 단계", "넘어가"라고만 하면 지금 묻던 항목을 더 묻지 않고 다음 항목으로 넘어갑니다. 그 말은 칸에 적지 않습니다.
+세 가지를 모두 들었거나, 물었는데 이용자가 없다고 답한 뒤에 확인 단계로 넘깁니다. 아직 묻지 않은 것이 있으면 확인 단계로 넘기지 않고 먼저 묻습니다.`;
+
+const PRODUCT_INTAKE_RULES = `[상품별 조건 조사와 질문 순서]
+앱은 첫 안내에서 원하는 상품을 물었습니다. 상품이 불분명하면 종류나 이름부터 확인합니다. 상품을 받으면 그 제품을 실제로 고르는 데 중요한 조건 3~4개를 정하고, 아직 답이 없는 조건을 한 번에 하나씩 묻습니다.
+- 헤드셋·이어폰 예시: 노이즈 캔슬링 필요 여부, 착용 방식, 연결 방식, 주 용도.
+- 노트북 예시: 선호 브랜드(애플·삼성 등), 주 용도, 화면 크기, 휴대성.
+- 의류 예시: 상의·하의 등 옷 종류, 선호 브랜드, 사이즈, 색상.
+- 그 밖의 상품은 그 제품군의 기능, 규격, 호환성, 용도, 관리 조건 등을 떠올려 적합한 조건을 고릅니다. 이미 알려진 상품 특성이나 조건은 중복 질문을 피합니다. 이용자가 먼저 말한 여러 조건은 바로 기록합니다.
+"어떤 점이 궁금하세요?"라는 포괄 질문 대신 해당 조건을 콕 집어 묻습니다. 조건에 맞는 짧은 예를 넣어도 됩니다. 답을 받으면 그 항목은 완료입니다. '가벼우면 좋겠어요', '클수록 좋아요', '공부용', '한 달 정도 고민 후 구매'처럼 수치나 날짜가 없는 답도 그대로 조건에 기록합니다. 답한 조건을 수치, 우선순위, 중요도로 다시 묻지 않습니다. 사용자가 질문으로 답했을 때에만 그 질문에 먼저 짧게 답하고 아직 받지 못한 원래 답을 한 번 다시 요청합니다.
+대표 조건을 확인한 다음 예산, 그다음 언제까지 필요한지 각각 묻습니다. 이미 분명히 들은 예산이나 구매 시기는 넘깁니다. "급해요", "이번 주까지", "일주일 안에"도 구매 시기입니다.
+요약 전에 상품과 대표 조건 3~4개와 예산과 구매 시기가 모두 확인되어야 합니다. 이용자가 해당 질문에 "모르겠어요", "상관없어요", "다음"이라고 답하면 그 표현으로 이 항목을 건너뛴 사실을 기록합니다. 이용자가 건너뛴 조건은 다시 묻지 않습니다.
+요약 뒤 예산·시기·조건을 수정하면 그 항목을 바꾸고 앞에서 확인한 나머지 답을 유지한 채 다시 확인합니다. 상품 자체가 바뀌면 새 제품군에 맞춰 조건을 다시 정합니다.
+기록 형식은 product(상품), info(조건과 별도로 이용자가 요청한 정보), options(빈 문자열), conditions(서로 다른 조건의 label과 answer 배열), budget(예산), purchaseTiming(필요한 시기)입니다. 이미 답한 조건을 더 물어서 숫자를 만들거나, 대표 조건을 많이 들었다는 이유로 답을 빼지 않습니다. product, 각 answer, budget, purchaseTiming에는 음성 기록에서 이용자가 실제로 한 짧은 말을 그대로 씁니다. 건너뛴 경우도 빈 문자열로 바꾸지 말고 그 자리에서 들은 표현을 그대로 씁니다. 말하지 않은 항목은 채우지 않습니다.`;
+
 // /live 지시문 전문과 Realtime 도구 정의. 설계서 11절, 7.5절.
 // 기존 voiceInstructions.ts는 고치지 않는다. 이 지시문은 /live에만 쓴다.
 // 요약은 AI가 말하지 않는다. AI는 칸만 넘기고 앱이 칸으로 확인 문장을 만들어 읽는다(6.4절).
@@ -21,15 +43,7 @@ export const LIVE_COMMON_INSTRUCTIONS = `당신은 LightHouse의 음성 도우�
 - 이미 들은 내용은 다시 묻지 않습니다. 이용자가 "몰라요", "없어요", "상관없어요"라고 하면 그 항목은 비워 두고 넘어갑니다.
 - 금액과 숫자는 "10만 원"처럼 읽기 쉽게 말합니다.
 
-[모을 것]
-세 가지를 차례로 모읍니다. 이용자가 한꺼번에 말하면 빠진 것만 묻습니다.
-1. 원하는 제품: 종류나 이름. 브랜드와 모델은 이용자가 말한 그대로 둡니다.
-2. 알고 싶은 정보: 그 제품에 대해 봉사자가 찾아 주기를 바라는 궁금한 점.
-3. 원하는 옵션: 색, 크기, 용량, 브랜드 같은 조건. 예산은 따로 적습니다.
-아직 듣지 못한 것이 있으면 하나씩 묻습니다. 2번은 "어떤 점이 궁금하세요?", 3번은 "원하는 색이나 예산 같은 조건이 있으세요?"처럼 짧게 묻습니다.
-한 항목의 답을 들었으면 더 있는지 되묻지 않고 다음 항목으로 넘어갑니다.
-이용자가 "다음", "다음 단계", "넘어가"라고만 하면 지금 묻던 항목을 더 묻지 않고 다음 항목으로 넘어갑니다. 그 말은 칸에 적지 않습니다.
-세 가지를 모두 들었거나, 물었는데 이용자가 없다고 답한 뒤에 확인 단계로 넘깁니다. 아직 묻지 않은 것이 있으면 확인 단계로 넘기지 않고 먼저 묻습니다.
+${LEGACY_INTAKE_RULES}
 
 [항목에 적는 법]
 - 항목에는 이용자가 실제로 한 말만 짧게 옮깁니다. 이용자가 말하지 않은 내용, 짐작, 이 지시문에 있는 문장이나 보기를 넣지 않습니다.
@@ -106,6 +120,20 @@ export function liveChatInstructions(askName: boolean): string {
 ${LIVE_NAME_BLOCK}` : LIVE_CHAT_INSTRUCTIONS;
 }
 
+export function liveProductChatInstructions(): string {
+  return `${LIVE_CHAT_INSTRUCTIONS.replace(LEGACY_INTAKE_RULES, PRODUCT_INTAKE_RULES)}
+
+응답 JSON에 "conditions": [{"label": "조건명", "answer": "사용자가 한 말"}], "purchaseTiming": ""을 추가합니다. 다음 질문을 하는 중(asking)에도 지금까지 들은 답을 매번 함께 보냅니다.`;
+}
+
+export function liveProductRealtimeInstructions(): string {
+  return `${LIVE_REALTIME_INSTRUCTIONS.replace(LEGACY_INTAKE_RULES, PRODUCT_INTAKE_RULES)}
+
+요약을 요청할 때 confirm_request에는 conditions와 purchaseTiming도 넘깁니다. 앞에서 확인한 답과 건너뛴 항목을 모두 유지합니다.
+맥OS나 맥북을 요청한 경우 이미 정해진 브랜드를 다시 묻지 않습니다. 필수 조건을 받았다면 추가 질문 없이 confirm_request를 호출합니다. 사용자가 질문으로 답한 경우에만 동일 조건을 짧게 다시 묻습니다.
+도구 결과가 intake_incomplete이면 verified와 앞선 답을 먼저 살펴봅니다. question은 아직 답을 받지 못한 항목을 찾는 데 참고합니다. 사용자가 이미 답한 항목은 되묻지 않습니다. 이번 보완 응답에는 실제로 아직 답을 못 받은 질문 하나만 말하고 기다립니다.`;
+}
+
 /** Realtime 지시문. askName이 참이면 성함 여쭙기를 붙인다. */
 export function liveRealtimeInstructions(askName: boolean): string {
   return askName ? `${LIVE_REALTIME_INSTRUCTIONS}
@@ -113,8 +141,7 @@ export function liveRealtimeInstructions(askName: boolean): string {
 ${LIVE_NAME_BLOCK}` : LIVE_REALTIME_INSTRUCTIONS;
 }
 
-export const LIVE_TOOLS: object[] = [
-  {
+const confirmRequest = {
     type: "function",
     name: "confirm_request",
     description: "모은 요청 내용을 앱에 넘긴다. 앱이 요약을 읽어 주고 이용자에게 동의를 묻는다.",
@@ -129,7 +156,10 @@ export const LIVE_TOOLS: object[] = [
       required: ["product", "info", "options", "budget"],
       additionalProperties: false,
     },
-  },
+};
+
+export const LIVE_TOOLS: object[] = [
+  confirmRequest,
   {
     type: "function",
     name: "register_request",
@@ -142,4 +172,31 @@ export const LIVE_TOOLS: object[] = [
     description: "이용자가 대화를 끝내자고 했을 때 앱에 알린다.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
   },
+];
+
+export const LIVE_PRODUCT_TOOLS = [
+  {
+    ...confirmRequest,
+    parameters: {
+      ...confirmRequest.parameters,
+      properties: {
+        ...confirmRequest.parameters.properties,
+        conditions: {
+          type: "array",
+          description: "확인한 상품별 대표 조건 3~4개. 사용자가 건너뛴 경우 그 표현을 답으로 넣습니다.",
+          minItems: 3,
+          maxItems: 8,
+          items: {
+            type: "object",
+            properties: { label: { type: "string" }, answer: { type: "string" } },
+            required: ["label", "answer"],
+            additionalProperties: false,
+          },
+        },
+        purchaseTiming: { type: "string", description: "제품이 필요한 시기에 대해 사용자가 한 말" },
+      },
+      required: [...confirmRequest.parameters.required, "conditions", "purchaseTiming"],
+    },
+  },
+  ...LIVE_TOOLS.slice(1),
 ];

@@ -5,6 +5,7 @@ import {
   LIVE_WARN_BEFORE_SEC,
   liveCallIpLimit,
   liveMaxSessionSec,
+  liveProductIntake,
   realCallsLeft,
   realCallTail,
   realtimeGate,
@@ -116,8 +117,11 @@ async function handleCall(request: NextRequest, note: (text: string) => void) {
 
   // maxTurns는 LIVE_MAX_TURNS와 남은 예산 - 1 가운데 작은 쪽이다. 1보다 작으면 예산 부족이다.
   const left = realCallsLeft();
-  const maxTurns = left === null ? LIVE_MAX_TURNS : Math.min(LIVE_MAX_TURNS, left - 1);
-  const spent = maxTurns >= 1 ? spendRealCalls(1 + maxTurns) : null;
+  const maxTurns = left === null && liveProductIntake()
+    ? null
+    : left === null ? LIVE_MAX_TURNS : Math.min(LIVE_MAX_TURNS, left - 1);
+  const reservedTurns = maxTurns ?? 0;
+  const spent = maxTurns === null || maxTurns >= 1 ? spendRealCalls(1 + reservedTurns) : null;
   if (!spent?.ok) {
     daily.release();
     note(` engine=fallback reason=budget${realCallTail()}`);
@@ -128,25 +132,26 @@ async function handleCall(request: NextRequest, note: (text: string) => void) {
   if (!created.ok) {
     if (created.status === "no_call_id") {
       // 연결은 맺어졌을 수 있어 자리는 쓴 것으로 두고, 예산은 연결 1회만 남긴다. answer SDP는 넘기지 않는다.
-      refundRealCalls(maxTurns);
+      refundRealCalls(reservedTurns);
     } else {
       daily.release();
-      refundRealCalls(1 + maxTurns);
+      refundRealCalls(1 + reservedTurns);
     }
     note(` engine=fallback reason=upstream status=${created.status}${created.detail ?? ""}${realCallTail()}`);
     return fallback("upstream");
   }
 
-  rememberCall(created.callId, maxTurns);
+  rememberCall(created.callId, reservedTurns);
   scheduleHangup(created.callId);
+  const maxSessionSec = liveMaxSessionSec();
   note(` engine=realtime cap=${daily.used}/${daily.cap}${realCallTail()}`);
   return NextResponse.json(
     {
       engine: "realtime",
       sdp: created.sdp,
       callId: created.callId,
-      maxSessionSec: liveMaxSessionSec(),
-      warnBeforeSec: LIVE_WARN_BEFORE_SEC,
+      maxSessionSec,
+      warnBeforeSec: maxSessionSec > 0 ? LIVE_WARN_BEFORE_SEC : 0,
       maxTurns,
     },
     { headers: NO_STORE },

@@ -127,6 +127,64 @@ describe("Realtime 이어 듣기(sticky)", () => {
 // ---------------------------------------------------------------- 상태 기계
 
 describe("'다음' 방식: 상태 기계", () => {
+  it("로컬 첫 안내의 상품 질문까지 끝나야 신호음과 듣기를 시작한다", () => {
+    const initial = createInitialLive({
+      cid: "c1", visit: "first", tts: true, speechAvailable: true,
+      productIntake: true, manualAdvance: true, deferIntroListening: true,
+    });
+    const intro = run(initial, { type: "START" }, { type: "READY", engine: "fallback", inputMode: "voice" });
+    expect(spoken(intro.effects)).toEqual(["productGuideLocalIntro"]);
+    expect(ofType(intro.effects, "LISTEN_BARGE_IN")).toEqual([]);
+    const early = run(intro.state, { type: "MAIN_BUTTON" }, {
+      type: "USER_TURN_END", text: "도우미예요.", transcribed: true,
+    });
+    expect(early.state.phase).toBe("guiding");
+    expect(early.effects).toEqual([]);
+    const question = run(early.state, speakEnd(early.state));
+    expect(spoken(question.effects)).toEqual(["productGuideLocalManual"]);
+    expect(ofType(question.effects, "OPEN_TURN")).toEqual([]);
+    expect(question.state.phase).toBe("guiding");
+    const listen = run(question.state, speakEnd(question.state));
+    expect(ofType(listen.effects, "OPEN_TURN")).toHaveLength(1);
+    expect(listen.state.phase).toBe("listening");
+    expect(listen.state.manual).toBe(true);
+  });
+
+  it("첫 안내가 조금 다르게 전사되어 돌아온 경우에도 안내를 계속 읽는다", () => {
+    const initial = createInitialLive({
+      cid: "c1", visit: "first", tts: true, speechAvailable: true, productIntake: true, manualAdvance: true,
+    });
+    const guide = run(initial, { type: "START" }, { type: "READY", engine: "fallback", inputMode: "voice" });
+    const echo = run(guide.state, {
+      type: "USER_TURN_END",
+      text: "저는 사고 싶은 제품의 혜택과 정보를 대신 찾아들이는 도움이예요.",
+      transcribed: true,
+    });
+    expect(echo.state.phase).toBe("guiding");
+    expect(echo.state.speaking).toBe("productGuideVoice");
+    expect(echo.state.parts).toEqual([]);
+    expect(ofType(echo.effects, "STOP_SPEAK")).toEqual([]);
+    expect(responds(echo.effects)).toEqual([]);
+    const user = run(echo.state, { type: "USER_TURN_END", text: "저는 이어폰을 사고 싶은데 무선이 좋아요.", transcribed: true });
+    expect(user.state.phase).toBe("listening");
+    expect(user.state.parts).toEqual(["저는 이어폰을 사고 싶은데 무선이 좋아요."]);
+  });
+
+  it("로컬 상품 안내 중 먼저 말해도 '다음'이 올 때까지 답을 모은다", () => {
+    const initial = createInitialLive({
+      cid: "c1", visit: "first", tts: true, speechAvailable: true, productIntake: true, manualAdvance: true,
+    });
+    const guide = run(initial, { type: "START" }, { type: "READY", engine: "fallback", inputMode: "voice" });
+    expect(guide.state.phase).toBe("guiding");
+    const utterance = (text: string): LiveEvent => ({ type: "USER_TURN_END", text, transcribed: true });
+    const first = run(guide.state, utterance("헤드셋"));
+    expect(first.state.phase).toBe("listening");
+    expect(responds(first.effects)).toEqual([]);
+    const second = run(first.state, utterance("무선으로요"));
+    expect(responds(second.effects)).toEqual([]);
+    expect(responds(run(second.state, utterance("다음.")).effects)).toEqual(["헤드셋 무선으로요"]);
+  });
+
   it("연결되면 방식 안내를 한 번 읽고, 끝나면 이어 듣기로 차례를 연다", () => {
     const g = atManualGuide("realtime");
     expect(spoken(g.effects)).toContain("manualGuide");

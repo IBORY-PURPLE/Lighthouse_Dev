@@ -1,6 +1,6 @@
 import "server-only";
 import { after } from "next/server";
-import { LIVE_TOOLS, liveRealtimeInstructions } from "@/lib/liveInstructions";
+import { LIVE_PRODUCT_TOOLS, LIVE_TOOLS, liveProductRealtimeInstructions, liveRealtimeInstructions } from "@/lib/liveInstructions";
 import {
   LIVE_REALTIME_MODEL_DEFAULT,
   LIVE_VOICE,
@@ -8,6 +8,7 @@ import {
   liveAskName,
   liveDailySessionCap,
   liveMaxSessionSec,
+  liveProductIntake,
   liveReasoningEffort,
   liveTranscribeLang,
   liveVadMode,
@@ -41,6 +42,7 @@ export function buildRealtimeSession(o?: { rate?: RealtimeRate }): object {
   const model = process.env.LIVE_REALTIME_MODEL?.trim() || LIVE_REALTIME_MODEL_DEFAULT;
   const language = liveTranscribeLang();
   const effort = liveReasoningEffort();
+  const productIntake = liveProductIntake();
   const turnDetection =
     liveVadMode() === "server"
       ? {
@@ -56,7 +58,7 @@ export function buildRealtimeSession(o?: { rate?: RealtimeRate }): object {
   return {
     type: "realtime",
     model,
-    instructions: liveRealtimeInstructions(liveAskName()),
+    instructions: productIntake ? liveProductRealtimeInstructions() : liveRealtimeInstructions(liveAskName()),
     output_modalities: ["audio"],
     ...(effort === null ? {} : { reasoning: { effort } }),
     audio: {
@@ -67,7 +69,7 @@ export function buildRealtimeSession(o?: { rate?: RealtimeRate }): object {
       },
       output: { voice: LIVE_VOICE, speed: SPEED[o?.rate ?? "normal"] },
     },
-    tools: LIVE_TOOLS,
+    tools: productIntake ? LIVE_PRODUCT_TOOLS : LIVE_TOOLS,
     tool_choice: "auto",
     max_output_tokens: 700,
     truncation: "auto",
@@ -218,13 +220,16 @@ export function settleCall(callId: string, turns?: number): number {
 
 /** 세션 상한 + 15초가 지난 통화를 끊고 장부에서 지운다. 끊으려 한 통화 수를 돌려준다. */
 export async function sweepCalls(now: number = Date.now()): Promise<number> {
-  const limitMs = liveMaxSessionSec() * 1000 + SWEEP_GRACE_MS;
+  const sessionSec = liveMaxSessionSec();
+  // OpenAI가 종료하는 세션의 장부만 정리한다. 상품 대화에는 앱에서 hangup을 보내지 않는다.
+  const limitMs = (sessionSec || 3600) * 1000 + SWEEP_GRACE_MS;
   const stale: string[] = [];
   for (const [callId, entry] of ledger) {
     if (now - entry.at > limitMs) stale.push(callId);
   }
   // 동시에 두 번 끊지 않게 await 전에 먼저 지운다.
   for (const callId of stale) ledger.delete(callId);
+  if (!sessionSec) return 0;
   await Promise.all(stale.map((callId) => hangupRealtimeCall(callId)));
   return stale.length;
 }
@@ -245,8 +250,10 @@ export function scheduleHangup(
   callId: string,
   schedule: (task: () => Promise<void>) => void = afterResponse,
 ): void {
+  const sessionSec = liveMaxSessionSec();
+  if (!sessionSec) return;
   schedule(async () => {
-    await new Promise<void>((resolve) => setTimeout(resolve, (liveMaxSessionSec() + SCHEDULE_GRACE_SEC) * 1000));
+    await new Promise<void>((resolve) => setTimeout(resolve, (sessionSec + SCHEDULE_GRACE_SEC) * 1000));
     await hangupRealtimeCall(callId);
     settleCall(callId);
   });

@@ -9,6 +9,8 @@ export const SPEAK_RATES = { slow: 0.8, normal: 0.95, fast: 1.15 } as const;
  * 이 환경에서는 −2단계(약 0.8배)와 +1단계(약 1.12배)가 되는 값을 쓴다. Edge는 목소리가 달라 그대로 둔다.
  */
 export const SPEAK_RATES_SAPI = { slow: 0.62, normal: 1, fast: 1.3 } as const;
+// SpeechSynthesisUtterance가 받는 최대 요청값. 음성 엔진은 지원하는 범위로 제한할 수 있다.
+export const FASTEST_CONFIRMATION_RATE = 10;
 
 /** Windows의 Chrome 계열(Chrome, Whale, Brave…)인가. Edge는 뺀다. */
 export function usesSapiRates(userAgent: string | undefined): boolean {
@@ -64,7 +66,7 @@ export function createLiveSpeaker(win: Window): LiveSpeaker {
 
   return {
     available,
-    speak(id, text, onEnd) {
+    speak(id, text, onEnd, fastest = false) {
       token += 1;
       const mine = token;
       clearGuard();
@@ -89,7 +91,7 @@ export function createLiveSpeaker(win: Window): LiveSpeaker {
         synth.cancel();
         const utterance = new Utterance(text);
         utterance.lang = "ko-KR";
-        utterance.rate = rates[rate];
+        utterance.rate = fastest ? FASTEST_CONFIRMATION_RATE : rates[rate];
         utterance.onend = () => done(false);
         utterance.onerror = () => done(true);
         current = utterance;

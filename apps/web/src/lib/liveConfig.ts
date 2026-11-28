@@ -12,6 +12,19 @@ export function isLiveEnabled(): boolean {
   return value !== "off";
 }
 
+/** 제품별 질문과 음성 끼어들기를 켠다. 로컬 체험에서 사용한다. */
+export function liveProductIntake(): boolean {
+  return process.env.LIVE_PRODUCT_INTAKE?.trim().toLowerCase() === "on";
+}
+
+export function liveLocalTranscription(): boolean {
+  return process.env.VERCEL !== "1" && process.env.LIVE_LOCAL_TRANSCRIPTION?.trim() === "on";
+}
+
+export function liveMicDiagnostics(): boolean {
+  return liveLocalTranscription() && process.env.LIVE_MIC_DIAGNOSTICS === "on";
+}
+
 export type RealtimeGate = { ok: true } | { ok: false; reason: "disabled" | "mock" | "no_key" };
 
 /** LIVE_REALTIME === "on" 이고 mock이 아니고 키가 있을 때만 Realtime을 쓴다. */
@@ -37,8 +50,9 @@ function intEnv(name: string, fallback: number, min: number, max: number): numbe
   return Math.min(max, Math.max(min, Number(raw)));
 }
 
-/** LIVE_MAX_SESSION_SEC, 기본 270, 60~280으로 자른다. */
+/** 상품 대화는 앱의 통화 제한이 없다. 이전 플로우는 60~280초 설정을 사용한다. */
 export function liveMaxSessionSec(): number {
+  if (liveProductIntake()) return 0;
   return intEnv("LIVE_MAX_SESSION_SEC", 270, 60, 280);
 }
 

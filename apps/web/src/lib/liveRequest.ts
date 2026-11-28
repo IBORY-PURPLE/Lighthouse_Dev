@@ -1,6 +1,7 @@
 // /live 접수 흐름: 확인한 draft를 봉사자 대기열(POST /api/requests) 본문으로 바꾸고, 재시도하고, 기기 기록과 푸시를 잇는다. 설계서 12절.
 // 화면(브라우저)에서 쓰는 모듈이다. 접수 결과 분류와 재시도 순서는 12.1·12.3절 표 그대로이고, 말과 상태 전이는 liveMachine이 맡는다.
 import type { LiveDraft } from "@/lib/liveEngine";
+import { isIntakeSkip } from "@/lib/liveText";
 import { cutText } from "@/lib/liveText";
 
 export const LIVE_RECORDS_KEY = "lh-requests";
@@ -63,12 +64,15 @@ export interface LiveRequestBody {
 export function toLiveRequest(draft: LiveDraft, cid: string): LiveRequestBody | null {
   const product = cutText(draft.product.trim(), ANSWER_MAX);
   if (!product) return null;
-  const budgetText = draft.budget.trim();
+  const budgetText = draft.conditions && isIntakeSkip(draft.budget) ? "" : draft.budget.trim();
+  const timing = draft.purchaseTiming && !isIntakeSkip(draft.purchaseTiming) ? draft.purchaseTiming : "";
   const qa = [
     { q: "원하는 제품", a: draft.product },
     { q: "알고 싶은 정보", a: draft.info },
     { q: "원하는 옵션", a: draft.options },
-    { q: "예산", a: draft.budget },
+    { q: "예산", a: budgetText },
+    { q: "필요한 시기", a: timing },
+    ...(draft.conditions ?? []).filter(({ answer }) => !isIntakeSkip(answer)).map(({ label, answer }) => ({ q: label, a: answer })),
   ]
     .map(({ q, a }) => ({ q, a: cutText(a.trim(), ANSWER_MAX) }))
     .filter(({ a }) => a !== "");
@@ -76,7 +80,7 @@ export function toLiveRequest(draft: LiveDraft, cid: string): LiveRequestBody | 
     clientRequestId: cid,
     product,
     budget: cutText(budgetText, ANSWER_MAX) || UNDECIDED,
-    condition: conditionOf(`${draft.options} ${draft.budget}`),
+    condition: conditionOf(`${draft.options} ${(draft.conditions ?? []).map(({ answer }) => answer).join(" ")} ${budgetText}`),
     details: { summary: cutText(draft.summary, SUMMARY_MAX), qa },
   };
 }

@@ -69,6 +69,7 @@ interface Setup extends FakeLiveOptions {
   /** true면 POST /api/requests를 막지 않고 실제 서버로 보낸다(사례 2의 1건) */
   realRegister?: boolean;
   fromHome?: boolean;
+  manualAdvance?: boolean;
 }
 
 interface Live {
@@ -127,7 +128,9 @@ async function openLive(page: Page, setup: Setup = {}): Promise<Live> {
   }
   if (setup.realtime) {
     await page.route("**/api/live/config", (route) =>
-      route.fulfill({ json: { enabled: true, realtime: true, maxSessionSec: 270, warnBeforeSec: 60 } }),
+      route.fulfill({
+        json: { enabled: true, realtime: true, maxSessionSec: 270, warnBeforeSec: 60, advance: setup.manualAdvance ? "manual" : "auto" },
+      }),
     );
     await page.route("**/api/live/call*", (route) => {
       live.call.count += 1;
@@ -864,7 +867,7 @@ test.describe("/live 음성 도우미 화면", () => {
     await expectState(page, "listening");
     expect(live.chat).toHaveLength(1);
 
-    // '끝내기'라고 하면 바로 끝내고, 마침 안내를 다 읽은 뒤 /live 처음 상태로 돌아간다.
+    // '끝내기'라고 하면 바로 끝내고, 마침 안내를 다 읽은 뒤 상품 요청 화면으로 돌아간다.
     await whenListening(page);
     await holdTts(page);
     await page.evaluate(() => window.__fakeLive.rec.say("끝내기"));
@@ -872,8 +875,8 @@ test.describe("/live 음성 도우미 화면", () => {
     await heard(page, script("endedHomeUnsent"));
     expect(live.chat).toHaveLength(1);
     await releaseTts(page);
-    await expectState(page, "idle");
-    await expect(page.getByRole("button", { name: BUTTONS.start, exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/request$/);
+    await expect(page).toHaveTitle("상품 요청 · LightHouse");
   });
 
   // ---- 사례 11 글자 모드 ----
@@ -1007,6 +1010,27 @@ test.describe("/live 음성 도우미 화면", () => {
     await emit(page, { type: "input_audio_buffer.committed", item_id: itemId });
     await emit(page, { type: "conversation.item.input_audio_transcription.completed", item_id: itemId, transcript });
   }
+
+  test("가짜 Realtime의 '다음' 방식에서 '끝내기'를 말하면 상품 요청으로 돌아간다", async ({ page }) => {
+    const live = await openLive(page, { realtime: true, manualAdvance: true });
+    await startConversation(page);
+    await expect.poll(() => page.evaluate(() => window.__fakeLive.rtc.channels), POLL).toBe(1);
+    await page.evaluate(() => window.__fakeLive.rtc.open());
+    await expect.poll(() => micEnabled(page), POLL).toBe(true);
+    await holdTts(page);
+
+    await userSpeaks(page, "item_exit", "끝내기");
+    await expectState(page, "ended");
+    await heard(page, script("endedHome"));
+    await expect(page).toHaveURL(/\/live$/);
+    expect(await sentTypes(page)).not.toContain("response.create");
+    expect(live.register).toHaveLength(0);
+    await expect.poll(() => live.hangup.length, POLL).toBe(1);
+
+    await releaseTts(page);
+    await expect(page).toHaveURL(/\/request$/);
+    await expect(page.getByRole("heading", { name: "상품 요청", exact: true })).toBeVisible();
+  });
 
   test("사례 15 가짜 Realtime", async ({ page }) => {
     const live = await openLive(page, { realtime: true });

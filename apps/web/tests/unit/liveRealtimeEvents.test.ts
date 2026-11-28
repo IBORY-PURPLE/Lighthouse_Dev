@@ -163,17 +163,16 @@ describe("realtimeStep response.done", () => {
     expect(logs(r.actions)).toEqual(["rt=failed"]);
   });
 
-  it("completed 소리 없는 confirm_request: INTENT confirm 뒤에 REPLY_END", () => {
+  it("completed 소리 없는 confirm_request는 INTENT만 내고 상태 기계가 다음 동작을 정한다", () => {
     const r = step(tr(), done("completed", [fc("confirm_request", "c1", SLOTS)]));
     expect(emits(r.actions)).toEqual([
       { type: "INTENT", kind: "confirm", slots: SLOTS, callId: "c1" },
-      { type: "REPLY_END" },
     ]);
   });
 
-  it("completed 소리가 난 confirm_request: REPLY_END를 따로 내지 않는다", () => {
-    const r = step(tr({ audioStarted: true }), done("completed", [fc("confirm_request", "c1", SLOTS)]));
-    expect(emits(r.actions)).toEqual([{ type: "INTENT", kind: "confirm", slots: SLOTS, callId: "c1" }]);
+  it("completed confirm_request에서 소리가 아직 나고 있으면 상태 기계에 알린다", () => {
+    const r = step(tr({ audioStarted: true, audioPlaying: true }), done("completed", [fc("confirm_request", "c1", SLOTS)]));
+    expect(emits(r.actions)).toEqual([{ type: "INTENT", kind: "confirm", slots: SLOTS, callId: "c1", audioPending: true }]);
   });
 
   it("completed register_request와 end_conversation은 REPLY_END를 내지 않는다", () => {
@@ -386,6 +385,35 @@ describe("realtimeOp", () => {
     const loud = op(tr(), { op: "toolResult", callId: "c1", output: { ok: true }, respond: true });
     expect(sendTypes(loud.actions)).toEqual(["conversation.item.create", "response.create"]);
     expect(loud.tracker.turnsSent).toBe(1);
+  });
+
+  it("보완 질문은 모델이 도구를 다시 부르지 않고, 이전 소리의 끝도 기다림을 풀지 않는다", () => {
+    const result = op(tr({ audioPlaying: true }), {
+      op: "toolResult", callId: "c1", output: { error: "intake_incomplete" }, respond: "clarify",
+    });
+    expect(sends(result.actions).at(-1)).toMatchObject({ type: "response.create", response: { tool_choice: "none" } });
+    expect(result.tracker.turnsSent).toBe(1);
+    const stale = step(result.tracker, { type: "output_audio_buffer.cleared" });
+    expect(emits(stale.actions)).toEqual([]);
+    const created = step(stale.tracker, { type: "response.created" });
+    const started = step(created.tracker, { type: "output_audio_buffer.started" });
+    expect(emits(started.actions)).toEqual([{ type: "REPLY_START" }]);
+  });
+
+  it("낭독할 대본은 지시문과 분리하고 일반 대화에 추가하지 않는다", () => {
+    const text = "다 말씀하신 뒤 '다음'이라고 해 주세요.";
+    const result = op(tr(), { op: "narrate", text });
+    const request = sends(result.actions).at(-1);
+    expect(request).toMatchObject({
+      type: "response.create",
+      response: {
+        conversation: "none",
+        tool_choice: "none",
+        input: [{ type: "message", role: "user", content: [{ type: "input_text", text }] }],
+      },
+    });
+    expect(JSON.stringify(request)).not.toContain("지금 할 일");
+    expect(request).toMatchObject({ response: { instructions: expect.not.stringContaining(text) } });
   });
 
   it("setRate는 system 칸으로 말투를 부탁하고 id를 logOnly에 넣는다", () => {

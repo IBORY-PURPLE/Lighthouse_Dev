@@ -4,6 +4,7 @@
 // createLiveRunner를 useSyncExternalStore로 구독한다. 화면은 사건을 보내고 상태를 그리기만 한다.
 // 로그와 콘솔에 이용자 말, AI 답, SDP, 기기 ID, 상품명을 남기지 않는다.
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -18,10 +19,11 @@ import {
 import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { StatusRegion } from "@/components/StatusRegion";
-import { BUTTONS, COMMAND_GUIDE, ENDED_HOME_SPEAKING } from "@/lib/liveCommands";
+import { BUTTONS, COMMAND_GUIDE, ENDED_REQUEST_SPEAKING } from "@/lib/liveCommands";
 import { createEarconPlayer } from "@/lib/liveEarcons";
 import type { EarconPlayer, EngineKind } from "@/lib/liveEngine";
 import { createFallbackEngine } from "@/lib/liveFallbackEngine";
+import { createLocalRecognition, localRecognitionAvailable, postMicDiagnostic, type MicDiagnostic } from "@/lib/liveLocalRecognition";
 import { createHaptic } from "@/lib/liveHaptic";
 import { GESTURE_IDLE, HOLD_MS, gestureStep, type GestureOutput, type GestureState } from "@/lib/liveGesture";
 import { createInitialLive, type LiveEvent, type LiveState } from "@/lib/liveMachine";
@@ -35,7 +37,7 @@ import { createLiveLog, forgetLiveLogLabel, readLiveLogLabel } from "@/lib/liveL
 import { createLiveRunner, type LiveCaption, type LiveRunner } from "@/lib/liveRunner";
 import { errorScriptFor, readVisits, script } from "@/lib/liveScripts";
 import { createLiveSpeaker } from "@/lib/liveSpeaker";
-import { decodeAiTurn } from "@/lib/liveText";
+import { decodeAiTurn, isIntakeSkip } from "@/lib/liveText";
 import { createWakeLock, newConversationId, runStartClick, setAudioSession } from "@/lib/liveUnlock";
 import { getSpeechRecognitionCtor } from "@/lib/speech";
 import styles from "@/app/live/live.module.css";
@@ -254,7 +256,13 @@ interface Ctx {
  * 접수 뒤의 [요청 목록 보기] 링크(답을 들으러 가는 유일한 길), 작은 '기록 중' 표시(QA 진행자 확인용).
  * full이 참이면 예전 화면 전체를 그린다(화면 시험과 진행자 점검용).
  */
-export function LiveConversation({ full = false }: { full?: boolean }) {
+export function LiveConversation({ full = false, productIntake = false, localTranscription = false, manualAdvance = false, micDiagnostics = false }: {
+  full?: boolean;
+  productIntake?: boolean;
+  localTranscription?: boolean;
+  manualAdvance?: boolean;
+  micDiagnostics?: boolean;
+}) {
   const router = useRouter();
   const [store] = useState(createStore);
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getServerState);
@@ -273,7 +281,7 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
   }, []);
   /** 처음 상태에서 소개 알림을 띄울 때가 됐는가. */
   const [introReady, setIntroReady] = useState(false);
-  const goHomeRef = useRef(false);            // 말로 끝낸 뒤 마침 안내를 읽는 중인가
+  const goToRequestRef = useRef(false);       // 말로 끝낸 뒤 마침 안내를 읽는 중인가
   /** 서버가 대화 기록을 받았다고 한 뒤의 표시(진행자 확인용). null이면 그리지 않는다. */
   const [logMark, setLogMark] = useState<{ label: string } | null>(null);
 
@@ -366,6 +374,16 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
 
     // 대화 기록(QA 분석용): 참가자 표지는 주소 ?p=에서. 서버가 켜 줄 때(설정 응답의 log)만 보낸다.
     const deviceReady = startDeviceReady();
+    const debug: MicDiagnostic | undefined = micDiagnostics &&
+      (win.location.hostname === "localhost" || win.location.hostname === "127.0.0.1") &&
+      new URLSearchParams(win.location.search).get("mic_debug") === "1"
+      ? (event, detail) => postMicDiagnostic(win, event, detail)
+      : undefined;
+    const useLocalRecognition = localTranscription && localRecognitionAvailable(win);
+    debug?.("screen", `로컬 음성 인식=${useLocalRecognition} · 다음 방식=${manualAdvance}`);
+    let diagnosticState = "";
+    let diagnosticPhase: LiveState["phase"] = "idle";
+    let diagnosticParts = 0;
     const label = readLiveLogLabel(win.location.search, storage);
     const liveLog = createLiveLog({
       fetch: (input, init) => win.fetch(input, init),
@@ -383,7 +401,11 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
 
     const runner = createLiveRunner(
       {
-        createEngine: (kind: EngineKind) => (kind === "realtime" ? createRealtimeEngine() : createFallbackEngine(win)),
+        createEngine: (kind: EngineKind) => kind === "realtime"
+          ? createRealtimeEngine({ productIntake })
+          : createFallbackEngine(win, useLocalRecognition
+            ? { createRecognition: () => createLocalRecognition(win, debug) }
+            : undefined),
         speaker,
         earcons,
         timers: {
@@ -396,7 +418,7 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
         requestStream: async () => {
           try {
             if (!win.navigator.mediaDevices?.getUserMedia) return undefined;
-            return await win.navigator.mediaDevices.getUserMedia({ audio: true });
+            return await win.navigator.mediaDevices.getUserMedia({ audio: productIntake ? { echoCancellation: true, noiseSuppression: true } : true });
           } catch {
             return undefined;
           }
@@ -419,13 +441,37 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
         wakeLock,
         waitSoundOn: readWaitSound,
         attachPush: (id) => { void attachPushIfOn(id, win); },
-        record: (e, s, fx) => liveLog.record(e, s, fx),
+        record: (e, s, fx) => {
+          liveLog.record(e, s, fx);
+          if (!debug) return;
+          if (e.type === "SPEAK_END") {
+            debug("state", `${e.id} · ${e.failed ? "낭독 오류" : "낭독 끝남"}`);
+          }
+          if (diagnosticPhase === "guiding" && (e.type === "USER_TURN_END" || e.type === "USER_PART")) {
+            if (fx.some((effect) => effect.type === "STOP_SPEAK")) debug("state", "첫 안내를 끊고 말 받음");
+            else if (s.phase === "guiding") debug("echo_filtered", "첫 안내 계속");
+          }
+          diagnosticPhase = s.phase;
+          const status = `${s.phase} · 입력=${s.inputMode} · ${s.bargeIn ? "안내 중에도 듣는 중" : "마이크=" + s.mic}`;
+          if (status !== diagnosticState) {
+            diagnosticState = status;
+            debug("state", status);
+          }
+          if (e.type === "FAILED") debug("mic_error", e.kind);
+          if (s.parts.length > diagnosticParts) debug("hold_answer", `${s.parts.length}개 모음 · '다음' 기다리는 중`);
+          diagnosticParts = s.parts.length;
+          if (fx.some((effect) => effect.type === "ENGINE_RESPOND")) debug("advance", "AI에 답변 전달");
+          if (e.type === "USER_TURN_END" && e.text && fx.length === 0) debug("echo_filtered", "전사된 말이 이 상태에서는 처리되지 않음");
+        },
       },
       createInitialLive({
         cid: newConversationId(),
-        visit: readVisits(storage) > 0 ? "returning" : "first",
+        visit: !productIntake && readVisits(storage) > 0 ? "returning" : "first",
+        productIntake,
+        manualAdvance,
+        deferIntroListening: useLocalRecognition,
         tts: speaker.available,
-        speechAvailable: getSpeechRecognitionCtor(win) !== null,
+        speechAvailable: useLocalRecognition || getSpeechRecognitionCtor(win) !== null,
       }),
     );
     ctxRef.current = { runner, earcons };
@@ -506,7 +552,7 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
       liveLog.dispose();
       runner.dispose();
     };
-  }, [store, activateMain, exitNow]);
+  }, [store, activateMain, exitNow, productIntake, localTranscription, manualAdvance, micDiagnostics]);
 
   // 들어오면 화면 낭독기가 소개를 한 번 읽는다. 알림 칸은 화면이 뜬 뒤에 글이 들어와야 읽히므로 잠깐 뒤에 채운다.
   useEffect(() => {
@@ -514,19 +560,19 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
     return () => window.clearTimeout(timer);
   }, []);
 
-  // 말로 끝냈으면("끝내 줘" → "네") 마침 안내를 다 읽은 뒤 /live 처음 상태로 돌아간다.
+  // '끝내기'를 받아 마침 안내를 다 읽으면 상품 요청 화면으로 이동한다.
   useEffect(() => {
     if (state.phase !== "ended") {
-      goHomeRef.current = false;
+      goToRequestRef.current = false;
       return;
     }
     if (state.speaking !== null) {
-      if (ENDED_HOME_SPEAKING.has(state.speaking)) goHomeRef.current = true;
+      if (ENDED_REQUEST_SPEAKING.has(state.speaking)) goToRequestRef.current = true;
       return;
     }
-    if (!goHomeRef.current) return;
-    goHomeRef.current = false;
-    window.location.replace(`${window.location.pathname}${window.location.search}`);
+    if (!goToRequestRef.current) return;
+    goToRequestRef.current = false;
+    window.location.replace("/request");
   }, [state.phase, state.speaking]);
 
   /** ? 단추: 말 명령 안내를 열고 닫는다. 대화 중에 열면 대화를 멈춘다(낭독기가 읽는 명령 낱말이 마이크로 들어가지 않게). */
@@ -743,7 +789,7 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
         ref={mainRef}
         type="button"
         className={styles.main}
-        aria-disabled={spec.disabled ? "true" : undefined}
+        aria-disabled={!state.cid || spec.disabled ? "true" : undefined}
         onClick={onMainClick}
       >
         {/* 음성 모션(오브). 장식이라 낭독기에는 숨긴다. 단추 이름은 뒤의 글자다. */}
@@ -775,7 +821,9 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
       {full && guideShown ? (
         <section className={styles.guide} data-live-guide="" aria-label="말 명령어">
           <h2>말 명령어</h2>
-          <p>띵 소리가 난 뒤에 이 말만 따로 하면 돼요. 도우미가 말하는 동안에는 {BUTTONS.talk} 단추를 눌러 끊을 수 있어요.</p>
+          {productIntake
+            ? <p>띵 소리가 난 뒤에 이 말만 따로 하면 돼요. 도우미가 안내하거나 질문하는 동안에도 말씀할 수 있어요.</p>
+            : <p>띵 소리가 난 뒤에 이 말만 따로 하면 돼요. 도우미가 말하는 동안에는 {BUTTONS.talk} 단추를 눌러 끊을 수 있어요.</p>}
           <ul>
             {COMMAND_GUIDE.map((g) => (
               <li key={g.say}><strong>{g.say}</strong> {g.does}</li>
@@ -809,7 +857,11 @@ export function LiveConversation({ full = false }: { full?: boolean }) {
             {draft.product ? (<><dt>제품</dt><dd>{draft.product}</dd></>) : null}
             {draft.info ? (<><dt>알고 싶은 정보</dt><dd>{draft.info}</dd></>) : null}
             {draft.options ? (<><dt>옵션</dt><dd>{draft.options}</dd></>) : null}
-            {draft.budget ? (<><dt>예산</dt><dd>{draft.budget}</dd></>) : null}
+            {draft.conditions?.filter(({ answer }) => !isIntakeSkip(answer)).map(({ label, answer }) => (
+              <Fragment key={label}><dt>{label}</dt><dd>{answer}</dd></Fragment>
+            ))}
+            {draft.budget && (!draft.conditions || !isIntakeSkip(draft.budget)) ? (<><dt>예산</dt><dd>{draft.budget}</dd></>) : null}
+            {draft.purchaseTiming && !isIntakeSkip(draft.purchaseTiming) ? (<><dt>필요한 시기</dt><dd>{draft.purchaseTiming}</dd></>) : null}
           </dl>
           <div className={styles.row}>
             <button type="button" className={styles.small} onClick={() => send({ type: "CONSENT_BUTTON" })}>

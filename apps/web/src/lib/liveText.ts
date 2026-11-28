@@ -3,6 +3,10 @@
 import type { LiveChatStatus, LiveDraft, LiveSlots } from "@/lib/liveEngine";
 
 export const SLOT_MAX = { product: 70, info: 100, options: 70, budget: 30 } as const;  // UTF-16 길이
+export const PURCHASE_TIMING_MAX = 40;
+export const PRODUCT_CONDITION_LABEL_MAX = 24;
+export const PRODUCT_CONDITION_ANSWER_MAX = 44;
+export const PRODUCT_CONDITIONS_MAX = 8;
 export const REPLY_MAX = 400;
 export const SUMMARY_MAX = 300;                 // cleanRequestDetails의 요약 상한과 같다
 export const EMPTY_SLOTS: LiveSlots = { product: "", info: "", options: "", budget: "" };
@@ -42,16 +46,32 @@ export function cleanSlot(value: unknown, max: number): string {
   return cutText(maskPhone(spaced), max);
 }
 
-/** 객체에서 네 칸을 cleanSlot으로 읽는다. 던지지 않는다. */
+/** 대화 기록과 모델 응답을 같은 형식으로 읽는다. 이전 기록에는 제품별 칸이 없을 수 있다. */
 export function readSlots(value: unknown): LiveSlots {
   if (typeof value !== "object" || value === null) return { ...EMPTY_SLOTS };
   const o = value as Record<string, unknown>;
-  return {
+  const slots: LiveSlots = {
     product: cleanSlot(o.product, SLOT_MAX.product),
     info: cleanSlot(o.info, SLOT_MAX.info),
     options: cleanSlot(o.options, SLOT_MAX.options),
     budget: cleanSlot(o.budget, SLOT_MAX.budget),
   };
+  if (typeof o.purchaseTiming === "string") slots.purchaseTiming = cleanSlot(o.purchaseTiming, PURCHASE_TIMING_MAX);
+  if (Array.isArray(o.conditions)) {
+    slots.conditions = o.conditions.slice(0, PRODUCT_CONDITIONS_MAX).flatMap((value: unknown) => {
+      if (!value || typeof value !== "object") return [];
+      const row = value as Record<string, unknown>;
+      const label = cleanSlot(row.label, PRODUCT_CONDITION_LABEL_MAX);
+      const answer = cleanSlot(row.answer, PRODUCT_CONDITION_ANSWER_MAX);
+      return label && answer ? [{ label, answer }] : [];
+    });
+  }
+  return slots;
+}
+
+export function isIntakeSkip(text: string): boolean {
+  const normalized = text.trim().replace(/[\s\p{P}]+/gu, "");
+  return /^(?:다음(?:요|단계|질문)?|넘어가(?:요|주세요)?|몰라(?:요)?|모르겠(?:어요|습니다)|잘모르겠(?:어요|습니다)|미정(?:이에요|입니다)?|아직(?:정하지않았어요|모르겠어요)|없(?:어|어요|습니다)|아무거나(?:요)?|상관없(?:어|어요|습니다)|관계없(?:어|어요|습니다)|필요없(?:어요|습니다))$/.test(normalized);
 }
 
 // ---------- 칸에서 지시문이 샌 문장 빼기 ----------
@@ -188,7 +208,7 @@ export function tidySlots(slots: LiveSlots): LiveSlots {
   const base = stripEnd(info);
   const cut = base.replace(INFO_TAIL, "").trim();
   if (cut && cut !== base) info = cut;
-  return { product: slots.product, info, options: dropBudget(slots.options), budget: slots.budget };
+  return { ...slots, info, options: dropBudget(slots.options) };
 }
 
 const NUMERAL = /[\d일이삼사오육칠팔구십백천만억]/;
@@ -216,7 +236,7 @@ export function summaryOf(slots: LiveSlots): string {
   const product = stripEnd(slots.product);
   const info = stripEnd(slots.info);
   const options = stripEnd(slots.options);
-  const budget = stripEnd(slots.budget);
+  const budget = slots.conditions && isIntakeSkip(slots.budget) ? "" : stripEnd(slots.budget);
   const parts: string[] = [];
   if (product) parts.push(`제품은 ${product}.`);
   if (info) parts.push(`알고 싶은 정보는 ${info}.`);
@@ -224,6 +244,10 @@ export function summaryOf(slots: LiveSlots): string {
   // 예산 칸의 값이 옵션·정보 글에 그대로 들어 있을 때만 따로 읽지 않는다(같은 말을 두 번 하지 않으려고).
   // 값이 다르면 접수에 쓰는 예산 칸을 반드시 읽는다. 읽어 준 예산과 접수되는 예산이 달라지면 안 된다(Codex 3차 지적 2).
   if (budget && !saysBudget(`${options} ${info}`, budget)) parts.push(`예산은 ${budget}.`);
+  if (slots.purchaseTiming && !isIntakeSkip(slots.purchaseTiming)) parts.push(`필요한 시기는 ${stripEnd(slots.purchaseTiming)}.`);
+  for (const { label, answer } of slots.conditions ?? []) {
+    if (!isIntakeSkip(answer)) parts.push(`${label}, ${stripEnd(answer)}.`);
+  }
   return parts.join(" ");
 }
 
@@ -237,7 +261,7 @@ export function toDraft(slots: LiveSlots): LiveDraft | null {
 const STATUSES: readonly LiveChatStatus[] = ["asking", "confirming", "done", "ended"];
 
 function encode(reply: string, status: LiveChatStatus, s: LiveSlots): string {
-  return JSON.stringify({ reply, status, product: s.product, info: s.info, options: s.options, budget: s.budget });
+  return JSON.stringify({ reply, status, ...s });
 }
 
 /** 기록의 AI 칸. 결과 길이는 항상 2000 이하다(넘으면 reply를 반씩 줄인다). */

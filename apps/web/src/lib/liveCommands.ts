@@ -36,8 +36,8 @@ export const BUTTONS = {
 export const ANSWER_CUE = "이제 천천히 답변해 주세요.";
 export const SPEAK_CUE = "이제 천천히 말씀해 주세요.";
 
-/** 말로 끝냈을 때의 마침 대본 id. 화면은 이 대본을 다 읽으면 /live 처음 상태로 돌아간다. */
-export const ENDED_HOME_SPEAKING: ReadonlySet<string> = new Set(["endedHome", "endedHomeRegistered", "endedHomeUnsent"]);
+/** 말로 끝냈을 때의 마침 대본 id. 화면은 이 대본을 다 읽으면 /request로 이동한다. */
+export const ENDED_REQUEST_SPEAKING: ReadonlySet<string> = new Set(["endedHome", "endedHomeRegistered", "endedHomeUnsent"]);
 
 /** ? 단추가 보여 주는 말 명령 목록. 화면 글이다(대본이 아니다). */
 export const COMMAND_GUIDE: { say: string; does: string }[] = [
@@ -46,7 +46,7 @@ export const COMMAND_GUIDE: { say: string; does: string }[] = [
   { say: "천천히, 빠르게, 보통", does: "말 빠르기를 바꿔요" },
   { say: "도움말", does: "사용법을 들어요" },
   { say: "멈춰 줘, 잠깐", does: "대화를 잠시 멈춰요. 이어서 하려면 계속하기 단추를 눌러요" },
-  { say: "끝내기", does: "대화를 끝내고 메인 화면으로 돌아가요" },
+  { say: "끝내기", does: "대화를 끝내고 상품 요청 화면으로 돌아가요" },
   { say: "네, 보내 줘", does: "요약을 들은 뒤 봉사자에게 보내요" },
 ];
 
@@ -60,9 +60,9 @@ export const COMMANDS: { command: LocalCommand; words: string[]; meaning: string
   { command: "pause",  words: ["잠깐", "잠깐만", "잠시만", "멈춰", "정지"],     meaning: "잠시 멈춘다" },
   // 끝내고 싶다는 말: 바로 끝내지 않고 '끝내기'라고 말하라고 알려 준다(잘못 알아들어 대화를 잃지 않게).
   { command: "end",    words: ["그만", "끝", "끝내", "종료", "끝내고싶어", "끝내고싶어요", "그만하고싶어", "그만하고싶어요", "끝낼래", "그만할래", "나가고싶어", "나갈래"],   meaning: "끝내는 방법을 알려 준다" },
-  // 이 말을 하면 바로 끝내고 메인 화면(/live 처음 상태)으로 돌아간다.
+  // 이 말을 하면 바로 끝내고 상품 요청 화면(/request)으로 돌아간다.
   // '네 끝내기', '끝내기 다음'처럼 대답 말이나 넘기는 말이 붙어도 받는다(붙으면 명령으로 안 잡혀 같은 안내가 되풀이된다).
-  { command: "exit",   words: ["끝내기", "네끝내기", "끝내기다음", "네끝내기다음", "끝내기할게"], meaning: "대화를 끝내고 메인 화면으로 돌아간다" },
+  { command: "exit",   words: ["끝내기", "네끝내기", "끝내기다음", "네끝내기다음", "끝내기할게"], meaning: "대화를 끝내고 상품 요청 화면으로 돌아간다" },
 ];
 
 /** NFKC, 소문자, 공백·문장부호 제거. */
@@ -156,6 +156,7 @@ const hasAffirm = (tokens: string[]) =>
 /** AI를 거치지 않고 바로 접수할 때 쓴다. 토큰이 모두 YES, SEND, FILLER이고 YES나 SEND가 하나 이상 있다. */
 export function isClearConsent(text: string): boolean {
   if (consentRejected(text)) return false;
+  if (normalizeSpeech(text) === "요청보내기") return true;
   const tokens = consentTokens(text);
   if (tokens.length === 0) return false;
   if (!tokens.every((t) => isAffirm(t) || FILLER.has(t))) return false;
@@ -201,6 +202,29 @@ export function isScreenReaderEcho(text: string): boolean {
   }
   if (stripped > 0) return n === "" || SCREEN_TEXTS.has(n);
   return SCREEN_TEXTS.has(n) && matchLocalCommand(text) === null;
+}
+
+/** 첫 안내가 마이크에 되들어왔을 때, 긴 구간의 작은 받아쓰기 오차를 허용한다. */
+export function isIntroEcho(heard: string, intro: string): boolean {
+  if (heard.length < 16 || !intro) return false;
+  const tolerance = Math.min(4, Math.ceil(heard.length * 0.12));
+  if (heard.length > intro.length + tolerance) return false;
+
+  // 시작 칸을 0으로 두어 안내 전체의 어느 연속 구간과도 비교할 수 있게 한다.
+  let previous = new Uint16Array(intro.length + 1);
+  let current = new Uint16Array(intro.length + 1);
+  for (let i = 1; i <= heard.length; i++) {
+    current[0] = i;
+    for (let j = 1; j <= intro.length; j++) {
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + (heard[i - 1] === intro[j - 1] ? 0 : 1),
+      );
+    }
+    [previous, current] = [current, previous];
+  }
+  return previous.some((distance) => distance <= tolerance);
 }
 
 function cardTokens(text: string): string[] {

@@ -2,6 +2,7 @@
 // 무엇을 보내고 무엇을 낼지는 liveRealtimeEvents.ts의 순수 함수가 정한다. 이 파일은 그 결과를 실행한다.
 // 로그와 콘솔에 이용자 말, AI 답, SDP, 기기 ID를 남기지 않는다(꼬리표만).
 import type { EngineEvent, EngineStartContext, LiveEngine } from "@/lib/liveEngine";
+import { answeredIntakeFields } from "@/lib/liveIntake";
 import {
   createRealtimeTracker, realtimeOp, realtimeStep, realtimeTranscriptTimeout,
   type EngineOp, type RealtimeAction, type RealtimeResult, type RealtimeTracker,
@@ -17,9 +18,10 @@ export interface RealtimeEngineDeps {
   fetchFn?: typeof fetch;
   createPeer?: () => RTCPeerConnection;
   createAudio?: () => HTMLAudioElement;
+  productIntake?: boolean;
 }
 
-interface CallInfo { sdp: string; callId: string; maxSessionSec: number; warnBeforeSec: number; maxTurns: number }
+interface CallInfo { sdp: string; callId: string; maxSessionSec: number; warnBeforeSec: number; maxTurns: number | null }
 
 function positive(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v) && v > 0;
@@ -37,6 +39,7 @@ export function createRealtimeEngine(deps: RealtimeEngineDeps = {}): LiveEngine 
   let callId = "";
   let started = false;
   let ready = false;
+  let providerExpiryNear = Infinity;
   let closed = false;
   let abortListener: (() => void) | null = null;
   let abortSignal: AbortSignal | null = null;
@@ -165,7 +168,7 @@ export function createRealtimeEngine(deps: RealtimeEngineDeps = {}): LiveEngine 
 
   /** 연결 단계를 지나기 전의 끊김은 connect, 지난 뒤는 network로 센다. */
   function lostByMonitor(): void {
-    lost(ready ? "network" : "connect");
+    lost(!ready ? "connect" : Date.now() >= providerExpiryNear ? "session_limit" : "network");
   }
 
   async function postOffer(sdp: string, rate: string, signal: AbortSignal): Promise<CallInfo | { fallback: string }> {
@@ -182,13 +185,13 @@ export function createRealtimeEngine(deps: RealtimeEngineDeps = {}): LiveEngine 
     const d = (typeof data === "object" && data !== null ? data : {}) as Record<string, unknown>;
     if (d.engine !== "realtime") return { fallback: typeof d.reason === "string" ? d.reason.slice(0, 40) : "unknown" };
     if (typeof d.sdp !== "string" || typeof d.callId !== "string" || !d.callId
-      || !positive(d.maxSessionSec) || typeof d.warnBeforeSec !== "number" || !Number.isFinite(d.warnBeforeSec)
-      || typeof d.maxTurns !== "number" || !Number.isFinite(d.maxTurns)) {
+      || (d.maxSessionSec !== 0 && !positive(d.maxSessionSec)) || typeof d.warnBeforeSec !== "number" || !Number.isFinite(d.warnBeforeSec)
+      || (d.maxTurns !== null && (typeof d.maxTurns !== "number" || !Number.isFinite(d.maxTurns)))) {
       return { fallback: "bad_response" };
     }
     return {
       sdp: d.sdp, callId: d.callId, maxSessionSec: d.maxSessionSec,
-      warnBeforeSec: Math.max(0, d.warnBeforeSec), maxTurns: Math.max(0, Math.floor(d.maxTurns)),
+      warnBeforeSec: Math.max(0, d.warnBeforeSec), maxTurns: d.maxTurns === null ? null : Math.max(0, Math.floor(d.maxTurns)),
     };
   }
 
@@ -276,13 +279,16 @@ export function createRealtimeEngine(deps: RealtimeEngineDeps = {}): LiveEngine 
       }
 
       ready = true;
+      if (info.maxSessionSec === 0) providerExpiryNear = Date.now() + 59 * 60_000;
       if (ctx.history.length > 0) applyOp({ op: "restore", history: ctx.history });
       if (closed) return;
       emit({ type: "READY", engine: "realtime", inputMode: "voice" });
       const endSec = info.maxSessionSec;
-      const warnSec = Math.max(0, endSec - info.warnBeforeSec);
-      sessionWarnTimer = setTimeout(() => { sessionWarnTimer = null; if (!closed) emit({ type: "SESSION_WARN" }); }, warnSec * 1000);
-      sessionEndTimer = setTimeout(() => { sessionEndTimer = null; lost("session_limit"); }, endSec * 1000);
+      if (endSec > 0 && !closed) {
+        const warnSec = Math.max(0, endSec - info.warnBeforeSec);
+        sessionWarnTimer = setTimeout(() => { sessionWarnTimer = null; if (!closed) emit({ type: "SESSION_WARN" }); }, warnSec * 1000);
+        sessionEndTimer = setTimeout(() => { sessionEndTimer = null; lost("session_limit"); }, endSec * 1000);
+      }
     } catch {
       // 취소(abort)로 끝난 경우는 이미 닫혀 있어 조용히 넘어간다.
       lost("connect");
@@ -292,12 +298,16 @@ export function createRealtimeEngine(deps: RealtimeEngineDeps = {}): LiveEngine 
   return {
     kind: "realtime",
     start,
-    listen: (opts) => applyOp(opts?.sticky === true ? { op: "listen", keep: opts.keep === true, sticky: true } : { op: "listen", keep: opts?.keep === true }),
+    listen: (opts) => applyOp({ op: "listen", keep: opts?.keep === true, sticky: opts?.sticky, bargeIn: opts?.bargeIn }),
     hold: () => applyOp({ op: "hold" }),
     submit: () => applyOp({ op: "submit" }),
     cancelListen: (discard) => applyOp({ op: "cancelListen", discard }),
-    respond: (turn) => applyOp({ op: "respond", text: turn.text, source: turn.source }),
+    respond: (turn, history) => applyOp({
+      op: "respond", text: turn.text, source: turn.source,
+      ...(deps.productIntake ? { answered: answeredIntakeFields([...history, { role: "user", content: turn.text }]) } : {}),
+    }),
     cancelResponse: () => applyOp({ op: "cancelResponse" }),
+    narrate: (text) => applyOp({ op: "narrate", text }),
     toolResult: (id, output, respond) => applyOp({ op: "toolResult", callId: id, output, respond }),
     setRate: (rate) => applyOp({ op: "setRate", rate }),
     close,

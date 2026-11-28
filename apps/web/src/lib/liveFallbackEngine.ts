@@ -23,7 +23,7 @@ import {
   type SpeechRecognitionLike,
 } from "@/lib/speech";
 
-export type LiveRecognition = SpeechRecognitionLike & { stop?(): void };
+export type LiveRecognition = SpeechRecognitionLike & { stop?(): void; onspeechstart?: (() => void) | null };
 
 type ResultEvent = Parameters<NonNullable<SpeechRecognitionLike["onresult"]>>[0];
 
@@ -72,6 +72,7 @@ interface Pending {
 export interface FallbackEngineOptions {
   /** 시험용. 기본은 전역 fetch(부를 때 찾는다). */
   fetch?: typeof fetch;
+  createRecognition?: () => LiveRecognition;
 }
 
 const join = (a: string, b: string): string => [a, b].filter(Boolean).join(" ");
@@ -89,6 +90,7 @@ export function createFallbackEngine(win: Window, options: FallbackEngineOptions
   let onAbort: (() => void) | undefined;
 
   const Ctor = getSpeechRecognitionCtor(win);
+  const createRecognition = options.createRecognition ?? (Ctor ? () => new Ctor() : null);
 
   const emit = (e: EngineEvent) => {
     if (closed) return;
@@ -103,6 +105,7 @@ export function createFallbackEngine(win: Window, options: FallbackEngineOptions
     clearTimeout(s.listenTimer);
     clearTimeout(s.stopTimer);
     s.rec.onstart = null;
+    if ("onspeechstart" in s.rec) s.rec.onspeechstart = null;
     s.rec.onresult = null;
     s.rec.onerror = null;
     s.rec.onend = null;
@@ -274,7 +277,7 @@ export function createFallbackEngine(win: Window, options: FallbackEngineOptions
       onAbort = () => engine.close();
       ctx.signal.addEventListener("abort", onAbort, { once: true });
       // 네트워크를 쓰지 않는다.
-      if (Ctor) emit({ type: "READY", engine: "fallback", inputMode: "voice" });
+      if (createRecognition) emit({ type: "READY", engine: "fallback", inputMode: "voice" });
       else emit({ type: "READY", engine: "fallback", inputMode: "text", textReason: "speech_unavailable" });
     },
 
@@ -283,11 +286,11 @@ export function createFallbackEngine(win: Window, options: FallbackEngineOptions
       cancelSession(true);
       heldMode = false;
       if (!opts?.keep) held = "";
-      if (!Ctor) {
+      if (!createRecognition) {
         emit({ type: "FAILED", kind: "speech_unavailable" });
         return;
       }
-      const rec: LiveRecognition = new Ctor();
+      const rec = createRecognition();
       rec.lang = "ko-KR";
       rec.continuous = false;
       rec.interimResults = true;
@@ -314,6 +317,11 @@ export function createFallbackEngine(win: Window, options: FallbackEngineOptions
         emit({ type: "LISTEN_STARTED", late: Date.now() - s.listenAt > LISTEN_LATE_MS });
       };
       rec.onresult = (event) => onResult(s, event);
+      if ("onspeechstart" in rec) rec.onspeechstart = () => {
+        if (s.done || s.spoke) return;
+        s.spoke = true;
+        emit({ type: "USER_SPEECH_START" });
+      };
       rec.onerror = (event) => onError(s, event.error);
       rec.onend = () => onEnd(s);
       try {

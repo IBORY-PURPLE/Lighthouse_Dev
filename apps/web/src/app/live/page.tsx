@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { LiveConversation } from "@/components/LiveConversation";
-import { isLiveEnabled, liveUiMode } from "@/lib/liveConfig";
+import { isLiveEnabled, liveAdvanceMode, liveLocalTranscription, liveMicDiagnostics, liveProductIntake, liveUiMode } from "@/lib/liveConfig";
 import styles from "./live.module.css";
 
 // /live 서버 컴포넌트. 기능이 꺼져 있으면 안내와 첫 화면 링크만 보인다. 설계서 4.1절.
@@ -27,5 +27,11 @@ export default async function LivePage({
   // 화면 구성: 기본은 메인 단추 하나(minimal). ?ui=full 또는 LIVE_UI=full이면 예전 화면.
   const ui = (await searchParams).ui;
   const full = ui === "full" || (ui !== "minimal" && liveUiMode() === "full");
-  return <LiveConversation full={full} />;
+  return <LiveConversation
+    full={full}
+    productIntake={liveProductIntake()}
+    localTranscription={liveLocalTranscription()}
+    manualAdvance={liveAdvanceMode() === "manual"}
+    micDiagnostics={liveMicDiagnostics()}
+  />;
 }

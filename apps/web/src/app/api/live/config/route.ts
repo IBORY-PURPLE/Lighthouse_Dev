@@ -5,6 +5,7 @@ import {
   liveAdvanceMode,
   liveLogMode,
   liveMaxSessionSec,
+  liveProductIntake,
   realtimeGate,
 } from "@/lib/liveConfig";
 import { clientKey, createRateLimiter } from "@/lib/rateLimit";
@@ -30,13 +31,15 @@ function handleConfig(request: NextRequest): Response {
   }
   const gate = realtimeGate();
   const log = liveLogMode();
+  const maxSessionSec = liveMaxSessionSec();
   return NextResponse.json(
     {
       enabled: true,
       realtime: gate.ok,
       ...(gate.ok ? {} : { reason: gate.reason }),
-      maxSessionSec: liveMaxSessionSec(),
-      warnBeforeSec: LIVE_WARN_BEFORE_SEC,
+      maxSessionSec,
+      warnBeforeSec: maxSessionSec > 0 ? LIVE_WARN_BEFORE_SEC : 0,
+      ...(liveProductIntake() ? { productIntake: true } : {}),
       ...(liveAdvanceMode() === "manual" ? { advance: "manual" } : {}),
       ...(log ? { log } : {}),
     },
